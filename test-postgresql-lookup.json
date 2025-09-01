@@ -1,0 +1,23 @@
+{
+  "header": {
+    "po_number": "TEST-POSTGRESQL-LOOKUP-001",
+    "po_date": "2025-09-01",
+    "platform_id": 1,
+    "serving_distributor": "EVARA",
+    "region": "North",
+    "area": "Test Area"
+  },
+  "lines": [
+    {
+      "platform_code": "TEST001",
+      "sap_code": "SAP001",
+      "item_name": "Test Item with PostgreSQL Lookup",
+      "quantity": 5,
+      "basic_amount": 200.00,
+      "tax": 36.00,
+      "landing_amount": 236.00,
+      "total_amount": 236.00,
+      "uom": "PCS"
+    }
+  ]
+}

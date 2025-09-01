@@ -1,0 +1,20 @@
+{
+  "header": {
+    "po_number": "TEST-UNIFIED-001",
+    "po_date": "2025-09-01",
+    "platform_id": 1
+  },
+  "lines": [
+    {
+      "platform_code": "TEST001",
+      "sap_code": "SAP001",
+      "item_name": "Test Item 1",
+      "quantity": 10,
+      "basic_amount": 100.00,
+      "tax": 18.00,
+      "landing_amount": 118.00,
+      "total_amount": 118.00,
+      "uom": "PCS"
+    }
+  ]
+}

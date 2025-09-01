@@ -1,0 +1,36 @@
+{
+  "master": {
+    "platform_id": 1,
+    "vendor_po_number": "TEST-PO-001",
+    "distributor_id": 1,
+    "po_date": "2025-09-01",
+    "region": "North",
+    "area": "Test Area",
+    "state_id": 1,
+    "district_id": 1
+  },
+  "lines": [
+    {
+      "platform_code": "TEST001",
+      "sap_code": "SAP001",
+      "item_name": "Test Item 1",
+      "quantity": 10,
+      "basic_amount": 100.00,
+      "tax": 18.00,
+      "landing_amount": 118.00,
+      "total_amount": 118.00,
+      "uom": "PCS"
+    },
+    {
+      "platform_code": "TEST002", 
+      "sap_code": "SAP002",
+      "item_name": "Test Item 2",
+      "quantity": 5,
+      "basic_amount": 200.00,
+      "tax": 36.00,
+      "landing_amount": 236.00,
+      "total_amount": 236.00,
+      "uom": "PCS"
+    }
+  ]
+}

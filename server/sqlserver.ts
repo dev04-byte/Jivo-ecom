@@ -1,0 +1,70 @@
+import sql from "mssql";
+
+const sqlConfig: sql.config = {
+  server: process.env.SQLSERVER_HOST ?? "103.89.44.240",
+  port: parseInt(process.env.SQLSERVER_PORT ?? "1433", 10),
+  user: process.env.SQLSERVER_USER ?? "webm2",
+  password: process.env.SQLSERVER_PASSWORD ?? "foxpro@7",
+  database: process.env.SQLSERVER_DATABASE ?? "jsap",
+  options: {
+    encrypt: (process.env.SQLSERVER_ENCRYPT ?? "false") === "true",
+    trustServerCertificate: (process.env.SQLSERVER_TRUST_SERVER_CERT ?? "true") === "true",
+  },
+  pool: { max: 5, min: 0, idleTimeoutMillis: 30000 },
+};
+
+let poolPromise: Promise<sql.ConnectionPool> | null = null;
+
+async function getPool() {
+  if (!poolPromise) poolPromise = new sql.ConnectionPool(sqlConfig).connect();
+  return poolPromise;
+}
+
+export async function callSpGetItemDetails(itemName?: string): Promise<any[]> {
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+    
+    // Add parameter if provided
+    if (itemName) {
+      request.input('ItemName', sql.NVarChar(255), itemName);
+    }
+    
+    const result = await request.execute("dbo.SP_GET_ITEM_DETAILS");
+    return result.recordset ?? [];
+  } catch (error) {
+    console.error("Error calling SP_GET_ITEM_DETAILS:", error);
+    throw error;
+  }
+}
+
+// Get all item names for search dropdown
+export async function callSpGetItemNames(): Promise<any[]> {
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+    
+    const result = await request.execute("dbo.SP_GET_ITEM_DETAILS1");
+    return result.recordset ?? [];
+  } catch (error) {
+    console.error("Error calling SP_GET_ITEM_DETAILS1:", error);
+    throw error;
+  }
+}
+
+// Close the connection pool when the process exits
+process.on('SIGINT', async () => {
+  if (poolPromise) {
+    const pool = await poolPromise;
+    await pool.close();
+  }
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  if (poolPromise) {
+    const pool = await poolPromise;
+    await pool.close();
+  }
+  process.exit(0);
+});

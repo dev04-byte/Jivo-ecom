@@ -1,0 +1,7 @@
+# Ignore all files in attachments folder
+*
+# Except this file
+!.gitignore
+# Keep the po subfolder structure
+!po/
+po/*

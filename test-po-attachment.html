@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test PO with Attachment</title>
+</head>
+<body>
+    <h1>Test PO Creation with Attachment</h1>
+    
+    <form id="poForm" enctype="multipart/form-data">
+        <div>
+            <label>PO Number:</label>
+            <input type="text" id="poNumber" value="TEST-ATTACH-001" required>
+        </div>
+        
+        <div>
+            <label>Platform ID:</label>
+            <input type="number" id="platformId" value="1" required>
+        </div>
+        
+        <div>
+            <label>Region:</label>
+            <input type="text" id="region" value="NORTH" required>
+        </div>
+        
+        <div>
+            <label>Area:</label>
+            <input type="text" id="area" value="TEST AREA" required>
+        </div>
+        
+        <div>
+            <label>Item Name:</label>
+            <input type="text" id="itemName" value="Test Item" required>
+        </div>
+        
+        <div>
+            <label>Quantity:</label>
+            <input type="number" id="quantity" value="1" required>
+        </div>
+        
+        <div>
+            <label>Basic Amount:</label>
+            <input type="number" id="basicAmount" value="100" step="0.01" required>
+        </div>
+        
+        <div>
+            <label>Tax:</label>
+            <input type="number" id="tax" value="18" step="0.01" required>
+        </div>
+        
+        <div>
+            <label>Landing Amount:</label>
+            <input type="number" id="landingAmount" value="118" step="0.01" required>
+        </div>
+        
+        <div>
+            <label><strong>Attachment (Required):</strong></label>
+            <input type="file" id="attachment" required>
+            <small>Required: PDF, DOC, XLS, or image files only</small>
+        </div>
+        
+        <div>
+            <button type="submit">Create PO with Attachment</button>
+        </div>
+    </form>
+    
+    <div id="result" style="margin-top: 20px;"></div>
+    
+    <script>
+        document.getElementById('poForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = 'Creating PO...';
+            
+            try {
+                // Create form data
+                const formData = new FormData();
+                
+                // Add the attachment file
+                const attachmentFile = document.getElementById('attachment').files[0];
+                if (!attachmentFile) {
+                    resultDiv.innerHTML = '<div style="color: red;">Attachment is required!</div>';
+                    return;
+                }
+                formData.append('attachment', attachmentFile);
+                
+                // Create PO data object
+                const poData = {
+                    master: {
+                        vendor_po_number: document.getElementById('poNumber').value,
+                        platform_id: parseInt(document.getElementById('platformId').value),
+                        region: document.getElementById('region').value,
+                        area: document.getElementById('area').value
+                    },
+                    lines: [{
+                        item_name: document.getElementById('itemName').value,
+                        quantity: parseInt(document.getElementById('quantity').value),
+                        basic_amount: parseFloat(document.getElementById('basicAmount').value),
+                        tax: parseFloat(document.getElementById('tax').value),
+                        landing_amount: parseFloat(document.getElementById('landingAmount').value)
+                    }]
+                };
+                
+                // Add PO data as JSON string
+                formData.append('poData', JSON.stringify(poData));
+                
+                console.log('Sending PO data:', poData);
+                console.log('File:', attachmentFile.name, attachmentFile.size, 'bytes');
+                
+                // Submit to server
+                const response = await fetch('http://localhost:8000/api/pos', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.text();
+                
+                if (response.ok) {
+                    const jsonResult = JSON.parse(result);
+                    resultDiv.innerHTML = `
+                        <div style="color: green;">
+                            <h3>✅ PO Created Successfully!</h3>
+                            <p><strong>PO ID:</strong> ${jsonResult.po ? jsonResult.po.id : 'N/A'}</p>
+                            <p><strong>Attachment:</strong> ${jsonResult.attachment ? jsonResult.attachment.filename : 'N/A'}</p>
+                            <pre>${JSON.stringify(jsonResult, null, 2)}</pre>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div style="color: red;">
+                            <h3>❌ Error Creating PO</h3>
+                            <p><strong>Status:</strong> ${response.status}</p>
+                            <pre>${result}</pre>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                resultDiv.innerHTML = `
+                    <div style="color: red;">
+                        <h3>❌ Network Error</h3>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        });
+    </script>
+    
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+        div { margin: 10px 0; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; }
+        button { background: #007cba; color: white; padding: 10px 20px; border: none; cursor: pointer; }
+        button:hover { background: #005a87; }
+        #result { border: 1px solid #ddd; padding: 15px; background: #f9f9f9; }
+        pre { background: #f0f0f0; padding: 10px; overflow-x: auto; }
+        small { color: #666; font-style: italic; }
+    </style>
+</body>
+</html>
