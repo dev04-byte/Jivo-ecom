@@ -212,16 +212,6 @@ export const poAttachments = pgTable("po_attachments", {
   updated_at: timestamp("updated_at").defaultNow()
 });
 
-// Insert and Select schemas for PO Attachments
-export const insertPoAttachmentSchema = createInsertSchema(poAttachments).omit({
-  id: true,
-  uploaded_at: true,
-  created_at: true,
-  updated_at: true,
-});
-export type InsertPoAttachment = z.infer<typeof insertPoAttachmentSchema>;
-export type PoAttachment = typeof poAttachments.$inferSelect;
-
 // Insert and Select schemas for new table
 export const insertSapItemMstApiSchema = createInsertSchema(sapItemMstApi).omit({
   id: true,
@@ -258,6 +248,7 @@ export const pfPoRelations = relations(pfPo, ({ one, many }) => ({
     fields: [pfPo.platform],
     references: [pfMst.id]
   }),
+  
   state: one(states, {
     fields: [pfPo.state_id],
     references: [states.id]
@@ -2512,18 +2503,12 @@ export type InsertBigBasketInventoryDaily = z.infer<typeof insertBigBasketInvent
 export type BigBasketInventoryRange = typeof invBigBasketJmRange.$inferSelect;
 export type InsertBigBasketInventoryRange = z.infer<typeof insertBigBasketInventoryRangeSchema>;
 
-// Distributors table - simple reference table for PO master
-export const distributors = pgTable("distributors", {
-  id: integer("id").primaryKey(),
-  name: text("name").notNull(),
-});
-
 // PO Master table - matches existing database structure
 export const poMaster = pgTable("po_master", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   platform_id: integer("platform_id").notNull(),
   vendor_po_number: varchar("vendor_po_number", { length: 256 }),
-  distributor_id: integer("distributor_id").notNull().references(() => distributors.id),
+  distributor_id: integer("distributor_id").notNull(),
   series: varchar("series", { length: 250 }).notNull(),
   company_id: integer("company_id").notNull(),
   po_date: timestamp("po_date").notNull(),
@@ -2656,6 +2641,11 @@ export const districts = pgTable("districts", {
   id: integer("id").primaryKey(),
   district: text("district").notNull(),
   state_id: integer("state_id").notNull().references(() => states.id),
+});
+
+export const distributors = pgTable("distributors", {
+  id: integer("id").primaryKey(),
+  name: text("name").notNull(),
 });
 
 // Regions table for proper cascading

@@ -35,8 +35,6 @@ import {
 } from "./hana-test-routes";
 
 import { insertPfPoSchema, insertPfOrderItemsSchema, insertFlipkartGroceryPoHeaderSchema, insertFlipkartGroceryPoLinesSchema, insertDistributorMstSchema, insertDistributorPoSchema, insertDistributorOrderItemsSchema, insertPoMasterSchema, insertPoLinesSchema, distributors } from "@shared/schema";
-import { db } from "@shared/db";
-import { eq, sql } from "drizzle-orm";
 import { setupPoWithAttachmentRoutes } from "./po-with-attachment-routes";
 import { z } from "zod";
 import { seedTestData } from "./seed-data";
@@ -888,6 +886,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const pos = await storage.getAllPos();
       res.json(pos);
     } catch (error) {
+
+
+
+
+
+
+
+
+
+      
+
+
+
+
+
+
+
+
+
+
+
       res.status(500).json({ message: "Failed to fetch POs" });
     }
   });
@@ -2413,8 +2432,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         district_id: null, // Will be populated if we have district mapping
         dispatch_from: cleanHeader.dispatch_from || null,
         warehouse: cleanHeader.warehouse || null,
-        serving_distributor: cleanHeader.serving_distributor || null, // Add serving_distributor field
-        distributor_id: cleanHeader.distributor_id || null, // Add distributor_id field  
         created_by: null // Use NULL instead of 'IMPORT_SYSTEM' to avoid foreign key constraint
       };
 
@@ -5078,125 +5095,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/hana/items", getHanaItemsTest);
   app.post("/api/hana/search", searchHanaItemsTest);
   app.get("/api/hana/raw-procedure", executeRawProcedure);
-
-  // Debug route to check PostgreSQL tables
-  app.get("/api/debug/tables", async (req, res) => {
-    try {
-      const tables = await db.execute(sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`);
-      res.json({ tables });
-    } catch (error) {
-      console.error("Error fetching tables:", error);
-      res.status(500).json({ error: "Failed to fetch tables" });
-    }
-  });
-
-  // Debug route to check distributors table structure
-  app.get("/api/debug/distributors-schema", async (req, res) => {
-    try {
-      const schema = await db.execute(sql`SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = 'distributors' ORDER BY ordinal_position`);
-      res.json({ schema });
-    } catch (error) {
-      console.error("Error fetching distributors schema:", error);
-      res.status(500).json({ error: "Failed to fetch distributors schema" });
-    }
-  });
-
-  // Debug route to select all data from distributors table
-  app.get("/api/debug/distributors-data", async (req, res) => {
-    try {
-      const data = await db.execute(sql`SELECT * FROM distributors ORDER BY id`);
-      res.json({ data });
-    } catch (error) {
-      console.error("Error fetching distributors data:", error);
-      res.status(500).json({ error: "Failed to fetch distributors data" });
-    }
-  });
-
-  // Debug endpoint to add DISTRIBUTOR A
-  app.post("/api/debug/add-distributor-a", async (req, res) => {
-    try {
-      // Check if DISTRIBUTOR A already exists
-      const existing = await db.select().from(distributors).where(eq(distributors.name, "DISTRIBUTOR A")).limit(1);
-      
-      if (existing.length > 0) {
-        return res.json({ 
-          success: true, 
-          message: "DISTRIBUTOR A already exists",
-          distributor: existing[0] 
-        });
-      }
-
-      // Find the next available ID
-      const maxIdResult = await db.execute(sql`SELECT MAX(id) as max_id FROM distributors`);
-      const nextId = (maxIdResult.rows[0]?.max_id || 0) + 1;
-
-      // Insert DISTRIBUTOR A
-      const [newDistributor] = await db.insert(distributors).values({
-        id: nextId,
-        name: "DISTRIBUTOR A"
-      }).returning();
-
-      res.json({ 
-        success: true, 
-        message: "DISTRIBUTOR A added successfully",
-        distributor: newDistributor 
-      });
-    } catch (error) {
-      console.error("Error adding DISTRIBUTOR A:", error);
-      res.status(500).json({ error: "Failed to add DISTRIBUTOR A" });
-    }
-  });
-
-  // Temporary route to populate distributors table from distributorMst
-  app.post("/api/admin/sync-distributors", async (req, res) => {
-    try {
-      const distributorMstData = await storage.getAllDistributors();
-      const results = [];
-      
-      // First, ensure there's a default distributor with ID 1
-      try {
-        const defaultExists = await db.select().from(distributors).where(eq(distributors.id, 1)).limit(1);
-        if (defaultExists.length === 0) {
-          const [defaultDistributor] = await db.insert(distributors).values({
-            id: 1,
-            name: "DEFAULT DISTRIBUTOR"
-          }).returning();
-          results.push({ action: 'created_default', ...defaultDistributor });
-        } else {
-          results.push({ action: 'exists', id: 1, name: 'DEFAULT DISTRIBUTOR' });
-        }
-      } catch (error) {
-        console.error("Error creating default distributor:", error);
-        results.push({ action: 'error', id: 1, name: 'DEFAULT DISTRIBUTOR', error: error.message });
-      }
-      
-      for (const dist of distributorMstData) {
-        try {
-          // Check if already exists in distributors table
-          const existing = await db.select().from(distributors).where(eq(distributors.id, dist.id)).limit(1);
-          
-          if (existing.length === 0) {
-            // Insert into distributors table
-            const [created] = await db.insert(distributors).values({
-              id: dist.id,
-              name: dist.distributor_name
-            }).returning();
-            results.push({ action: 'created', ...created });
-          } else {
-            results.push({ action: 'exists', id: dist.id, name: dist.distributor_name });
-          }
-        } catch (error) {
-          console.error(`Error syncing distributor ${dist.id}:`, error);
-          results.push({ action: 'error', id: dist.id, name: dist.distributor_name, error: error.message });
-        }
-      }
-      
-      res.json({ success: true, results, message: `Synced ${results.length} distributors` });
-    } catch (error) {
-      console.error("Error syncing distributors:", error);
-      res.status(500).json({ error: "Failed to sync distributors" });
-    }
-  });
 
   // RBAC Routes - User Management and Permissions
   app.get("/api/roles", async (req, res) => {
