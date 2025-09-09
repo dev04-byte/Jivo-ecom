@@ -239,80 +239,388 @@ export function POListView() {
     });
   };
 
-  const handleExport = () => {
-    // Prepare PO summary data
-    const poSummaryData = filteredPOs.map(po => {
-      const { totalQuantity, totalValue } = calculatePOTotals(po.orderItems);
-      return {
-        'PO Number': po.po_number,
-        'Platform': po.platform.pf_name,
-        'Status': po.status,
-        'Order Date': format(new Date(po.order_date), 'yyyy-MM-dd'),
-        'Expiry Date': po.expiry_date ? format(new Date(po.expiry_date), 'yyyy-MM-dd') : 'Not set',
-        'City': po.city,
-        'State': po.state,
-        'Location': `${po.city}, ${po.state}`,
-        'Distributor': po.serving_distributor || 'Not assigned',
-        'Total Items': po.orderItems.length,
-        'Total Quantity': totalQuantity,
-        'Total Value': parseFloat(totalValue.toFixed(2))
-      };
-    });
+  const handleExportAmazonDirect = async () => {
+    try {
+      console.log('🔍 AMAZON DIRECT EXPORT: Button clicked! Starting Amazon RAW export...');
+      console.log('🔍 AMAZON DIRECT EXPORT: Fetching Amazon data directly from database...');
+      
+      // Fetch raw database data from the new Amazon export endpoint
+      const response = await apiRequest('GET', '/api/amazon/export/excel');
+      console.log('🔍 AMAZON DIRECT EXPORT: API response status:', response.status);
+      
+      const responseData = await response.json();
+      console.log('🔍 AMAZON DIRECT EXPORT: API response data:', responseData);
+      
+      if (!responseData || !responseData.data) {
+        throw new Error('Failed to fetch Amazon export data');
+      }
 
-    // Prepare detailed order items data
-    const orderItemsData: any[] = [];
-    filteredPOs.forEach(po => {
-      po.orderItems.forEach(item => {
-        orderItemsData.push({
+      const poData = responseData.data;
+      const itemsData = responseData.itemsData || [];
+      
+      console.log(`🔍 AMAZON DIRECT EXPORT: Retrieved ${poData.length} Amazon POs with ${itemsData.length} items from database`);
+      
+      // Create a new workbook
+      const workbook = XLSX.utils.book_new();
+      
+      // Create Amazon PO Summary worksheet
+      const poSummaryWorksheet = XLSX.utils.json_to_sheet(poData);
+      const poSummaryColWidths = [
+        { wch: 10 }, { wch: 20 }, { wch: 15 }, { wch: 12 }, { wch: 12 },
+        { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 25 }, { wch: 30 },
+        { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 },
+        { wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 12 }
+      ];
+      poSummaryWorksheet['!cols'] = poSummaryColWidths;
+      XLSX.utils.book_append_sheet(workbook, poSummaryWorksheet, 'Amazon PO Summary');
+      
+      // Create Amazon Items Details worksheet
+      if (itemsData.length > 0) {
+        const itemsWorksheet = XLSX.utils.json_to_sheet(itemsData);
+        const itemsColWidths = [
+          { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 15 }, { wch: 15 },
+          { wch: 15 }, { wch: 30 }, { wch: 12 }, { wch: 10 }, { wch: 12 },
+          { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 },
+          { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 12 }
+        ];
+        itemsWorksheet['!cols'] = itemsColWidths;
+        XLSX.utils.book_append_sheet(workbook, itemsWorksheet, 'Amazon Item Details');
+      }
+      
+      // Generate filename with current date
+      const filename = `amazon-purchase-orders-RAW-${format(new Date(), 'yyyy-MM-dd')}.xlsx`;
+      
+      console.log(`🔍 AMAZON DIRECT EXPORT: Writing Excel file: ${filename}`);
+      
+      // Write file - try multiple methods for better compatibility
+      try {
+        XLSX.writeFile(workbook, filename);
+        console.log('🔍 AMAZON DIRECT EXPORT: Excel file written successfully');
+      } catch (writeError) {
+        console.error('🔍 AMAZON DIRECT EXPORT: XLSX writeFile error:', writeError);
+        // Try alternative download method
+        const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+        const blob = new Blob([wbout], { type: 'application/octet-stream' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        console.log('🔍 AMAZON DIRECT EXPORT: Alternative download method used');
+      }
+      
+      toast({
+        title: "Amazon Export Complete",
+        description: `${poData.length} Amazon POs with ${itemsData.length} items exported from RAW DATABASE`
+      });
+      
+    } catch (error) {
+      console.error('Amazon export error:', error);
+      toast({
+        title: "Amazon Export Failed",
+        description: "Failed to export Amazon purchase orders. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleExportDealshareRAW = async () => {
+    try {
+      console.log('🔍 DEALSHARE RAW EXPORT: Button clicked! Starting Dealshare RAW export...');
+      console.log('🔍 DEALSHARE RAW EXPORT: Fetching Dealshare data directly from database...');
+      
+      // Fetch raw database data from the new Dealshare export endpoint
+      const response = await apiRequest('GET', '/api/dealshare/export/excel');
+      console.log('🔍 DEALSHARE RAW EXPORT: API response status:', response.status);
+      
+      const responseData = await response.json();
+      console.log('🔍 DEALSHARE RAW EXPORT: API response data:', responseData);
+      
+      if (!responseData || !responseData.data) {
+        throw new Error('Failed to fetch Dealshare export data');
+      }
+
+      const poData = responseData.data;
+      const itemsData = responseData.itemsData || [];
+      
+      console.log(`🔍 DEALSHARE RAW EXPORT: Retrieved ${poData.length} Dealshare POs with ${itemsData.length} items from database`);
+      
+      // Create a new workbook
+      const workbook = XLSX.utils.book_new();
+      
+      // Create Dealshare PO Summary worksheet
+      const poSummaryWorksheet = XLSX.utils.json_to_sheet(poData);
+      const poSummaryColWidths = [
+        { wch: 10 }, { wch: 20 }, { wch: 15 }, { wch: 12 }, { wch: 12 },
+        { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 15 },
+        { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 12 }
+      ];
+      poSummaryWorksheet['!cols'] = poSummaryColWidths;
+      XLSX.utils.book_append_sheet(workbook, poSummaryWorksheet, 'Dealshare PO Summary');
+      
+      // Create Dealshare Items Details worksheet
+      if (itemsData.length > 0) {
+        const itemsWorksheet = XLSX.utils.json_to_sheet(itemsData);
+        const itemsColWidths = [
+          { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 15 }, { wch: 15 },
+          { wch: 15 }, { wch: 15 }, { wch: 30 }, { wch: 12 }, { wch: 12 },
+          { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 },
+          { wch: 12 }, { wch: 12 }
+        ];
+        itemsWorksheet['!cols'] = itemsColWidths;
+        XLSX.utils.book_append_sheet(workbook, itemsWorksheet, 'Dealshare Item Details');
+      }
+      
+      // Generate filename with current date
+      const filename = `dealshare-purchase-orders-RAW-${format(new Date(), 'yyyy-MM-dd')}.xlsx`;
+      
+      console.log(`🔍 DEALSHARE RAW EXPORT: Writing Excel file: ${filename}`);
+      
+      // Write file - try multiple methods for better compatibility
+      try {
+        XLSX.writeFile(workbook, filename);
+        console.log('🔍 DEALSHARE RAW EXPORT: Excel file written successfully');
+      } catch (writeError) {
+        console.error('🔍 DEALSHARE RAW EXPORT: XLSX writeFile error:', writeError);
+        // Try alternative download method
+        const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+        const blob = new Blob([wbout], { type: 'application/octet-stream' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        console.log('🔍 DEALSHARE RAW EXPORT: Alternative download method used');
+      }
+      
+      toast({
+        title: "Dealshare Export Complete",
+        description: `${poData.length} Dealshare POs with ${itemsData.length} items exported from RAW DATABASE`
+      });
+      
+    } catch (error) {
+      console.error('Dealshare export error:', error);
+      toast({
+        title: "Dealshare Export Failed",
+        description: "Failed to export Dealshare purchase orders. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      console.log('🔍 EXPORT: Starting Excel export process...');
+      console.log(`🔍 EXPORT: Raw pos data length: ${pos.length}`);
+      console.log(`🔍 EXPORT: Filtered POs length: ${filteredPOs.length}`);
+      console.log('🔍 EXPORT: First 3 POs in view:', filteredPOs.slice(0, 3).map(po => ({
+        id: po.id,
+        po_number: po.po_number,
+        platform: po.platform?.pf_name,
+        items_count: po.orderItems?.length
+      })));
+      
+      // Use the EXACT same filtered data that the view shows
+      // Transform the view data to match the expected export format
+      const poData = filteredPOs.map((po, index) => {
+        console.log(`🔍 EXPORT: Processing PO ${index + 1}/${filteredPOs.length}: ${po.po_number}`);
+        
+        const totalQuantity = po.orderItems?.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0;
+        const totalValue = po.orderItems?.reduce((sum, item) => {
+          const landingRate = parseFloat(item.landing_rate || '0') || 0;
+          const quantity = item.quantity || 0;
+          return sum + (landingRate * quantity);
+        }, 0);
+        
+        const poRecord = {
+          'PO ID': po.id,
           'PO Number': po.po_number,
-          'Platform': po.platform.pf_name,
-          'Item Name': item.item_name,
-          'SAP Code': item.sap_code || 'N/A',
-          'Quantity': item.quantity,
-          'Basic Rate': parseFloat(item.basic_rate || '0'),
-          'GST Rate': parseFloat(item.gst_rate || '0'),
-          'Landing Rate': parseFloat(item.landing_rate || '0'),
-          'Item Total': parseFloat((parseFloat(item.landing_rate || '0') * item.quantity).toFixed(2)),
-          'Status': item.status || 'Pending'
+          'Platform': po.platform?.pf_name || 'Unknown',
+          'Status': po.status || 'Open',
+          'Order Date': po.order_date,
+          'Expiry Date': po.expiry_date || '',
+          'City': po.city || '',
+          'State': po.state || '',
+          'Distributor': po.serving_distributor || '',
+          'Total Items': po.orderItems?.length || 0,
+          'Total Quantity': totalQuantity,
+          'Total Value': totalValue.toFixed(2)
+        };
+        
+        if (index < 3) {
+          console.log(`🔍 EXPORT: PO ${index + 1} export data:`, poRecord);
+        }
+        
+        return poRecord;
+      });
+
+      // Also prepare detailed items data for a second sheet - using EXACT same data as view
+      const itemsData: any[] = [];
+      let itemIndex = 0;
+      filteredPOs.forEach((po, poIndex) => {
+        console.log(`🔍 EXPORT: Processing items for PO ${poIndex + 1}: ${po.po_number} (${po.orderItems?.length || 0} items)`);
+        
+        po.orderItems?.forEach((item, itemIndexInPO) => {
+          const itemRecord = {
+            'PO Number': po.po_number,
+            'Platform': po.platform?.pf_name || 'Unknown',
+            'Item Name': item.item_name || '',
+            'SAP Code': item.sap_code || '',
+            'Quantity': item.quantity || 0,
+            'Basic Rate': item.basic_rate || '0',
+            'GST Rate': item.gst_rate || '0',
+            'Landing Rate': item.landing_rate || '0',
+            'Status': item.status || 'Pending'
+          };
+          
+          if (itemIndex < 5) {
+            console.log(`🔍 EXPORT: Item ${itemIndex + 1} (PO: ${po.po_number}, Item ${itemIndexInPO + 1}):`, itemRecord);
+          }
+          
+          itemsData.push(itemRecord);
+          itemIndex++;
         });
       });
-    });
-
-    // Create a new workbook
-    const workbook = XLSX.utils.book_new();
-    
-    // Create PO Summary worksheet
-    const poSummaryWorksheet = XLSX.utils.json_to_sheet(poSummaryData);
-    const poSummaryColWidths = [
-      { wch: 15 }, { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
-      { wch: 15 }, { wch: 15 }, { wch: 25 }, { wch: 20 }, { wch: 12 },
-      { wch: 15 }, { wch: 15 }
-    ];
-    poSummaryWorksheet['!cols'] = poSummaryColWidths;
-    XLSX.utils.book_append_sheet(workbook, poSummaryWorksheet, 'PO Summary');
-    
-    // Create Order Items worksheet if there are items
-    if (orderItemsData.length > 0) {
-      const itemsWorksheet = XLSX.utils.json_to_sheet(orderItemsData);
-      const itemsColWidths = [
-        { wch: 15 }, { wch: 20 }, { wch: 30 }, { wch: 15 }, 
-        { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 12 },
-        { wch: 12 }, { wch: 12 }
+      
+      console.log(`🔍 EXPORT: Prepared ${poData.length} PO records and ${itemsData.length} item records from filtered view data`);
+      console.log('🔍 EXPORT: About to create Excel workbook with this data');
+      
+      // Create a new workbook
+      const workbook = XLSX.utils.book_new();
+      
+      // Create PO Summary worksheet with raw database data
+      const poSummaryWorksheet = XLSX.utils.json_to_sheet(poData);
+      const poSummaryColWidths = [
+        { wch: 10 }, { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 12 },
+        { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 20 }, { wch: 12 },
+        { wch: 15 }, { wch: 15 }
       ];
-      itemsWorksheet['!cols'] = itemsColWidths;
-      XLSX.utils.book_append_sheet(workbook, itemsWorksheet, 'Order Items');
+      poSummaryWorksheet['!cols'] = poSummaryColWidths;
+      XLSX.utils.book_append_sheet(workbook, poSummaryWorksheet, 'PO Summary');
+      
+      // Create Items Details worksheet if there are items
+      if (itemsData.length > 0) {
+        const itemsWorksheet = XLSX.utils.json_to_sheet(itemsData);
+        const itemsColWidths = [
+          { wch: 20 }, { wch: 20 }, { wch: 30 }, { wch: 15 },
+          { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }
+        ];
+        itemsWorksheet['!cols'] = itemsColWidths;
+        XLSX.utils.book_append_sheet(workbook, itemsWorksheet, 'Item Details');
+      }
+      
+      // Generate filename with current date
+      const filename = `purchase-orders-export-${format(new Date(), 'yyyy-MM-dd')}.xlsx`;
+      
+      console.log(`🔍 EXPORT: Writing Excel file: ${filename}`);
+      console.log(`🔍 EXPORT: Final data summary:`);
+      console.log(`  - ${poData.length} PO records in "PO Summary" sheet`);
+      console.log(`  - ${itemsData.length} item records in "Item Details" sheet`);
+      console.log('🔍 EXPORT: Sample of what will be written to Excel:');
+      console.log('  PO Summary first record:', poData[0]);
+      console.log('  Item Details first record:', itemsData[0]);
+      
+      // Write file
+      XLSX.writeFile(workbook, filename);
+      
+      console.log('✅ EXPORT: Excel file written successfully');
+      
+      toast({
+        title: "Export Complete",
+        description: `${poData.length} purchase orders with ${itemsData.length} items exported successfully from VIEW DATA`
+      });
+    } catch (error) {
+      console.error('Export error:', error);
+      toast({
+        title: "Export Failed",
+        description: "Failed to export purchase orders. Please try again.",
+        variant: "destructive"
+      });
     }
-    
-    // Generate filename with current date
-    const filename = `purchase-orders-${format(new Date(), 'yyyy-MM-dd')}.xlsx`;
-    
-    // Write file
-    XLSX.writeFile(workbook, filename);
-    
-    toast({
-      title: "Export Complete",
-      description: `${filteredPOs.length} purchase orders with ${orderItemsData.length} items exported to Excel`
-    });
+  };
+
+  const handleExportSinglePO = async (po: POWithDetails) => {
+    try {
+      console.log(`🔍 FRONTEND DEBUG: Starting export for PO ${po.po_number} (ID: ${po.id})`);
+      
+      // Fetch raw database data from the new export endpoint
+      const response = await apiRequest('GET', `/api/pos/${po.id}/export`);
+      const responseData = await response.json();
+      
+      console.log(`🔍 FRONTEND DEBUG: API Response:`, responseData);
+      
+      if (!responseData.success || !responseData.data) {
+        throw new Error('Failed to fetch export data');
+      }
+
+      const exportData = responseData.data;
+      console.log(`🔍 FRONTEND DEBUG: Export data:`, exportData);
+      console.log(`🔍 FRONTEND DEBUG: Lines count: ${exportData.lines?.length || 0}`);
+      
+      if (exportData.lines && exportData.lines.length > 0) {
+        console.log(`🔍 FRONTEND DEBUG: First 3 line items:`, exportData.lines.slice(0, 3));
+        console.log(`🔍 FRONTEND DEBUG: All line items:`, exportData.lines);
+      }
+      
+      // Create a new workbook
+      const workbook = XLSX.utils.book_new();
+      
+      // Create PO Master worksheet
+      const poMasterWorksheet = XLSX.utils.json_to_sheet([exportData.master]);
+      const poMasterColWidths = [
+        { wch: 10 }, { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 12 },
+        { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 15 },
+        { wch: 15 }, { wch: 20 }, { wch: 20 }
+      ];
+      poMasterWorksheet['!cols'] = poMasterColWidths;
+      XLSX.utils.book_append_sheet(workbook, poMasterWorksheet, 'PO Master');
+      
+      // Create Order Items worksheet if there are items
+      if (exportData.lines && exportData.lines.length > 0) {
+        console.log(`🔍 FRONTEND DEBUG: Creating Excel with ${exportData.lines.length} line items`);
+        const itemsWorksheet = XLSX.utils.json_to_sheet(exportData.lines);
+        const itemsColWidths = [
+          { wch: 10 }, { wch: 25 }, { wch: 12 }, { wch: 15 }, 
+          { wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 12 }
+        ];
+        itemsWorksheet['!cols'] = itemsColWidths;
+        XLSX.utils.book_append_sheet(workbook, itemsWorksheet, 'PO Lines');
+        
+        // Debug what will be written to Excel
+        console.log(`🔍 FRONTEND DEBUG: Excel worksheet data preview:`, 
+          JSON.stringify(exportData.lines.slice(0, 2), null, 2));
+      } else {
+        console.log(`🔍 FRONTEND DEBUG: No lines to export`);
+      }
+      
+      // Generate filename with PO number
+      const filename = `PO_${po.po_number}_raw_data_${format(new Date(), 'yyyy-MM-dd')}.xlsx`;
+      
+      console.log(`🔍 FRONTEND DEBUG: Writing Excel file: ${filename}`);
+      
+      // Write file
+      XLSX.writeFile(workbook, filename);
+      
+      console.log(`✅ FRONTEND DEBUG: Excel export completed for ${po.po_number}`);
+      
+      toast({
+        title: "PO Exported",
+        description: `Purchase order ${po.po_number} exported with raw database data`
+      });
+    } catch (error) {
+      console.error('Export error:', error);
+      toast({
+        title: "Export Failed",
+        description: "Failed to export purchase order. Please try again.",
+        variant: "destructive"
+      });
+    }
   };
 
   const clearFilters = () => {
@@ -326,98 +634,58 @@ export function POListView() {
     setShowFilter(false);
   };
 
-  // Filter POs based on search term and filters
+  // Apply filters to show only relevant POs (same logic used by export)
   const filteredPOs = pos.filter(po => {
-    // Safety check for required fields
-    if (!po || !po.po_number || !po.platform) {
-      console.warn("🚨 Invalid PO data:", po);
+    // Search term filter
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch = 
+        po.po_number?.toLowerCase().includes(searchLower) ||
+        po.platform?.pf_name?.toLowerCase().includes(searchLower) ||
+        po.city?.toLowerCase().includes(searchLower) ||
+        po.state?.toLowerCase().includes(searchLower) ||
+        po.serving_distributor?.toLowerCase().includes(searchLower);
+      
+      if (!matchesSearch) return false;
+    }
+
+    // Status filter
+    if (statusFilter !== "all" && po.status?.toLowerCase() !== statusFilter.toLowerCase()) {
       return false;
     }
-    
-    const searchTermLower = searchTerm && typeof searchTerm === 'string' ? searchTerm.toLowerCase() : '';
-    let matchesSearch = searchTerm === "" || !searchTermLower;
-    
-    if (!matchesSearch && searchTermLower) {
-      try {
-        const poNumber = po.po_number || "";
-        const platformName = po.platform?.pf_name || "";
-        const status = po.status || "";
-        const location = `${po.city || ""}, ${po.state || ""}`;
-        
-        matchesSearch = (
-          (typeof poNumber === 'string' && poNumber.toLowerCase().includes(searchTermLower)) ||
-          (typeof platformName === 'string' && platformName.toLowerCase().includes(searchTermLower)) ||
-          (typeof status === 'string' && status.toLowerCase().includes(searchTermLower)) ||
-          (typeof location === 'string' && location.toLowerCase().includes(searchTermLower))
-        );
-      } catch (error) {
-        console.error('Error in search filter:', error, { po, searchTerm });
-        matchesSearch = false;
-      }
+
+    // Platform filter
+    if (platformFilter !== "all" && po.platform?.id.toString() !== platformFilter) {
+      return false;
+    }
+
+    // Order date filters
+    if (orderDateFrom && po.order_date) {
+      const poDate = new Date(po.order_date);
+      const fromDate = new Date(orderDateFrom);
+      if (isBefore(poDate, fromDate)) return false;
     }
     
-    const statusFilterLower = statusFilter && typeof statusFilter === 'string' ? statusFilter.toLowerCase() : '';
-    let matchesStatus = statusFilter === "all";
-    
-    if (!matchesStatus && statusFilterLower) {
-      try {
-        const status = po.status || "";
-        matchesStatus = typeof status === 'string' && status.toLowerCase() === statusFilterLower;
-      } catch (error) {
-        console.error('Error in status filter:', error, { po, statusFilter });
-        matchesStatus = false;
-      }
+    if (orderDateTo && po.order_date) {
+      const poDate = new Date(po.order_date);
+      const toDate = new Date(orderDateTo);
+      if (isAfter(poDate, toDate)) return false;
     }
-    const matchesPlatform = platformFilter === "all" || (po.platform?.id || "").toString() === platformFilter;
-    
-    // Date filters with safety checks
-    let matchesOrderDateFrom = true;
-    let matchesOrderDateTo = true;
-    
-    if (po.order_date) {
-      const poOrderDate = new Date(po.order_date);
-      if (!isNaN(poOrderDate.getTime())) {
-        matchesOrderDateFrom = orderDateFrom === "" || isAfter(poOrderDate, new Date(orderDateFrom)) || isEqual(poOrderDate, new Date(orderDateFrom));
-        matchesOrderDateTo = orderDateTo === "" || isBefore(poOrderDate, new Date(orderDateTo)) || isEqual(poOrderDate, new Date(orderDateTo));
-      }
+
+    // Expiry date filters
+    if (expiryDateFrom && po.expiry_date) {
+      const expiryDate = new Date(po.expiry_date);
+      const fromDate = new Date(expiryDateFrom);
+      if (isBefore(expiryDate, fromDate)) return false;
     }
     
-    let matchesExpiryDateFrom = true;
-    let matchesExpiryDateTo = true;
-    if (po.expiry_date) {
-      const poExpiryDate = new Date(po.expiry_date);
-      matchesExpiryDateFrom = expiryDateFrom === "" || isAfter(poExpiryDate, new Date(expiryDateFrom)) || isEqual(poExpiryDate, new Date(expiryDateFrom));
-      matchesExpiryDateTo = expiryDateTo === "" || isBefore(poExpiryDate, new Date(expiryDateTo)) || isEqual(poExpiryDate, new Date(expiryDateTo));
-    } else {
-      // If no expiry date, show the PO unless user specifically filtered for expiry dates
-      matchesExpiryDateFrom = expiryDateFrom === "";
-      matchesExpiryDateTo = expiryDateTo === "";
-      // If both expiry filters are empty, show all POs including those with null expiry
-      if (expiryDateFrom === "" && expiryDateTo === "") {
-        matchesExpiryDateFrom = true;
-        matchesExpiryDateTo = true;
-      }
+    if (expiryDateTo && po.expiry_date) {
+      const expiryDate = new Date(po.expiry_date);
+      const toDate = new Date(expiryDateTo);
+      if (isAfter(expiryDate, toDate)) return false;
     }
-    
-    const passes = matchesSearch && matchesStatus && matchesPlatform && 
-           matchesOrderDateFrom && matchesOrderDateTo && 
-           matchesExpiryDateFrom && matchesExpiryDateTo;
-    
-    // Debug individual filter failures
-    if (!passes) {
-      console.log(`🚨 PO ${po.po_number} filtered out:`, {
-        matchesSearch,
-        matchesStatus,
-        matchesPlatform,
-        matchesOrderDateFrom,
-        matchesOrderDateTo,
-        matchesExpiryDateFrom,
-        matchesExpiryDateTo,
-        po_expiry_date: po.expiry_date
-      });
-    }
-    
-    return passes;
+
+    return true;
   });
 
   // Debug filtering results
@@ -538,6 +806,22 @@ export function POListView() {
             >
               <Download className="h-4 w-4" />
               <span>Export</span>
+            </Button>
+            <Button 
+              variant="outline" 
+              onClick={handleExportAmazonDirect}
+              className="flex items-center space-x-2 bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100"
+            >
+              <Download className="h-4 w-4" />
+              <span>Amazon RAW</span>
+            </Button>
+            <Button 
+              variant="outline" 
+              onClick={handleExportDealshareRAW}
+              className="flex items-center space-x-2 bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
+            >
+              <Download className="h-4 w-4" />
+              <span>Dealshare RAW</span>
             </Button>
           </div>
         </div>
@@ -767,6 +1051,15 @@ export function POListView() {
                       >
                         <Edit className="h-4 w-4 mr-1" />
                         Edit
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => handleExportSinglePO(po)}
+                        className="hover:bg-purple-50 border-purple-200"
+                      >
+                        <Download className="h-4 w-4 mr-1" />
+                        Excel
                       </Button>
                       <Button 
                         variant="outline" 

@@ -26,6 +26,10 @@ import {
   getTableInfo,
   getPerformanceStats
 } from "./sql-routes";
+import { requirePermission } from "./rbac-middleware";
+import { setupUserManagementRoutes } from './user-management-routes';
+import { setupLogsRoutes } from './logs-routes';
+import { setupRBACData } from './setup-rbac';
 import {
   testHanaConnection,
   testStoredProcedure,
@@ -44,6 +48,7 @@ import { parseBigBasketPO } from "./bigbasket-parser";
 import { parseZomatoPO } from "./zomato-parser";
 import { parseDealsharePO } from "./dealshare-parser";
 import { parseAmazonSecondarySales } from "./amazon-secondary-sales-parser";
+import { parseAmazonPO } from "./amazon-parser";
 import { parseZeptoSecondaryData } from "./zepto-secondary-sales-parser";
 import { parseBlinkitSecondarySalesFile } from "./blinkit-secondary-sales-parser";
 import { parseSwiggySecondaryData } from "./swiggy-secondary-sales-parser";
@@ -57,8 +62,8 @@ import { parseAmazonInventoryFile } from "./amazon-inventory-parser";
 import { parseFlipkartInventoryCSV } from "./flipkart-inventory-parser";
 import { parseZeptoInventory } from "./zepto-inventory-parser";
 import { db } from "./db";
-import { sql, eq } from "drizzle-orm";
-import { pfPo, poMaster } from "@shared/schema";
+import { sql, eq, desc } from "drizzle-orm";
+import { pfPo, poMaster, amazonPoHeader, amazonPoLines, dealsharePoHeader, dealsharePoItems } from "@shared/schema";
 import { 
   scAmJwDaily, scAmJwRange, scAmJmDaily, scAmJmRange,
   scZeptoJmDaily, scZeptoJmRange, 
@@ -417,7 +422,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/distributors", async (req, res) => {
     try {
       const distributors = await storage.getAllDistributors();
-      res.json(distributors);
+      // Transform distributors table to match DistributorMst interface expected by frontend
+      const transformedDistributors = distributors.map(dist => ({
+        id: dist.id,
+        distributor_name: dist.name,
+        distributor_code: null,
+        contact_person: null,
+        phone: null,
+        email: null,
+        address: null,
+        city: null,
+        state: null,
+        region: null,
+        status: 'Active',
+        created_at: null,
+        updated_at: null
+      }));
+      res.json(transformedDistributors);
     } catch (error) {
       console.error("Error fetching distributors:", error);
       res.status(500).json({ error: "Failed to fetch distributors" });
@@ -558,8 +579,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // SAP Items API routes
-  app.get("/api/sap-items-api", async (_req, res) => {
+  // SAP Items API routes (Admin only)
+  app.get("/api/sap-items-api", requirePermission('sap_access'), async (_req, res) => {
     try {
       // Get all items from the items table to show in SAP sync
       const items = await storage.getAllItems();
@@ -587,7 +608,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/sap-items-api/sync", async (_req, res) => {
+  app.post("/api/sap-items-api/sync", requirePermission('sap_access'), async (_req, res) => {
     try {
       // Get all current items from the database
       const items = await storage.getAllItems();
@@ -907,7 +928,473 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 
 
-      res.status(500).json({ message: "Failed to fetch POs" });
+      console.error("❌ Error in GET /api/pos:", error);
+      console.error("❌ Error details:", {
+        name: error instanceof Error ? error.name : 'Unknown',
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      res.status(500).json({ 
+        message: "Failed to fetch POs",
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  // Export POs to Excel - EXACT SAME DATA AS VIEW
+  app.get("/api/pos/export/excel", async (_req, res) => {
+    try {
+      console.log("📊 EXCEL EXPORT: Starting export with same data as view...");
+      
+      // Get all POs using EXACT SAME method as view (/api/pos)
+      const allPOs = await storage.getAllPos();
+      console.log(`📊 EXCEL EXPORT: Retrieved ${allPOs.length} POs from storage.getAllPos()`);
+      
+      // Log first PO for debugging
+      if (allPOs.length > 0) {
+        const firstPO = allPOs[0];
+        console.log(`🔍 EXCEL EXPORT: First PO debug:`, {
+          id: firstPO.id,
+          po_number: firstPO.po_number,
+          platform: firstPO.platform?.pf_name,
+          city: firstPO.city,
+          state: firstPO.state,
+          serving_distributor: firstPO.serving_distributor,
+          orderItems_count: firstPO.orderItems?.length || 0,
+          first_item: firstPO.orderItems?.[0] ? {
+            item_name: firstPO.orderItems[0].item_name,
+            quantity: firstPO.orderItems[0].quantity,
+            basic_rate: firstPO.orderItems[0].basic_rate,
+            landing_rate: firstPO.orderItems[0].landing_rate
+          } : 'No items'
+        });
+      }
+      
+      // Transform data for Excel export - using EXACT same data structure as view
+      const excelData = allPOs.map(po => {
+        const totalQuantity = po.orderItems?.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0;
+        const totalValue = po.orderItems?.reduce((sum, item) => {
+          const landingRate = parseFloat(item.landing_rate || '0') || 0;
+          const quantity = item.quantity || 0;
+          return sum + (landingRate * quantity);
+        }, 0);
+        
+        return {
+          'PO ID': po.id,
+          'PO Number': po.po_number,
+          'Platform': po.platform?.pf_name || 'Unknown',
+          'Status': po.status || 'Open',
+          'Order Date': po.order_date,
+          'Expiry Date': po.expiry_date || '',
+          'City': po.city || '',
+          'State': po.state || '',
+          'Distributor': po.serving_distributor || '',
+          'Total Items': po.orderItems?.length || 0,
+          'Total Quantity': totalQuantity,
+          'Total Value': totalValue.toFixed(2)
+        };
+      });
+
+      // Prepare detailed items data for second sheet - using EXACT same orderItems data as view
+      const itemsData: any[] = [];
+      allPOs.forEach(po => {
+        po.orderItems?.forEach((item, index) => {
+          // Debug log for first few items
+          if (index < 2) {
+            console.log(`🔍 EXCEL EXPORT: Item ${index + 1} in PO ${po.po_number}:`, {
+              item_name: item.item_name,
+              quantity: item.quantity,
+              basic_rate: item.basic_rate,
+              landing_rate: item.landing_rate,
+              status: item.status
+            });
+          }
+          
+          itemsData.push({
+            'PO Number': po.po_number,
+            'Platform': po.platform?.pf_name || 'Unknown',
+            'Item Name': item.item_name || '',
+            'SAP Code': item.sap_code || '',
+            'Quantity': item.quantity || 0,
+            'Basic Rate': item.basic_rate || '0',
+            'GST Rate': item.gst_rate || '0',
+            'Landing Rate': item.landing_rate || '0',
+            'Status': item.status || 'Pending'
+          });
+        });
+      });
+
+      console.log(`📊 EXCEL EXPORT: Prepared ${excelData.length} PO records and ${itemsData.length} item records`);
+
+      res.json({
+        success: true,
+        count: excelData.length,
+        data: excelData,
+        itemsData: itemsData,
+        debug: {
+          timestamp: new Date().toISOString(),
+          total_pos: allPOs.length,
+          total_items: itemsData.length,
+          data_source: 'storage.getAllPos() - EXACT SAME AS VIEW',
+          message: 'Export uses identical data source as the PO list view'
+        }
+      });
+      
+    } catch (error) {
+      console.error("❌ EXCEL EXPORT: Error exporting POs:", error);
+      res.status(500).json({ 
+        error: "Failed to export POs", 
+        details: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  });
+
+  // Amazon-specific Excel export - fetches raw Amazon data from database
+  app.get("/api/amazon/export/excel", async (_req, res) => {
+    try {
+      console.log("🔍 AMAZON EXPORT: Fetching Amazon POs directly from amazon_po_header and amazon_po_lines tables...");
+      
+      // Fetch all Amazon PO headers with their lines
+      const amazonPOs = await db
+        .select({
+          header: amazonPoHeader,
+          lines: amazonPoLines
+        })
+        .from(amazonPoHeader)
+        .leftJoin(amazonPoLines, eq(amazonPoHeader.id, amazonPoLines.po_header_id))
+        .orderBy(desc(amazonPoHeader.created_at));
+      
+      console.log(`🔍 AMAZON EXPORT: Found ${amazonPOs.length} Amazon PO records in database`);
+      
+      // Group data by PO header
+      const groupedPOs = amazonPOs.reduce((acc, row) => {
+        const headerId = row.header.id;
+        if (!acc[headerId]) {
+          acc[headerId] = {
+            header: row.header,
+            lines: []
+          };
+        }
+        if (row.lines) {
+          acc[headerId].lines.push(row.lines);
+        }
+        return acc;
+      }, {} as Record<number, { header: any; lines: any[] }>);
+      
+      const poData = Object.values(groupedPOs).map(po => ({
+        'PO ID': po.header.id,
+        'PO Number': po.header.po_number,
+        'Platform': 'Amazon',
+        'PO Date': po.header.po_date,
+        'Delivery Date': po.header.delivery_date,
+        'Delivery Window Start': po.header.delivery_window_start,
+        'Delivery Window End': po.header.delivery_window_end,
+        'Ship To Name': po.header.ship_to_name,
+        'Ship To Address': po.header.ship_to_address_line1,
+        'Ship To City': po.header.ship_to_city,
+        'Ship To State': po.header.ship_to_state_or_region,
+        'Ship To Postal Code': po.header.ship_to_postal_code,
+        'Ship To Country': po.header.ship_to_country_code,
+        'Total Items': po.lines.length,
+        'Total Quantity': po.lines.reduce((sum, line) => sum + (parseFloat(line.quantity || '0') || 0), 0),
+        'Total Value': po.lines.reduce((sum, line) => {
+          const lineTotal = parseFloat(line.line_total || '0') || 0;
+          return sum + lineTotal;
+        }, 0).toFixed(2),
+        'Status': 'Active',
+        'Created At': po.header.created_at,
+        'Updated At': po.header.updated_at
+      }));
+      
+      // Prepare detailed items data
+      const itemsData: any[] = [];
+      Object.values(groupedPOs).forEach(po => {
+        po.lines.forEach(line => {
+          itemsData.push({
+            'PO Number': po.header.po_number,
+            'Platform': 'Amazon',
+            'Line Number': line.line_number,
+            'ASIN': line.asin,
+            'SKU': line.sku,
+            'External ID': line.external_id,
+            'Item Name': line.item_name,
+            'Quantity': parseFloat(line.quantity || '0') || 0,
+            'UOM': line.uom,
+            'Unit Cost': parseFloat(line.unit_cost || '0') || 0,
+            'Base Amount': parseFloat(line.base_amount || '0') || 0,
+            'Tax Rate': parseFloat(line.tax_rate || '0') || 0,
+            'Tax Amount': parseFloat(line.tax_amount || '0') || 0,
+            'Line Total': parseFloat(line.line_total || '0') || 0,
+            'Currency': line.currency_code,
+            'Ship Date': line.ship_date,
+            'Delivery Date': line.delivery_date,
+            'Status': 'Active',
+            'Created At': line.created_at,
+            'Updated At': line.updated_at
+          });
+        });
+      });
+      
+      console.log(`🔍 AMAZON EXPORT: Prepared ${poData.length} PO records and ${itemsData.length} item records from raw Amazon tables`);
+      
+      res.json({
+        success: true,
+        count: poData.length,
+        data: poData,
+        itemsData: itemsData,
+        debug: {
+          timestamp: new Date().toISOString(),
+          total_pos: poData.length,
+          total_items: itemsData.length,
+          data_source: 'amazon_po_header + amazon_po_lines - RAW DATABASE DATA',
+          message: 'Amazon export using direct database tables'
+        }
+      });
+      
+    } catch (error) {
+      console.error("❌ AMAZON EXPORT: Error exporting Amazon POs:", error);
+      res.status(500).json({ 
+        error: "Failed to export Amazon POs", 
+        details: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  });
+
+  // Dealshare-specific Excel export - fetches raw Dealshare data from database
+  app.get("/api/dealshare/export/excel", async (_req, res) => {
+    try {
+      console.log("🔍 DEALSHARE EXPORT: Fetching Dealshare POs directly from dealshare_po_header and dealshare_po_items tables...");
+      
+      // Fetch all Dealshare PO headers with their lines
+      const dealsharePoData = await db
+        .select({
+          header: dealsharePoHeader,
+          items: dealsharePoItems
+        })
+        .from(dealsharePoHeader)
+        .leftJoin(dealsharePoItems, eq(dealsharePoHeader.id, dealsharePoItems.po_header_id))
+        .orderBy(desc(dealsharePoHeader.created_at));
+      
+      console.log(`🔍 DEALSHARE EXPORT: Found ${dealsharePoData.length} Dealshare PO records in database`);
+      
+      // Group data by PO header
+      const groupedData = new Map<number, { header: any, items: any[] }>();
+      
+      for (const row of dealsharePoData) {
+        if (!groupedData.has(row.header.id)) {
+          groupedData.set(row.header.id, {
+            header: row.header,
+            items: []
+          });
+        }
+        
+        if (row.items) {
+          groupedData.get(row.header.id)!.items.push(row.items);
+        }
+      }
+      
+      // Format PO headers for Excel
+      const poData = Array.from(groupedData.values()).map(({ header, items }) => ({
+        'PO ID': header.id,
+        'PO Number': header.po_number,
+        'Platform': 'Dealshare',
+        'PO Date': header.po_created_date,
+        'Delivery Date': header.po_delivery_date,
+        'Expiry Date': header.po_expiry_date,
+        'Shipped By': header.shipped_by || '',
+        'Total Items': items.length,
+        'Total Quantity': items.reduce((sum, item) => sum + (item.quantity || 0), 0),
+        'Total Value': items.reduce((sum, item) => sum + (item.item_line_total_amount || 0), 0).toFixed(2),
+        'Status': header.status || 'Active',
+        'Created At': header.created_at,
+        'Updated At': header.updated_at
+      }));
+      
+      // Format items for Excel
+      const itemsData = Array.from(groupedData.values()).flatMap(({ header, items }) =>
+        items.map((item, index) => ({
+          'PO Number': header.po_number,
+          'Platform': 'Dealshare',
+          'Line Number': index + 1,
+          'External ID': item.external_id || '',
+          'Product Code': item.product_code || '',
+          'Item Name': item.item_name || '',
+          'Product Name': item.product_name || '',
+          'Quantity': item.quantity || 0,
+          'Unit Price': item.unit_price || 0,
+          'MRP': item.mrp || 0,
+          'Item Line Total': item.item_line_total_amount || 0,
+          'Tax Rate': item.tax_rate || 0,
+          'Tax Amount': item.tax_amount || 0,
+          'Status': item.status || 'Active',
+          'Created At': item.created_at,
+          'Updated At': item.updated_at
+        }))
+      );
+      
+      console.log(`🔍 DEALSHARE EXPORT: Prepared ${poData.length} PO records and ${itemsData.length} item records from raw Dealshare tables`);
+      
+      // Return structured data for frontend processing
+      res.json({
+        success: true,
+        count: poData.length,
+        data: poData,
+        itemsData: itemsData,
+        debug: {
+          timestamp: new Date(),
+          total_pos: poData.length,
+          total_items: itemsData.length,
+          data_source: "dealshare_po_header + dealshare_po_items - RAW DATABASE DATA",
+          message: "Dealshare export using direct database tables"
+        }
+      });
+      
+    } catch (error) {
+      console.error("🔥 DEALSHARE EXPORT ERROR:", error);
+      res.status(500).json({ 
+        success: false,
+        error: "Failed to export Dealshare POs", 
+        details: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  });
+
+  // Export single PO with all details
+  // Debug endpoint to check Amazon data directly
+  app.get("/api/debug/amazon/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      console.log(`🔍 DEBUG: Checking Amazon data for PO ${id}`);
+      
+      // Check po_master
+      const poMasterData = await db.select().from(poMaster).where(eq(poMaster.id, id)).limit(1);
+      console.log(`📊 po_master data:`, poMasterData[0]);
+      
+      // Check amazon_po_header
+      if (!poMasterData[0]?.vendor_po_number) {
+        res.status(404).json({ error: "No vendor PO number found" });
+        return;
+      }
+      
+      const amazonHeaders = await db.select().from(amazonPoHeader).where(eq(amazonPoHeader.po_number, poMasterData[0].vendor_po_number));
+      console.log(`📊 amazon_po_header data:`, amazonHeaders[0]);
+      
+      // Check amazon_po_lines
+      if (amazonHeaders.length > 0) {
+        const amazonLines = await db.select().from(amazonPoLines).where(eq(amazonPoLines.po_header_id, amazonHeaders[0].id)).limit(5);
+        console.log(`📦 amazon_po_lines data (first 5):`, amazonLines);
+      }
+      
+      res.json({
+        po_master: poMasterData[0],
+        amazon_header: amazonHeaders[0],
+        amazon_lines_count: amazonHeaders.length > 0 ? await db.select({ count: sql`count(*)` }).from(amazonPoLines).where(eq(amazonPoLines.po_header_id, amazonHeaders[0].id)) : 0
+      });
+    } catch (error) {
+      console.error("Debug error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Export single PO - EXACT SAME DATA AS VIEW
+  app.get("/api/pos/:id/export", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      console.log(`📊 SINGLE PO EXPORT: Exporting PO ${id} with same data as view...`);
+      
+      // Get all POs and find the one with matching ID - EXACT SAME method as view
+      const allPOs = await storage.getAllPos();
+      const po = allPOs.find(p => p.id === id);
+      
+      if (!po) {
+        console.log(`❌ SINGLE PO EXPORT: PO ${id} not found in list of ${allPOs.length} POs`);
+        return res.status(404).json({ 
+          error: "PO not found",
+          available_pos: allPOs.map(p => ({ id: p.id, po_number: p.po_number })).slice(0, 5)
+        });
+      }
+
+      console.log(`✅ SINGLE PO EXPORT: Found PO ${id}:`, {
+        po_number: po.po_number,
+        platform: po.platform?.pf_name,
+        city: po.city,
+        state: po.state,
+        serving_distributor: po.serving_distributor,
+        orderItems_count: po.orderItems?.length || 0
+      });
+      
+      if (po.orderItems && po.orderItems.length > 0) {
+        console.log(`🔍 SINGLE PO EXPORT: First item:`, {
+          item_name: po.orderItems[0].item_name,
+          quantity: po.orderItems[0].quantity,
+          basic_rate: po.orderItems[0].basic_rate,
+          landing_rate: po.orderItems[0].landing_rate,
+          status: po.orderItems[0].status
+        });
+      }
+
+      // Prepare response with EXACT SAME PO data as view shows
+      // Create export data using EXACT same structure as the view shows
+      const exportData = {
+        master: {
+          'PO ID': po.id,
+          'PO Number': po.po_number,
+          'Platform': po.platform?.pf_name || 'Unknown',
+          'Status': po.status || 'Open',
+          'Order Date': po.order_date,
+          'Expiry Date': po.expiry_date || '',
+          'City': po.city || '',
+          'State': po.state || '',
+          'Distributor': po.serving_distributor || '',
+          'Total Items': po.orderItems?.length || 0
+        },
+        lines: po.orderItems?.map((item, index) => {
+          // Debug log for first few items
+          if (index < 3) {
+            console.log(`🔍 SINGLE PO EXPORT: Line item ${index + 1}:`, {
+              item_name: item.item_name,
+              quantity: item.quantity,
+              basic_rate: item.basic_rate,
+              landing_rate: item.landing_rate,
+              status: item.status
+            });
+          }
+          
+          return {
+            'Item ID': item.id,
+            'Item Name': item.item_name || '',
+            'SAP Code': item.sap_code || '',
+            'Quantity': item.quantity || 0,
+            'Basic Rate': item.basic_rate || '0',
+            'GST Rate': item.gst_rate || '0',
+            'Landing Rate': item.landing_rate || '0',
+            'Total': ((parseFloat(item.landing_rate || '0') || 0) * (item.quantity || 0)).toFixed(2),
+            'Status': item.status || 'Pending'
+          };
+        }) || []
+      };
+
+      console.log(`📊 SINGLE PO EXPORT: Prepared export data with ${exportData.lines.length} line items`);
+
+      res.json({
+        success: true,
+        data: exportData,
+        debug: {
+          timestamp: new Date().toISOString(),
+          po_id: po.id,
+          po_number: po.po_number,
+          total_items: exportData.lines.length,
+          data_source: 'storage.getAllPos() - EXACT SAME AS VIEW',
+          message: 'Single PO export uses identical data source as the PO list view'
+        }
+      });
+      
+    } catch (error) {
+      console.error("Error exporting PO:", error);
+      res.status(500).json({ 
+        error: "Failed to export PO", 
+        details: error instanceof Error ? error.message : String(error) 
+      });
     }
   });
 
@@ -1741,12 +2228,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "No file uploaded" });
       }
       
-      const csvContent = req.file.buffer.toString("utf-8");
-      const parsedData = parseCityMallPO(csvContent, "system");
+      // Pass the Buffer directly to support both Excel and CSV
+      const parsedData = parseCityMallPO(req.file.buffer, "system", req.file.originalname);
       res.json(parsedData);
     } catch (error) {
-      console.error("Error parsing City Mall CSV:", error);
-      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to parse CSV" });
+      console.error("Error parsing City Mall file:", error);
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to parse file" });
     }
   });
 
@@ -2110,13 +2597,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         } else if (platformParam === "flipkart") {
           detectedVendor = "flipkart";
-          parsedData = await parseFlipkartGroceryPO(req.file.buffer.toString('utf-8'), uploadedBy);
+          parsedData = parseFlipkartGroceryPO(req.file.buffer, uploadedBy);
         } else if (platformParam === "zepto") {
           detectedVendor = "zepto";
           parsedData = parseZeptoPO(req.file.buffer.toString('utf-8'), uploadedBy);
         } else if (platformParam === "citymall") {
           detectedVendor = "citymall";
-          parsedData = await parseCityMallPO(req.file.buffer.toString('utf-8'), uploadedBy, filename);
+          parsedData = await parseCityMallPO(req.file.buffer, uploadedBy, filename);
         } else if (platformParam === "swiggy") {
           detectedVendor = "swiggy";
           parsedData = await parseSwiggyPO(req.file.buffer, uploadedBy);
@@ -2129,17 +2616,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else if (platformParam === "dealshare") {
           detectedVendor = "dealshare";
           parsedData = await parseDealsharePO(req.file.buffer, uploadedBy);
+        } else if (platformParam === "amazon") {
+          detectedVendor = "amazon";
+          console.log('🔍 Processing Amazon file, size:', req.file.buffer.length, 'bytes');
+          console.log('🔍 File name:', req.file.originalname);
+          parsedData = parseAmazonPO(req.file.buffer, uploadedBy);
+          console.log('🔍 Amazon parsing completed, got', parsedData.lines?.length || 0, 'lines');
         }
         // Fallback to filename detection if platform param not provided or recognized
         else if (filename.includes('flipkart') || filename.includes('grocery')) {
           detectedVendor = "flipkart";
-          parsedData = await parseFlipkartGroceryPO(req.file.buffer.toString('utf-8'), uploadedBy);
+          parsedData = parseFlipkartGroceryPO(req.file.buffer, uploadedBy);
         } else if (filename.includes('zepto')) {
           detectedVendor = "zepto";
           parsedData = parseZeptoPO(req.file.buffer.toString('utf-8'), uploadedBy);
         } else if (filename.includes('city') || filename.includes('mall')) {
           detectedVendor = "citymall";
-          parsedData = await parseCityMallPO(req.file.buffer.toString('utf-8'), uploadedBy, filename);
+          parsedData = await parseCityMallPO(req.file.buffer, uploadedBy, filename);
         } else if (filename.includes('blinkit')) {
           detectedVendor = "blinkit";
           console.log("Processing Blinkit file with multiple POs (filename detection)...");
@@ -2168,9 +2661,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else {
           // Try different parsers until one works
           const parsers = [
-            { name: "flipkart", parser: (buffer: Buffer, user: string) => parseFlipkartGroceryPO(buffer.toString('utf-8'), user) },
+            { name: "flipkart", parser: (buffer: Buffer, user: string) => parseFlipkartGroceryPO(buffer, user) },
             { name: "zepto", parser: (buffer: Buffer, user: string) => parseZeptoPO(buffer.toString('utf-8'), user) },
-            { name: "citymall", parser: (buffer: Buffer, user: string) => parseCityMallPO(buffer.toString('utf-8'), user, filename) },
+            { name: "citymall", parser: (buffer: Buffer, user: string) => parseCityMallPO(buffer, user, filename) },
             { name: "blinkit", parser: (buffer: Buffer, user: string) => {
               const result = parseBlinkitPO(buffer, user);
               // Convert multiple PO structure to single PO for fallback detection
@@ -2301,7 +2794,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
             // Clean and convert dates
             const cleanHeader = { ...po.header };
-            const dateFields = ['order_date', 'po_expiry_date', 'po_date', 'po_release_date', 'expected_delivery_date'];
+            const dateFields = ['order_date', 'po_expiry_date', 'po_date', 'po_release_date', 'expected_delivery_date', 'appointment_date', 'expiry_date', 'po_created_date', 'po_delivery_date'];
             dateFields.forEach(field => {
               if (cleanHeader[field]) {
                 cleanHeader[field] = safeConvertDate(cleanHeader[field]);
@@ -2387,7 +2880,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const cleanHeader = { ...header };
       
       // Convert all possible date fields
-      const dateFields = ['order_date', 'po_expiry_date', 'po_date', 'po_release_date', 'expected_delivery_date', 'appointment_date', 'expiry_date'];
+      const dateFields = ['order_date', 'po_expiry_date', 'po_date', 'po_release_date', 'expected_delivery_date', 'appointment_date', 'expiry_date', 'po_created_date', 'po_delivery_date'];
       dateFields.forEach(field => {
         if (cleanHeader[field]) {
           cleanHeader[field] = safeConvertDate(cleanHeader[field]);
@@ -2422,8 +2915,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create unified master data structure
       const masterData = {
         platform_id: platformMap[vendor] || 1, // Default to Blinkit if unknown
-        po_number: cleanHeader.po_number,
+        vendor_po_number: cleanHeader.po_number,
+        distributor_id: 3, // Use existing distributor ID to avoid foreign key constraint
+        series: 'IMP',
+        company_id: 1,
         po_date: cleanHeader.po_date || cleanHeader.order_date || new Date(),
+        delivery_date: cleanHeader.delivery_date || cleanHeader.po_delivery_date || null,
         expiry_date: cleanHeader.expiry_date || cleanHeader.po_expiry_date || null,
         appointment_date: cleanHeader.appointment_date || null,
         region: cleanHeader.region || 'DEFAULT',
@@ -2432,7 +2929,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         district_id: null, // Will be populated if we have district mapping
         dispatch_from: cleanHeader.dispatch_from || null,
         warehouse: cleanHeader.warehouse || null,
-        created_by: null // Use NULL instead of 'IMPORT_SYSTEM' to avoid foreign key constraint
+        created_by: 'SYSTEM', // Use 'SYSTEM' as a valid user
+        create_on: new Date()
       };
 
       // Convert line items to unified format
@@ -2469,7 +2967,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else if (vendor === 'zomato') {
           createdPo = await storage.createZomatoPo(cleanHeader, cleanLines);
         } else if (vendor === 'dealshare') {
+          console.log('🔍 DEBUG: About to create Dealshare PO with cleanHeader:', {
+            po_created_date: cleanHeader.po_created_date,
+            po_delivery_date: cleanHeader.po_delivery_date, 
+            po_expiry_date: cleanHeader.po_expiry_date,
+            po_created_date_type: typeof cleanHeader.po_created_date,
+            po_delivery_date_type: typeof cleanHeader.po_delivery_date,
+            po_expiry_date_type: typeof cleanHeader.po_expiry_date,
+            hasToISOString: cleanHeader.po_created_date?.toISOString ? 'YES' : 'NO'
+          });
           createdPo = await storage.createDealsharePo(cleanHeader, cleanLines);
+        } else if (vendor === 'amazon') {
+          console.log('📋 Creating Amazon PO:', cleanHeader.po_number);
+          createdPo = await storage.createAmazonPo(cleanHeader, cleanLines);
         } else {
           // Fallback to unified po_master table for platforms without specific methods
           createdPo = await storage.createPoInExistingTables(masterData, linesData);
@@ -2508,15 +3018,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Distributor routes
-  app.get("/api/distributors", async (_req, res) => {
-    try {
-      const distributors = await storage.getAllDistributors();
-      res.json(distributors);
-    } catch (error) {
-      console.error("Error fetching distributors:", error);
-      res.status(500).json({ message: "Failed to fetch distributors" });
-    }
-  });
 
   app.post("/api/distributors", async (req, res) => {
     try {
@@ -2804,6 +3305,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting Dealshare PO:", error);
       res.status(500).json({ error: "Failed to delete PO" });
+    }
+  });
+
+  // Amazon PO routes
+  app.get("/api/amazon-pos", async (_req, res) => {
+    try {
+      const pos = await storage.getAllAmazonPos();
+      res.json(pos);
+    } catch (error) {
+      console.error("Error fetching Amazon POs:", error);
+      res.status(500).json({ message: "Failed to fetch Amazon POs" });
+    }
+  });
+
+  app.get("/api/amazon-pos/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const po = await storage.getAmazonPoById(id);
+      if (!po) {
+        return res.status(404).json({ message: "Amazon PO not found" });
+      }
+      res.json(po);
+    } catch (error) {
+      console.error("Error fetching Amazon PO:", error);
+      res.status(500).json({ message: "Failed to fetch Amazon PO" });
+    }
+  });
+
+  app.post("/api/amazon-pos", async (req, res) => {
+    try {
+      const { header, lines } = req.body;
+      
+      if (!header || !lines) {
+        return res.status(400).json({ error: "Header and lines are required" });
+      }
+      
+      const createdPo = await storage.createAmazonPo(header, lines);
+      res.status(201).json(createdPo);
+    } catch (error) {
+      console.error("Error creating Amazon PO:", error);
+      res.status(500).json({ error: "Failed to create PO" });
+    }
+  });
+
+  app.put("/api/amazon-pos/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { header, lines } = req.body;
+      
+      const updatedPo = await storage.updateAmazonPo(id, header, lines);
+      res.json(updatedPo);
+    } catch (error) {
+      console.error("Error updating Amazon PO:", error);
+      res.status(500).json({ error: "Failed to update PO" });
+    }
+  });
+
+  app.delete("/api/amazon-pos/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteAmazonPo(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting Amazon PO:", error);
+      res.status(500).json({ error: "Failed to delete PO" });
+    }
+  });
+
+  app.put("/api/bigbasket-pos/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { header, lines } = req.body;
+      
+      const updatedPo = await storage.updateBigbasketPo(id, header, lines);
+      res.json(updatedPo);
+    } catch (error) {
+      console.error("Error updating BigBasket PO:", error);
+      res.status(500).json({ error: "Failed to update PO" });
     }
   });
 
@@ -4805,7 +5384,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const executionTime = Math.round(performance.now() - startTime);
 
       // Format results for frontend consumption
-      const columns = result.fields ? result.fields.map(field => field.name) : [];
+      console.log('Query result structure:', {
+        fields: result.fields?.map(f => ({ name: f.name, type: f.dataTypeID })),
+        rowCount: result.rows.length,
+        firstRowKeys: result.rows[0] ? Object.keys(result.rows[0]) : [],
+        firstRow: result.rows[0]
+      });
+      
+      // Get columns from result.fields if available, otherwise from first row keys
+      const columns = result.fields && result.fields.length > 0 
+        ? result.fields.map(field => field.name) 
+        : (result.rows.length > 0 ? Object.keys(result.rows[0]) : []);
+      
       const rows = result.rows.map(row => 
         columns.map(col => row[col] ?? null)
       );
@@ -5076,18 +5666,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/agent/health", healthCheckAgent);
   app.post("/api/agent/validate-po", validatePOAgent);
 
-  // SQL Server Routes - Direct database operations
-  app.get("/api/sql/health", sqlHealthCheck);
-  app.get("/api/sql/status", getSqlStatus);
-  app.get("/api/sql/items", getItemDetails);
-  app.get("/api/sql/hana-items", getHanaItems);
-  app.post("/api/sql/search-hana-items", searchHanaItems);
-  app.post("/api/sql/search-items", searchItems);
-  app.get("/api/sql/platform-items", getPlatformItems);
-  app.post("/api/sql/query", executeQuery);
-  app.post("/api/sql/stored-procedure", executeStoredProcedure);
-  app.get("/api/sql/table-info", getTableInfo);
-  app.get("/api/sql/performance", getPerformanceStats);
+  // SQL Server Routes - Direct database operations (Admin only)
+  app.get("/api/sql/health", requirePermission('sql_access'), sqlHealthCheck);
+  app.get("/api/sql/status", requirePermission('sql_access'), getSqlStatus);
+  app.get("/api/sql/items", requirePermission('sql_access'), getItemDetails);
+  app.get("/api/sql/hana-items", requirePermission('sql_access'), getHanaItems);
+  app.post("/api/sql/search-hana-items", requirePermission('sql_access'), searchHanaItems);
+  app.post("/api/sql/search-items", requirePermission('sql_access'), searchItems);
+  app.get("/api/sql/platform-items", requirePermission('sql_access'), getPlatformItems);
+  app.post("/api/sql/query", requirePermission('sql_access'), executeQuery);
+  app.post("/api/sql/stored-procedure", requirePermission('sql_access'), executeStoredProcedure);
+  app.get("/api/sql/table-info", requirePermission('sql_access'), getTableInfo);
+  app.get("/api/sql/performance", requirePermission('sql_access'), getPerformanceStats);
 
   // HANA Test Routes
   app.get("/api/hana/test-connection", testHanaConnection);
@@ -5207,6 +5797,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error removing permission from role:", error);
       res.status(500).json({ error: "Failed to remove permission from role" });
+    }
+  });
+
+  // Initialize RBAC data
+  app.post('/api/admin/setup-rbac', async (req, res) => {
+    try {
+      const result = await setupRBACData();
+      res.json(result);
+    } catch (error) {
+      console.error('Error setting up RBAC:', error);
+      res.status(500).json({ success: false, error: 'Failed to setup RBAC' });
+    }
+  });
+
+  // Setup user management routes
+  setupUserManagementRoutes(app);
+  setupLogsRoutes(app);
+
+  // Admin endpoint to fix City Mall line items
+  app.post("/api/admin/fix-city-mall-lines", async (req, res) => {
+    try {
+      console.log('🔧 Admin: Fixing City Mall line items...');
+      
+      const { eq, isNull } = await import("drizzle-orm");
+      const { cityMallPoHeader, cityMallPoLines } = await import("@shared/schema");
+      
+      // Check current state
+      const orphanedLines = await db.select().from(cityMallPoLines).where(isNull(cityMallPoLines.po_header_id));
+      console.log(`📊 Found ${orphanedLines.length} orphaned line items`);
+      
+      if (orphanedLines.length === 0) {
+        return res.json({ success: true, message: 'No orphaned line items found' });
+      }
+      
+      // Get the City Mall header for PO 1178920
+      const headers = await db.select().from(cityMallPoHeader).where(eq(cityMallPoHeader.po_number, '1178920'));
+      
+      if (headers.length === 0) {
+        return res.status(404).json({ success: false, message: 'City Mall header not found' });
+      }
+      
+      const headerId = headers[0].id;
+      console.log(`🔧 Linking ${orphanedLines.length} orphaned lines to header ID ${headerId}`);
+      
+      // Update orphaned lines
+      const result = await db.update(cityMallPoLines)
+        .set({ po_header_id: headerId })
+        .where(isNull(cityMallPoLines.po_header_id));
+      
+      console.log(`✅ Updated line items for City Mall PO ${headers[0].po_number}`);
+      
+      res.json({ 
+        success: true, 
+        message: `Fixed ${orphanedLines.length} line items`,
+        headerId: headerId,
+        poNumber: headers[0].po_number
+      });
+      
+    } catch (error) {
+      console.error('❌ Error fixing City Mall lines:', error);
+      res.status(500).json({ success: false, error: (error as Error).message });
     }
   });
 
