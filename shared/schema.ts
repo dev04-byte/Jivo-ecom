@@ -366,20 +366,62 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   userSessions: many(userSessions)
 }));
 
-// Log Master Table for tracking user edits and changes
+// Enhanced Log Master Table for comprehensive tracking
 export const logMaster = pgTable("log_master", {
   id: serial("id").primaryKey(),
   user_id: integer("user_id").references(() => users.id),
   username: varchar("username", { length: 100 }).notNull(),
-  action: varchar("action", { length: 50 }).notNull(), // 'CREATE', 'UPDATE', 'DELETE'
+  user_role: varchar("user_role", { length: 50 }),
+  action: varchar("action", { length: 50 }).notNull(), // 'CREATE', 'UPDATE', 'DELETE', 'VIEW', 'EXPORT', 'UPLOAD', 'DOWNLOAD'
+  module: varchar("module", { length: 50 }).notNull(), // 'PLATFORM_PO', 'DISTRIBUTOR_PO', 'USER_MGMT', 'INVENTORY', etc.
+  sub_module: varchar("sub_module", { length: 50 }), // 'PO_HEADER', 'PO_ITEMS', 'ATTACHMENTS', etc.
   table_name: varchar("table_name", { length: 100 }).notNull(),
   record_id: integer("record_id").notNull(),
   field_name: varchar("field_name", { length: 100 }),
   old_value: text("old_value"),
   new_value: text("new_value"),
+  description: text("description"), // Human readable description
+  severity: varchar("severity", { length: 20 }).default('INFO'), // 'INFO', 'WARN', 'ERROR', 'CRITICAL'
   ip_address: varchar("ip_address", { length: 45 }),
   user_agent: text("user_agent"),
   session_id: varchar("session_id", { length: 100 }),
+  request_id: varchar("request_id", { length: 100 }), // For tracing related operations
+  additional_data: text("additional_data"), // JSON string for complex data
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+  created_at: timestamp("created_at").defaultNow()
+});
+
+// PO Activity Log Table for detailed PO operations tracking
+export const poActivityLog = pgTable("po_activity_log", {
+  id: serial("id").primaryKey(),
+  po_id: integer("po_id").notNull(),
+  po_type: varchar("po_type", { length: 20 }).notNull(), // 'PLATFORM', 'DISTRIBUTOR'
+  po_number: varchar("po_number", { length: 100 }).notNull(),
+  platform_name: varchar("platform_name", { length: 100 }),
+  activity_type: varchar("activity_type", { length: 50 }).notNull(), // 'CREATED', 'UPDATED', 'STATUS_CHANGED', 'ITEM_ADDED', 'ITEM_REMOVED', 'ATTACHMENT_UPLOADED'
+  field_changed: varchar("field_changed", { length: 100 }),
+  old_value: text("old_value"),
+  new_value: text("new_value"),
+  user_id: integer("user_id").references(() => users.id),
+  username: varchar("username", { length: 100 }).notNull(),
+  user_role: varchar("user_role", { length: 50 }),
+  description: text("description").notNull(),
+  ip_address: varchar("ip_address", { length: 45 }),
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+  created_at: timestamp("created_at").defaultNow()
+});
+
+// System Performance Log for monitoring
+export const systemPerformanceLog = pgTable("system_performance_log", {
+  id: serial("id").primaryKey(),
+  endpoint: varchar("endpoint", { length: 200 }).notNull(),
+  method: varchar("method", { length: 10 }).notNull(),
+  response_time_ms: integer("response_time_ms").notNull(),
+  status_code: integer("status_code").notNull(),
+  user_id: integer("user_id").references(() => users.id),
+  error_message: text("error_message"),
+  request_size: integer("request_size"),
+  response_size: integer("response_size"),
   timestamp: timestamp("timestamp").defaultNow().notNull(),
   created_at: timestamp("created_at").defaultNow()
 });
@@ -1081,6 +1123,98 @@ export type DealsharePoHeader = typeof dealsharePoHeader.$inferSelect;
 export type InsertDealsharePoHeader = z.infer<typeof insertDealsharePoHeaderSchema>;
 export type DealsharePoItems = typeof dealsharePoItems.$inferSelect;
 export type InsertDealsharePoItems = z.infer<typeof insertDealsharePoItemsSchema>;
+
+// Amazon PO Header Table
+export const amazonPoHeader = pgTable("amazon_po_header", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  po_number: varchar("po_number", { length: 100 }).notNull().unique(),
+  po_date: timestamp("po_date"),
+  delivery_date: timestamp("delivery_date"),
+  delivery_window_start: timestamp("delivery_window_start"),
+  delivery_window_end: timestamp("delivery_window_end"),
+  vendor_code: varchar("vendor_code", { length: 50 }),
+  vendor_name: text("vendor_name"),
+  vendor_address: text("vendor_address"),
+  vendor_gstin: varchar("vendor_gstin", { length: 20 }),
+  ship_to_location: text("ship_to_location"),
+  ship_to_address: text("ship_to_address"),
+  ship_to_gstin: varchar("ship_to_gstin", { length: 20 }),
+  bill_to_location: text("bill_to_location"),
+  bill_to_address: text("bill_to_address"),
+  bill_to_gstin: varchar("bill_to_gstin", { length: 20 }),
+  payment_terms: varchar("payment_terms", { length: 100 }),
+  currency: varchar("currency", { length: 10 }).default("INR"),
+  total_items: integer("total_items").default(0),
+  total_quantity: integer("total_quantity").default(0),
+  total_base_amount: decimal("total_base_amount", { precision: 15, scale: 2 }).default("0"),
+  total_tax_amount: decimal("total_tax_amount", { precision: 15, scale: 2 }).default("0"),
+  total_amount: decimal("total_amount", { precision: 15, scale: 2 }).default("0"),
+  status: varchar("status", { length: 50 }).default("pending"),
+  created_by: varchar("created_by", { length: 100 }),
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow()
+});
+
+// Amazon PO Lines Table
+export const amazonPoLines = pgTable("amazon_po_lines", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  po_header_id: integer("po_header_id").notNull().references(() => amazonPoHeader.id, { onDelete: "cascade" }),
+  line_number: integer("line_number").notNull(),
+  asin: varchar("asin", { length: 50 }),
+  sku: varchar("sku", { length: 100 }),
+  external_id: varchar("external_id", { length: 100 }),
+  item_name: text("item_name"),
+  item_description: text("item_description"),
+  hsn_code: varchar("hsn_code", { length: 20 }),
+  category: varchar("category", { length: 100 }),
+  brand: varchar("brand", { length: 100 }),
+  model_number: varchar("model_number", { length: 50 }),
+  quantity: integer("quantity").default(0),
+  unit_price: decimal("unit_price", { precision: 15, scale: 2 }).default("0"),
+  base_amount: decimal("base_amount", { precision: 15, scale: 2 }).default("0"),
+  tax_rate: decimal("tax_rate", { precision: 5, scale: 2 }).default("0"),
+  tax_amount: decimal("tax_amount", { precision: 15, scale: 2 }).default("0"),
+  discount_percent: decimal("discount_percent", { precision: 5, scale: 2 }).default("0"),
+  discount_amount: decimal("discount_amount", { precision: 15, scale: 2 }).default("0"),
+  line_total: decimal("line_total", { precision: 15, scale: 2 }).default("0"),
+  delivery_date: timestamp("delivery_date"),
+  window_type: varchar("window_type", { length: 50 }),
+  window_start: varchar("window_start", { length: 20 }),
+  window_end: varchar("window_end", { length: 20 }),
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow()
+});
+
+// Relations for Amazon PO
+export const amazonPoHeaderRelations = relations(amazonPoHeader, ({ many }) => ({
+  lines: many(amazonPoLines),
+}));
+
+export const amazonPoLinesRelations = relations(amazonPoLines, ({ one }) => ({
+  header: one(amazonPoHeader, {
+    fields: [amazonPoLines.po_header_id],
+    references: [amazonPoHeader.id],
+  }),
+}));
+
+// Insert schemas for Amazon PO tables
+export const insertAmazonPoHeaderSchema = createInsertSchema(amazonPoHeader).omit({
+  id: true,
+  created_at: true,
+  updated_at: true
+});
+
+export const insertAmazonPoLinesSchema = createInsertSchema(amazonPoLines).omit({
+  id: true,
+  po_header_id: true,
+  created_at: true,
+  updated_at: true
+});
+
+export type AmazonPoHeader = typeof amazonPoHeader.$inferSelect;
+export type InsertAmazonPoHeader = z.infer<typeof insertAmazonPoHeaderSchema>;
+export type AmazonPoLines = typeof amazonPoLines.$inferSelect;
+export type InsertAmazonPoLines = z.infer<typeof insertAmazonPoLinesSchema>;
 
 // Secondary Sales Header Table
 export const secondarySalesHeader = pgTable("secondary_sales_header", {
@@ -2726,6 +2860,10 @@ export type InsertStatusItem = typeof statusItem.$inferInsert;
 // Types for logging
 export type LogMaster = typeof logMaster.$inferSelect;
 export type InsertLogMaster = z.infer<typeof insertLogMasterSchema>;
+export type POActivityLog = typeof poActivityLog.$inferSelect;
+export type InsertPOActivityLog = typeof poActivityLog.$inferInsert;
+export type SystemPerformanceLog = typeof systemPerformanceLog.$inferSelect;
+export type InsertSystemPerformanceLog = typeof systemPerformanceLog.$inferInsert;
 
 // Types for original tables
 export type States = typeof states.$inferSelect;
