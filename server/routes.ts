@@ -1259,6 +1259,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Debug endpoint for Blinkit parser testing
+  app.post("/api/debug/blinkit-parser", upload.single('file'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded for debugging" });
+      }
+
+      console.log("🔍 BLINKIT DEBUG: Starting parser test...");
+      console.log("🔍 File details:", { 
+        name: req.file.originalname, 
+        size: req.file.size,
+        mimetype: req.file.mimetype 
+      });
+
+      const uploadedBy = "debug-test";
+      const result = parseBlinkitPO(req.file.buffer, uploadedBy);
+      
+      console.log("🔍 BLINKIT DEBUG: Parser completed successfully");
+      
+      res.json({
+        success: true,
+        summary: {
+          totalPOs: result.poList.length,
+          totalItems: result.poList.reduce((sum, po) => sum + po.lines.length, 0),
+          firstPOPreview: result.poList[0] ? {
+            poNumber: result.poList[0].header.po_number,
+            totalQuantity: result.poList[0].header.total_quantity,
+            lineCount: result.poList[0].lines.length,
+            firstLinePreview: result.poList[0].lines[0] ? {
+              item_code: result.poList[0].lines[0].item_code,
+              product_description: result.poList[0].lines[0].product_description,
+              quantity: result.poList[0].lines[0].quantity,
+              total_amount: result.poList[0].lines[0].total_amount
+            } : null
+          } : null
+        },
+        fullResult: result
+      });
+
+    } catch (error) {
+      console.error("🔥 BLINKIT DEBUG ERROR:", error);
+      res.status(500).json({ 
+        error: "Blinkit parser debug failed", 
+        details: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+    }
+  });
+
   // Export single PO with all details
   // Debug endpoint to check Amazon data directly
   app.get("/api/debug/amazon/:id", async (req, res) => {

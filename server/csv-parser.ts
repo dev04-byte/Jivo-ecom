@@ -822,9 +822,8 @@ export function parseBlinkitPO(fileContent: Buffer, uploadedBy: string): {
         const cellValue = row[index] || '';
         obj[header] = cellValue.toString().trim();
       });
-      // Add debug info for troubleshooting
+      // Add debug info for troubleshooting (will be filtered out later)
       obj._debug_row_index = dataStartRow + rowIndex + 1;
-      obj._debug_original_row = row;
       return obj;
     }).filter((row, index) => {
       // More lenient row filtering - keep rows with any meaningful content
@@ -903,17 +902,51 @@ export function parseBlinkitPO(fileContent: Buffer, uploadedBy: string): {
   const requiredFields = ['item_id', 'name', 'remaining_quantity'];
   const missingFields = requiredFields.filter(field => !headerMap[field]);
   
-  console.log('Header mapping result:', headerMap);
-  console.log('Missing fields:', missingFields);
+  console.log('🔍 BLINKIT: Header mapping result:', headerMap);
+  console.log('🔍 BLINKIT: Missing fields:', missingFields);
+  console.log('🔍 BLINKIT: Available headers:', headers);
   
   if (missingFields.length > 0) {
-    // If we're missing critical fields, provide more helpful error message
-    const suggestions = missingFields.map(field => {
-      const variations = headerMappings[field as keyof typeof headerMappings];
-      return `${field} (expected one of: ${variations.join(', ')})`;
-    });
+    // Try more flexible matching for missing fields
+    const flexibleMatches: { [key: string]: string } = {};
     
-    throw new Error(`Missing required fields: ${suggestions.join(' | ')}. Available headers: ${headers.join(', ')}. Please check if your file has the correct column names.`);
+    for (const missingField of missingFields) {
+      // Try partial matching for field names
+      const partialMatch = headers.find(header => {
+        const lowerHeader = header.toLowerCase();
+        if (missingField === 'item_id') {
+          return lowerHeader.includes('item') || lowerHeader.includes('product') || lowerHeader.includes('sku') || lowerHeader.includes('code');
+        } else if (missingField === 'name') {
+          return lowerHeader.includes('name') || lowerHeader.includes('description') || lowerHeader.includes('title');
+        } else if (missingField === 'remaining_quantity') {
+          return lowerHeader.includes('qty') || lowerHeader.includes('quantity') || lowerHeader.includes('order');
+        }
+        return false;
+      });
+      
+      if (partialMatch) {
+        console.log(`🔍 BLINKIT: Found flexible match for ${missingField}: ${partialMatch}`);
+        headerMap[missingField] = partialMatch;
+        flexibleMatches[missingField] = partialMatch;
+      }
+    }
+    
+    // Check again after flexible matching
+    const stillMissingFields = requiredFields.filter(field => !headerMap[field]);
+    
+    if (stillMissingFields.length > 0) {
+      // If we're still missing critical fields, provide more helpful error message
+      const suggestions = stillMissingFields.map(field => {
+        const variations = headerMappings[field as keyof typeof headerMappings];
+        return `${field} (expected one of: ${variations.join(', ')})`;
+      });
+      
+      throw new Error(`Missing required fields: ${suggestions.join(' | ')}. Available headers: ${headers.join(', ')}. Please check if your file has the correct column names.`);
+    } else {
+      console.log('✅ BLINKIT: All required fields found using flexible matching:', flexibleMatches);
+    }
+  } else {
+    console.log('✅ BLINKIT: All required fields found with exact matching');
   }
 
   // Group rows by PO number (generate one if missing)
@@ -1013,9 +1046,7 @@ export function parseBlinkitPO(fileContent: Buffer, uploadedBy: string): {
         margin_percent: (Number(row['margin_percentage'] || row['margin'] || 0)).toString(),
         total_amount: lineTotal.toString(),
         status: String(row['po_state'] || row['status'] || "Active"),
-        created_by: uploadedBy,
-        // Preserve original row data for debugging
-        _debug_original_data: JSON.stringify(row).slice(0, 500)
+        created_by: uploadedBy
       };
     });
 
