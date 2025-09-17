@@ -1,0 +1,98 @@
+{
+  "method": "POST",
+  "url": "http://localhost:5000/api/unified-po/upload",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "platform": "blinkit",
+    "pdfData": {
+      "orderDetails": {
+        "poNumber": "BL_COMPLETE_TEST_1758112895299",
+        "date": "September 17, 2024",
+        "poType": "PO",
+        "currency": "INR",
+        "vendorNo": "1272",
+        "paymentTerms": "30 Days",
+        "expiryDate": "September 24, 2024",
+        "deliveryDate": "September 20, 2024"
+      },
+      "vendor": {
+        "company": "JIVO MART PRIVATE LIMITED",
+        "pan": "AAFCJ4102J",
+        "gst": "07AAFCJ4102J1ZS",
+        "address": "J-3/190, S/F RAJOURI GARDEN, NEW DELHI - 110027",
+        "contact": "TANUJ KESWANI",
+        "phone": "91-9818805452",
+        "email": "marketplace@jivo.in"
+      },
+      "buyer": {
+        "company": "HANDS ON TRADES PRIVATE LIMITED",
+        "pan": "AADCH7038R",
+        "cin": "U51909DL2015FTC285808",
+        "address": "Khasra No. 274 Gha and 277 Cha Kuanwala, PO Harrawala, Dehradun",
+        "gst": "05AADCH7038R1Z3",
+        "contact": "Durgesh Giri",
+        "phone": "+91 9068342018"
+      },
+      "items": [
+        {
+          "itemCode": "JIVO_ORANGE_1L",
+          "hsnCode": "22029020",
+          "productUPC": "UPC123456789",
+          "productDescription": "Jivo Wellness Drink Orange (1 l)",
+          "basicCostPrice": 295,
+          "igstPercent": 12,
+          "cessPercent": 0,
+          "addtCess": 0,
+          "taxAmount": 35.4,
+          "landingRate": 330.4,
+          "quantity": 100,
+          "mrp": 400,
+          "marginPercent": 21.15,
+          "totalAmount": 33040
+        },
+        {
+          "itemCode": "JIVO_CRANBERRY_1L",
+          "hsnCode": "22029020",
+          "productUPC": "UPC987654321",
+          "productDescription": "Jivo Wellness Drink Cranberry (1 l)",
+          "basicCostPrice": 295,
+          "igstPercent": 12,
+          "cessPercent": 0,
+          "addtCess": 0,
+          "taxAmount": 35.4,
+          "landingRate": 330.4,
+          "quantity": 75,
+          "mrp": 400,
+          "marginPercent": 21.15,
+          "totalAmount": 24780
+        },
+        {
+          "itemCode": "JIVO_MANGO_1L",
+          "hsnCode": "22029020",
+          "productUPC": "UPC555666777",
+          "productDescription": "Jivo Wellness Drink Mango (1 l)",
+          "basicCostPrice": 295,
+          "igstPercent": 12,
+          "cessPercent": 0,
+          "addtCess": 0,
+          "taxAmount": 35.4,
+          "landingRate": 330.4,
+          "quantity": 50,
+          "mrp": 400,
+          "marginPercent": 21.15,
+          "totalAmount": 16520
+        }
+      ],
+      "summary": {
+        "totalQuantity": 225,
+        "totalItems": 3,
+        "totalWeight": "0.225",
+        "totalAmount": 74340,
+        "cartDiscount": 0,
+        "netAmount": 74340
+      }
+    }
+  }
+}
