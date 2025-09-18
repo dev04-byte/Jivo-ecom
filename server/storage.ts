@@ -487,32 +487,31 @@ export interface IStorage {
   sessionStore: session.Store;
 }
 
-import connectPgSimple from "connect-pg-simple";
 import session from "express-session";
-import { pool } from "./db";
+import MemoryStore from "memorystore";
 
-const PostgresSessionStore = connectPgSimple(session);
+// Use MemoryStore instead of PostgreSQL session store for SQL Server compatibility
+const MemorySessionStore = MemoryStore(session);
 
 export class DatabaseStorage implements IStorage {
   sessionStore: session.Store;
-  
+
   // Helper method to map status ID to status name
   private mapStatusIdToName(statusId: number): string {
     const statusMap: Record<number, string> = {
       1: 'OPEN',
       2: 'PENDING',
-      3: 'IN_PROGRESS', 
+      3: 'IN_PROGRESS',
       4: 'COMPLETED',
       5: 'CLOSED',
       6: 'CANCELLED'
     };
     return statusMap[statusId] || 'OPEN';
   }
-  
+
   constructor() {
-    this.sessionStore = new PostgresSessionStore({
-      pool: pool as any,
-      createTableIfMissing: true,
+    this.sessionStore = new MemorySessionStore({
+      checkPeriod: 86400000, // Prune expired entries every 24h
     });
   }
   // Enhanced user methods with session store
