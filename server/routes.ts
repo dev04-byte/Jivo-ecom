@@ -1,8 +1,9 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { callSpGetItemDetails, callSpGetItemNames } from "./sqlserver";
-import { sqlServerService } from "./sql-service";
+// Commented out for Render PostgreSQL deployment - these services connect to SQL Server
+// import { callSpGetItemDetails, callSpGetItemNames } from "./sqlserver";
+// import { sqlServerService } from "./sql-service";
 import { setupAuth } from "./auth";
 import { 
   createPurchaseOrderAgent,
@@ -13,19 +14,20 @@ import {
   healthCheckAgent,
   validatePOAgent
 } from "./agent-routes";
-import {
-  sqlHealthCheck,
-  getSqlStatus,
-  getItemDetails,
-  getHanaItems,
-  searchHanaItems,
-  searchItems,
-  getPlatformItems,
-  executeQuery,
-  executeStoredProcedure,
-  getTableInfo,
-  getPerformanceStats
-} from "./sql-routes";
+// Commented out SQL Server routes for Render PostgreSQL deployment
+// import {
+//   sqlHealthCheck,
+//   getSqlStatus,
+//   getItemDetails,
+//   getHanaItems,
+//   searchHanaItems,
+//   searchItems,
+//   getPlatformItems,
+//   executeQuery,
+//   executeStoredProcedure,
+//   getTableInfo,
+//   getPerformanceStats
+// } from "./sql-routes";
 import {
   testHanaConnection,
   testStoredProcedure,
@@ -689,8 +691,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log("=== Starting items sync from HANA ===");
       
-      // Get items from HANA via stored procedure
-      const hanaResult = await sqlServerService.getItemDetails();
+      // Get items from HANA via stored procedure - COMMENTED OUT for Render deployment
+      // const hanaResult = await sqlServerService.getItemDetails();
+
+      // For Render PostgreSQL deployment, return mock success response
+      const hanaResult = { success: false, data: null };
       
       if (!hanaResult.success || !hanaResult.data) {
         console.warn("Failed to get items from HANA, using local data");
@@ -728,9 +733,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Clear existing items if any
       console.log("🧹 Clearing existing items table...");
       
-      // Get all items from HANA via stored procedure
+      // Get all items from HANA via stored procedure - COMMENTED OUT for Render deployment
       console.log("📞 Calling SP_GET_ITEM_DETAILS stored procedure...");
-      const hanaResult = await sqlServerService.getItemDetails();
+      // const hanaResult = await sqlServerService.getItemDetails();
+
+      // For Render PostgreSQL deployment, return mock failure response
+      const hanaResult = { success: false, data: null };
       
       if (!hanaResult.success || !hanaResult.data) {
         console.error("❌ Failed to get items from HANA:", hanaResult.error);
@@ -5273,18 +5281,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/agent/health", healthCheckAgent);
   app.post("/api/agent/validate-po", validatePOAgent);
 
-  // SQL Server Routes - Direct database operations
-  app.get("/api/sql/health", sqlHealthCheck);
-  app.get("/api/sql/status", getSqlStatus);
-  app.get("/api/sql/items", getItemDetails);
-  app.get("/api/sql/hana-items", getHanaItems);
-  app.post("/api/sql/search-hana-items", searchHanaItems);
-  app.post("/api/sql/search-items", searchItems);
-  app.get("/api/sql/platform-items", getPlatformItems);
-  app.post("/api/sql/query", executeQuery);
-  app.post("/api/sql/stored-procedure", executeStoredProcedure);
-  app.get("/api/sql/table-info", getTableInfo);
-  app.get("/api/sql/performance", getPerformanceStats);
+  // SQL Server Routes - COMMENTED OUT for Render PostgreSQL deployment
+  // app.get("/api/sql/health", sqlHealthCheck);
+  // app.get("/api/sql/status", getSqlStatus);
+  // app.get("/api/sql/items", getItemDetails);
+  // app.get("/api/sql/hana-items", getHanaItems);
+  // app.post("/api/sql/search-hana-items", searchHanaItems);
+  // app.post("/api/sql/search-items", searchItems);
+  // app.get("/api/sql/platform-items", getPlatformItems);
+  // app.post("/api/sql/query", executeQuery);
+  // app.post("/api/sql/stored-procedure", executeStoredProcedure);
+  // app.get("/api/sql/table-info", getTableInfo);
+  // app.get("/api/sql/performance", getPerformanceStats);
 
   // HANA Test Routes
   app.get("/api/hana/test-connection", testHanaConnection);

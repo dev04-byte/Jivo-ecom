@@ -117,7 +117,7 @@ const parseDate = (value: string | Date | undefined): Date | null => {
 
 export const insertZeptoPoToDatabase = async (data: ParsedZeptoPO): Promise<{ success: boolean; message: string; data?: any }> => {
   try {
-    console.log('🔄 Starting Zepto PO database insertion with SQL Server support...');
+    console.log('🔄 Starting Zepto PO database insertion with PostgreSQL support...');
     console.log('📦 Raw header data:', JSON.stringify(data.header, null, 2));
 
     // Create header object with all available columns matching the database schema
