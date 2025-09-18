@@ -28,13 +28,14 @@ import {
 //   getTableInfo,
 //   getPerformanceStats
 // } from "./sql-routes";
-import {
-  testHanaConnection,
-  testStoredProcedure,
-  getHanaItems as getHanaItemsTest,
-  searchHanaItems as searchHanaItemsTest,
-  executeRawProcedure
-} from "./hana-test-routes";
+// Commented out for Render PostgreSQL deployment - these routes connect to SQL Server
+// import {
+//   testHanaConnection,
+//   testStoredProcedure,
+//   getHanaItems as getHanaItemsTest,
+//   searchHanaItems as searchHanaItemsTest,
+//   executeRawProcedure
+// } from "./hana-test-routes";
 
 import { insertPfPoSchema, insertPfOrderItemsSchema, insertFlipkartGroceryPoHeaderSchema, insertFlipkartGroceryPoLinesSchema, insertDistributorMstSchema, insertDistributorPoSchema, insertDistributorOrderItemsSchema, insertPoMasterSchema, insertPoLinesSchema, distributors } from "@shared/schema";
 import { z } from "zod";
@@ -5294,12 +5295,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // app.get("/api/sql/table-info", getTableInfo);
   // app.get("/api/sql/performance", getPerformanceStats);
 
-  // HANA Test Routes
-  app.get("/api/hana/test-connection", testHanaConnection);
-  app.get("/api/hana/test-procedure", testStoredProcedure);
-  app.get("/api/hana/items", getHanaItemsTest);
-  app.post("/api/hana/search", searchHanaItemsTest);
-  app.get("/api/hana/raw-procedure", executeRawProcedure);
+  // HANA Test Routes - Commented out for Render PostgreSQL deployment
+  // app.get("/api/hana/test-connection", testHanaConnection);
+  // app.get("/api/hana/test-procedure", testStoredProcedure);
+  // app.get("/api/hana/items", getHanaItemsTest);
+  // app.post("/api/hana/search", searchHanaItemsTest);
+  // app.get("/api/hana/raw-procedure", executeRawProcedure);
 
   // RBAC Routes - User Management and Permissions
   app.get("/api/roles", async (req, res) => {
