@@ -75,6 +75,7 @@ export default function PODetails() {
   };
 
   const getStatusBadgeVariant = (status: string) => {
+    if (!status) return 'default';
     switch (status.toLowerCase()) {
       case 'open': return 'default';
       case 'closed': return 'secondary';
@@ -86,9 +87,11 @@ export default function PODetails() {
   };
 
   const calculatePOTotals = (items: PfOrderItems[]) => {
-    const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+    const totalQuantity = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
     const totalValue = items.reduce((sum, item) => {
-      return sum + (parseFloat(item.landing_rate) * item.quantity);
+      const rate = parseFloat(item.landing_rate || '0');
+      const qty = item.quantity || 0;
+      return sum + (isNaN(rate) ? 0 : rate * qty);
     }, 0);
     return { totalQuantity, totalValue };
   };
@@ -144,7 +147,7 @@ export default function PODetails() {
                 {po.po_number}
               </h1>
               <p className="text-gray-600 dark:text-gray-300 mt-1">
-                {po.platform.pf_name} • Created {format(new Date(po.order_date), 'MMM dd, yyyy')}
+                {po.platform.pf_name} • Created {format(new Date(po.order_date || po.po_date), 'MMM dd, yyyy')}
               </p>
             </div>
             <Badge 
@@ -185,36 +188,22 @@ export default function PODetails() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-gray-500">Order Date</p>
-                    <div className="flex items-center">
-                      <Calendar className="mr-2 h-4 w-4 text-gray-400" />
-                      <span className="font-semibold">{format(new Date(po.order_date), 'MMM dd, yyyy')}</span>
+                  {/* Show all actual Blinkit table columns */}
+                  {Object.entries(po).filter(([key, value]) =>
+                    key !== 'platform' &&
+                    key !== 'orderItems' &&
+                    key !== 'poLines' &&
+                    value !== null &&
+                    value !== undefined &&
+                    value !== ''
+                  ).map(([key, value]) => (
+                    <div key={key} className="space-y-1">
+                      <p className="text-sm font-medium text-gray-500 capitalize">{key.replace(/_/g, ' ')}</p>
+                      <div className="flex items-center">
+                        <span className="font-semibold text-sm break-words">{String(value)}</span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-gray-500">Expiry Date</p>
-                    <div className="flex items-center">
-                      <Clock className="mr-2 h-4 w-4 text-gray-400" />
-                      <span className="font-semibold">
-                        {po.expiry_date ? format(new Date(po.expiry_date), 'MMM dd, yyyy') : 'Not set'}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-gray-500">Location</p>
-                    <div className="flex items-center">
-                      <MapPin className="mr-2 h-4 w-4 text-gray-400" />
-                      <span className="font-semibold">{po.city}, {po.state}</span>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-gray-500">Distributor</p>
-                    <div className="flex items-center">
-                      <Building className="mr-2 h-4 w-4 text-gray-400" />
-                      <span className="font-semibold">{po.serving_distributor || 'Not assigned'}</span>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
@@ -223,7 +212,7 @@ export default function PODetails() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <DollarSign className="mr-2 h-5 w-5" />
+                  <Package className="mr-2 h-5 w-5" />
                   Order Summary
                 </CardTitle>
               </CardHeader>
@@ -261,37 +250,21 @@ export default function PODetails() {
                   </div>
                 ) : (
                   <>
-                    {/* Header */}
-                    <div className="grid grid-cols-12 gap-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg font-medium text-sm">
-                      <div className="col-span-4">Item Name</div>
-                      <div className="col-span-2 text-center">Quantity</div>
-                      <div className="col-span-2 text-center">Landing Rate</div>
-                      <div className="col-span-2 text-center">Total</div>
-                      <div className="col-span-2 text-center">Status</div>
-                    </div>
-                    
-                    {/* Items */}
-                    {po.orderItems.map((item) => (
-                      <div key={item.id} className="grid grid-cols-12 gap-4 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                        <div className="col-span-4">
-                          <p className="font-medium">{item.item_name}</p>
-                          {item.hsn_code && (
-                            <p className="text-sm text-gray-500">HSN: {item.hsn_code}</p>
-                          )}
-                        </div>
-                        <div className="col-span-2 text-center">
-                          <span className="font-semibold">{item.quantity}</span>
-                        </div>
-                        <div className="col-span-2 text-center">
-                          <span className="font-semibold">₹{parseFloat(item.landing_rate).toFixed(2)}</span>
-                        </div>
-                        <div className="col-span-2 text-center">
-                          <span className="font-semibold">₹{(parseFloat(item.landing_rate) * item.quantity).toFixed(2)}</span>
-                        </div>
-                        <div className="col-span-2 text-center">
-                          <Badge variant="outline" className="text-xs">
-                            Active
-                          </Badge>
+                    {/* Show all columns dynamically */}
+                    {po.orderItems.map((item, index) => (
+                      <div key={item.id || index} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3">
+                        <h4 className="font-medium text-lg">Item {index + 1}</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {Object.entries(item).filter(([key, value]) =>
+                            value !== null &&
+                            value !== undefined &&
+                            value !== ''
+                          ).map(([key, value]) => (
+                            <div key={key} className="space-y-1">
+                              <p className="text-sm font-medium text-gray-500 capitalize">{key.replace(/_/g, ' ')}</p>
+                              <p className="font-semibold text-sm break-words">{String(value)}</p>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     ))}

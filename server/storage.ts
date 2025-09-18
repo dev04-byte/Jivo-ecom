@@ -667,6 +667,49 @@ export class DatabaseStorage implements IStorage {
     // PRIORITY 1: Fetch platform-specific POs first (original data)
     // This ensures we show exact data from each platform's tables
 
+    // Fetch Zepto POs from zepto_po_header (original Zepto data)
+    try {
+      const zeptoPos = await this.getAllZeptoPos();
+      console.log(`📊 getAllPos: Found ${zeptoPos.length} Zepto POs from zepto_po_header (original data)`);
+
+      for (const zeptoPo of zeptoPos) {
+        // Use original Zepto data exactly as uploaded
+        const originalZeptoPo = {
+          id: zeptoPo.id,
+          po_number: zeptoPo.po_number,
+          po_date: zeptoPo.po_date,
+          platform: { id: 3, pf_name: "Zepto" },
+          status: zeptoPo.status || 'Active',
+          created_at: zeptoPo.created_at,
+          updated_at: zeptoPo.updated_at,
+          order_date: zeptoPo.po_date,
+          expiry_date: zeptoPo.po_expiry_date,
+          city: zeptoPo.city || '',
+          state: zeptoPo.state || '',
+          serving_distributor: zeptoPo.vendor_name || '',
+          // Original Zepto line items with exact field names
+          orderItems: zeptoPo.poLines.map(line => ({
+            id: line.id,
+            po_id: zeptoPo.id,
+            item_code: line.vendor_item_code || '',
+            item_name: line.item_name,
+            quantity: line.quantity || 0,
+            basic_rate: line.basic_rate?.toString() || '0',
+            landing_rate: line.landing_rate?.toString() || '0',
+            status: line.status || 'Pending',
+            platform_code: line.vendor_item_code || '',
+            sap_code: line.vendor_item_code || '',
+            uom: line.uom || 'PCS',
+            gst_rate: line.gst_rate?.toString() || '0'
+          }))
+        };
+
+        result.push(originalZeptoPo as any);
+      }
+    } catch (error) {
+      console.error('Error fetching Zepto POs from zepto_po_header:', error);
+    }
+
     // Fetch Blinkit POs from blinkit_po_header (original Blinkit data)
     try {
       const blinkitPos = await this.getAllBlinkitPos();
@@ -712,7 +755,7 @@ export class DatabaseStorage implements IStorage {
       console.error('Error fetching Blinkit POs from blinkit_po_header:', error);
     }
 
-    // PRIORITY 2: Fetch POs from po_master table (but exclude Blinkit to avoid duplicates)
+    // PRIORITY 2: Fetch POs from po_master table (but exclude Blinkit and Zepto to avoid duplicates)
     const posWithPlatforms = await db
       .select({
         po: poMaster,
@@ -720,10 +763,13 @@ export class DatabaseStorage implements IStorage {
       })
       .from(poMaster)
       .leftJoin(pfMst, eq(poMaster.platform_id, pfMst.id))
-      .where(ne(poMaster.series, 'Blinkit')) // Exclude Blinkit POs since we're showing original data
+      .where(and(
+        ne(poMaster.series, 'Blinkit'), // Exclude Blinkit POs since we're showing original data
+        ne(poMaster.series, 'Zepto')    // Exclude Zepto POs since we're showing original data
+      ))
       .orderBy(desc(poMaster.create_on));
 
-    console.log(`📊 getAllPos: Found ${posWithPlatforms.length} non-Blinkit POs from po_master table`);
+    console.log(`📊 getAllPos: Found ${posWithPlatforms.length} non-Blinkit/Zepto POs from po_master table`);
 
     // Process POs from po_master table
     for (const poWithPlatform of posWithPlatforms) {
@@ -900,7 +946,7 @@ export class DatabaseStorage implements IStorage {
     // Sort results by created_at descending (most recent uploads first)
     result.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
-    console.log(`📊 getAllPos: Returning ${result.length} POs total (po_master + Blinkit)`);
+    console.log(`📊 getAllPos: Returning ${result.length} POs total (po_master + Zepto + Blinkit)`);
 
     return result;
   }
@@ -937,89 +983,72 @@ export class DatabaseStorage implements IStorage {
   async getPoById(id: number): Promise<(Omit<PfPo, 'platform'> & { platform: PfMst; orderItems: PfOrderItems[] }) | undefined> {
     console.log(`🔍 getPoById: Starting search for PO ${id} - prioritizing platform-specific data`);
 
-    // PRIORITY 1: Check Blinkit-specific tables first (original data)
+    // PRIORITY 1: Check Zepto-specific tables first (original data)
+    console.log(`🔍 getPoById: Checking Zepto tables for PO ${id}...`);
+    try {
+      const zeptoPo = await this.getZeptoPOById(id);
+      if (zeptoPo) {
+        console.log(`✅ getPoById: Found Zepto PO ${id} in zepto_po_header (using original data)`);
+
+        // Return RAW Zepto table data PLUS frontend compatibility fields
+        const rawZeptoPo = {
+          // Add platform info for frontend identification
+          platform: { id: 3, pf_name: "Zepto" },
+          // All original zepto_po_header columns exactly as they are
+          ...zeptoPo,
+          // Frontend compatibility fields (mapped from raw data)
+          expiry_date: zeptoPo.po_expiry_date,
+          city: zeptoPo.delivery_location || '',
+          state: '',
+          serving_distributor: zeptoPo.vendor_name,
+          // Convert poLines to exact zepto_po_lines column names + frontend compatibility
+          orderItems: zeptoPo.poLines.map(line => ({
+            // All original zepto_po_lines columns exactly as they are
+            ...line,
+            // Frontend compatibility fields (mapped from raw data)
+            item_name: line.sku_desc || 'Zepto Product',
+            quantity: line.po_qty || 0,
+            landing_rate: line.landing_cost?.toString() || '0',
+            total_amount: line.total_value?.toString() || '0'
+          }))
+        };
+
+        console.log(`✅ getPoById: Returning RAW Zepto PO ${id} with ${rawZeptoPo.orderItems.length} items`);
+        return rawZeptoPo as any;
+      }
+    } catch (error) {
+      console.error(`❌ getPoById: Error checking Zepto tables for PO ${id}:`, error);
+    }
+
+    // PRIORITY 2: Check Blinkit-specific tables (original data)
     console.log(`🔍 getPoById: Checking Blinkit tables for PO ${id}...`);
     try {
       const blinkitPo = await this.getBlinkitPoById(id);
       if (blinkitPo) {
         console.log(`✅ getPoById: Found Blinkit PO ${id} in blinkit_po_header (using original data)`);
 
-        // Convert Blinkit PO to unified format for editing with ORIGINAL data
-        const convertedBlinkitPo = {
-          id: blinkitPo.id,
-          po_number: blinkitPo.po_number,
+        // Return RAW Blinkit table data PLUS frontend compatibility fields
+        const rawBlinkitPo = {
+          // Add platform info for frontend identification
           platform: { id: 1, pf_name: "Blinkit" },
-          serving_distributor: null,
-          company: "JIVO MART",
-          company_id: 1,
-          distributor_id: 1,
-          series: "Blinkit",
-          po_date: blinkitPo.po_date,
-          delivery_date: blinkitPo.po_delivery_date ? new Date(blinkitPo.po_delivery_date) : null,
-          expiry_date: blinkitPo.po_expiry_date ? new Date(blinkitPo.po_expiry_date) : null,
-          appointment_date: null,
-          region: null,
-          state: null,
-          state_id: null,
-          city: null,
-          district_id: null,
-          area: null,
-          dispatch_from: null,
-          ware_house: null,
-          warehouse: null,
-          status: "OPEN",
-          status_id: 1,
-          created_by: "system",
-          comments: null,
-          created_at: blinkitPo.created_at,
-          updated_at: blinkitPo.updated_at,
-          order_date: blinkitPo.po_date,
-          // Use ORIGINAL Blinkit field names and data
-          vendor_name: blinkitPo.vendor_name,
-          buyer_name: blinkitPo.buyer_name,
-          total_amount: blinkitPo.total_amount,
-          net_amount: blinkitPo.net_amount,
-          cart_discount: blinkitPo.cart_discount,
-          vendor_contact_email: blinkitPo.vendor_contact_email,
-          vendor_contact_phone: blinkitPo.vendor_contact_phone,
-          payment_terms: blinkitPo.payment_terms,
+          // All original blinkit_po_header columns exactly as they are
+          ...blinkitPo,
+          // Frontend compatibility fields (mapped from raw data)
+          expiry_date: blinkitPo.po_expiry_date,
+          serving_distributor: blinkitPo.vendor_name,
+          // Convert poLines to exact blinkit_po_lines column names + frontend compatibility
           orderItems: blinkitPo.poLines.map(line => ({
-            id: line.id,
-            po_id: blinkitPo.id,
+            // All original blinkit_po_lines columns exactly as they are
+            ...line,
+            // Frontend compatibility fields (mapped from raw data)
             item_name: line.product_description || 'Blinkit Product',
-            item_code: line.item_code || '',
             quantity: line.quantity || 0,
-            sap_code: line.item_code || '',
-            platform_code: line.item_code || '',
-            uom: 'PCS',
-            // Use ORIGINAL Blinkit field names and values
-            basic_rate: line.basic_cost_price?.toString() || '0',
-            basic_cost_price: line.basic_cost_price?.toString() || '0',
-            igst_percent: line.igst_percent?.toString() || '0',
-            cess_percent: line.cess_percent?.toString() || '0',
-            addt_cess: line.addt_cess?.toString() || '0',
-            tax_amount: line.tax_amount?.toString() || '0',
-            gst_rate: line.tax_amount?.toString() || '0',
             landing_rate: line.landing_rate?.toString() || '0',
-            total_amount: line.total_amount?.toString() || '0',
-            mrp: line.mrp?.toString() || '0',
-            margin_percent: line.margin_percent?.toString() || '0',
-            hsn_code: line.hsn_code || null,
-            product_upc: line.product_upc || '',
-            product_description: line.product_description || '',
-            boxes: null,
-            unit_size_ltrs: 0,
-            loose_qty: null,
-            total_ltrs: 0,
-            status: 'Pending',
-            invoice_date: null,
-            invoice_litre: null,
-            invoice_amount: null,
-            invoice_qty: null
+            total_amount: line.total_amount?.toString() || '0'
           }))
         };
 
-        return convertedBlinkitPo as any;
+        return rawBlinkitPo as any;
       }
     } catch (error) {
       console.error(`❌ getPoById: Error checking Blinkit tables for PO ${id}:`, error);
