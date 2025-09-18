@@ -1,4 +1,5 @@
 import { db } from './db';
+import { zeptoPoHeader, zeptoPoLines } from '@shared/schema';
 
 interface ZeptoPoHeader {
   po_number: string;
@@ -116,7 +117,7 @@ const parseDate = (value: string | Date | undefined): Date | null => {
 
 export const insertZeptoPoToDatabase = async (data: ParsedZeptoPO): Promise<{ success: boolean; message: string; data?: any }> => {
   try {
-    console.log('🔄 Starting Zepto PO database insertion with SQL Server support...');
+    console.log('🔄 Starting Zepto PO database insertion with PostgreSQL support...');
     console.log('📦 Raw header data:', JSON.stringify(data.header, null, 2));
 
     // Create header object with all available columns matching the database schema
@@ -126,13 +127,13 @@ export const insertZeptoPoToDatabase = async (data: ParsedZeptoPO): Promise<{ su
       status: String(data.header.status || 'Open').substring(0, 20),
       vendor_code: data.header.vendor_code ? String(data.header.vendor_code).substring(0, 50) : null,
       vendor_name: data.header.vendor_name ? String(data.header.vendor_name).substring(0, 200) : null,
-      po_amount: data.header.po_amount ? parseFloat(parseDecimal(data.header.po_amount)) : null,
+      po_amount: data.header.po_amount ? parseDecimal(data.header.po_amount) : null,
       delivery_location: data.header.delivery_location ? String(data.header.delivery_location).substring(0, 200) : null,
       po_expiry_date: parseDate(data.header.po_expiry_date),
       total_quantity: parseInt(String(data.header.total_quantity || '0')) || 0,
-      total_cost_value: parseFloat(parseDecimal(data.header.total_cost_value || '0')),
-      total_tax_amount: parseFloat(parseDecimal(data.header.total_tax_amount || '0')),
-      total_amount: parseFloat(parseDecimal(data.header.total_amount || '0')),
+      total_cost_value: parseDecimal(data.header.total_cost_value || '0'),
+      total_tax_amount: parseDecimal(data.header.total_tax_amount || '0'),
+      total_amount: parseDecimal(data.header.total_amount || '0'),
       unique_brands: data.header.unique_brands || [],
       created_by: String(data.header.created_by || 'system'),
       uploaded_by: String(data.header.uploaded_by || 'system')
@@ -140,8 +141,12 @@ export const insertZeptoPoToDatabase = async (data: ParsedZeptoPO): Promise<{ su
 
     console.log('✅ Complete header data prepared:', JSON.stringify(safeHeaderData, null, 2));
 
-    // Insert header using SQL Server
-    const insertedHeader = await db.insertZeptoPoHeader(safeHeaderData);
+    // Insert header using Drizzle ORM
+    const [insertedHeader] = await db
+      .insert(zeptoPoHeader)
+      .values(safeHeaderData)
+      .returning();
+
     console.log('🎯 Header inserted successfully with ID:', insertedHeader.id);
 
     // Insert lines if they exist
@@ -149,41 +154,48 @@ export const insertZeptoPoToDatabase = async (data: ParsedZeptoPO): Promise<{ su
     if (data.lines && data.lines.length > 0) {
       console.log(`📋 Processing ${data.lines.length} line items...`);
 
-      const safeLinesData = data.lines.map((line, index) => {
-        const safeLine: any = {
-          line_number: parseInt(String(line.line_number || (index + 1))) || (index + 1),
-          po_number: String(line.po_number || safeHeaderData.po_number),
-          sku: String(line.sku || ''),
-          sku_desc: String(line.sku_desc || ''),
-          brand: String(line.brand || ''),
-          sku_id: String(line.sku_id || ''),
-          sap_id: String(line.sap_id || ''),
-          hsn_code: String(line.hsn_code || ''),
-          ean_no: String(line.ean_no || ''),
-          po_qty: parseInt(String(line.po_qty || '0')) || 0,
-          asn_qty: parseInt(String(line.asn_qty || '0')) || 0,
-          grn_qty: parseInt(String(line.grn_qty || '0')) || 0,
-          remaining_qty: parseInt(String(line.remaining_qty || '0')) || 0,
-          status: String(line.status || 'Pending'),
-          created_by: String(line.created_by || safeHeaderData.created_by)
-        };
+      // Process lines in smaller batches to avoid issues
+      const batchSize = 10;
+      for (let i = 0; i < data.lines.length; i += batchSize) {
+        const batch = data.lines.slice(i, i + batchSize);
 
-        // Handle decimal fields for lines with proper null handling
-        safeLine.cost_price = line.cost_price ? parseFloat(parseDecimal(line.cost_price)) : null;
-        safeLine.landing_cost = line.landing_cost ? parseFloat(parseDecimal(line.landing_cost)) : null;
-        safeLine.cgst = line.cgst ? parseFloat(parseDecimal(line.cgst)) : null;
-        safeLine.sgst = line.sgst ? parseFloat(parseDecimal(line.sgst)) : null;
-        safeLine.igst = line.igst ? parseFloat(parseDecimal(line.igst)) : null;
-        safeLine.cess = line.cess ? parseFloat(parseDecimal(line.cess)) : null;
-        safeLine.mrp = line.mrp ? parseFloat(parseDecimal(line.mrp)) : null;
-        safeLine.total_value = line.total_value ? parseFloat(parseDecimal(line.total_value)) : null;
+        const safeLinesData = batch.map((line, index) => {
+          const safeLine: any = {
+            po_header_id: insertedHeader.id,
+            line_number: parseInt(String(line.line_number || (i + index + 1))) || (i + index + 1),
+            po_number: String(line.po_number || safeHeaderData.po_number),
+            sku: String(line.sku || ''),
+            sku_desc: String(line.sku_desc || ''),
+            brand: String(line.brand || ''),
+            sku_id: String(line.sku_id || ''),
+            sap_id: String(line.sap_id || ''),
+            hsn_code: String(line.hsn_code || ''),
+            ean_no: String(line.ean_no || ''),
+            po_qty: parseInt(String(line.po_qty || '0')) || 0,
+            asn_qty: parseInt(String(line.asn_qty || '0')) || 0,
+            grn_qty: parseInt(String(line.grn_qty || '0')) || 0,
+            remaining_qty: parseInt(String(line.remaining_qty || '0')) || 0,
+            status: String(line.status || 'Pending'),
+            created_by: String(line.created_by || safeHeaderData.created_by)
+          };
 
-        return safeLine;
-      });
+          // Handle decimal fields for lines with proper null handling
+          safeLine.cost_price = line.cost_price ? parseDecimal(line.cost_price) : null;
+          safeLine.landing_cost = line.landing_cost ? parseDecimal(line.landing_cost) : null;
+          safeLine.cgst = line.cgst ? parseDecimal(line.cgst) : null;
+          safeLine.sgst = line.sgst ? parseDecimal(line.sgst) : null;
+          safeLine.igst = line.igst ? parseDecimal(line.igst) : null;
+          safeLine.cess = line.cess ? parseDecimal(line.cess) : null;
+          safeLine.mrp = line.mrp ? parseDecimal(line.mrp) : null;
+          safeLine.total_value = line.total_value ? parseDecimal(line.total_value) : null;
 
-      await db.insertZeptoPoLines(safeLinesData, insertedHeader.id);
-      insertedLinesCount = safeLinesData.length;
-      console.log(`✅ Inserted ${insertedLinesCount} lines successfully`);
+          return safeLine;
+        });
+
+        await db.insert(zeptoPoLines).values(safeLinesData);
+        insertedLinesCount += safeLinesData.length;
+        console.log(`✅ Inserted batch ${Math.floor(i/batchSize) + 1}: ${safeLinesData.length} lines`);
+      }
     }
 
     const successMessage = `Zepto PO ${safeHeaderData.po_number} inserted successfully with ${insertedLinesCount} lines`;

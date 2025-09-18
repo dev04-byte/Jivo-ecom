@@ -1,0 +1,4 @@
+PO No.,PO Date,Status,Vendor Code,Vendor Name,PO Amount,Del Location,Line No,SKU,SKU Code,SKU Desc,Brand,EAN,HSN,CGST %,SGST %,IGST %,CESS %,MRP,Qty,Unit Base Cost,Landing Cost,Total Amount,Created By,ASN Quantity,GRN Quantity,PO Expiry Date
+ZPO001,2024-01-15,Open,V001,Test Vendor,5000.00,Delhi,1,SKU001,SC001,Test Product 1,Brand A,1234567890123,2106,9.00,9.00,0.00,0.00,100.00,10,80.00,95.20,952.00,system,0,0,2024-02-15
+ZPO001,2024-01-15,Open,V001,Test Vendor,5000.00,Delhi,2,SKU002,SC002,Test Product 2,Brand B,1234567890124,2107,9.00,9.00,0.00,0.00,150.00,5,120.00,142.80,714.00,system,0,0,2024-02-15
+ZPO001,2024-01-15,Open,V001,Test Vendor,5000.00,Delhi,3,SKU003,SC003,Test Product 3,Brand A,1234567890125,2108,9.00,9.00,0.00,0.00,200.00,3,160.00,190.40,571.20,system,0,0,2024-02-15

@@ -10,11 +10,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 
 interface ParsedPOData {
-  header: any;
-  lines: any[];
+  header?: any;
+  lines?: any[];
+  poList?: Array<{
+    header: any;
+    lines: any[];
+  }>;
   totalItems?: number;
   totalQuantity?: number;
   totalAmount?: string;
+  detectedVendor?: string;
+  totalPOs?: number;
+  source?: string;
 }
 
 export default function ZeptoPoUpload() {
@@ -44,11 +51,16 @@ export default function ZeptoPoUpload() {
       return response.json();
     },
     onSuccess: (data) => {
-      setParsedData(data);
+      console.log('Preview data received:', data);
+      setParsedData(data.data || data);
       setShowPreview(true);
+      const message = data.data?.poList
+        ? `Found ${data.data.totalPOs || data.data.poList.length} POs with ${data.data.poList.reduce((sum: number, po: any) => sum + (po.lines?.length || 0), 0)} total items`
+        : `Found ${data.totalItems || data.lines?.length || 0} items`;
+
       toast({
         title: "File previewed successfully",
-        description: `Found ${data.totalItems} items`,
+        description: message,
       });
     },
     onError: (error: Error) => {
@@ -61,27 +73,66 @@ export default function ZeptoPoUpload() {
   });
 
   const importMutation = useMutation({
-    mutationFn: async (data: { header: any; lines: any[] }) => {
-      const response = await fetch('/api/po/import/zepto', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to import PO');
+    mutationFn: async (data: any) => {
+      // Handle both single PO and multiple POs
+      if (data.poList) {
+        // Multiple POs - import each one
+        const results = [];
+        for (const po of data.poList) {
+          const response = await fetch('/api/zepto/confirm-insert', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              po_header: po.header,
+              po_lines: po.lines
+            }),
+          });
+
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(`Failed to import PO ${po.header.po_number}: ${error.error || 'Unknown error'}`);
+          }
+
+          results.push(await response.json());
+        }
+        return { results, totalPOs: data.poList.length };
+      } else {
+        // Single PO
+        const response = await fetch('/api/zepto/confirm-insert', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            po_header: data.header,
+            po_lines: data.lines
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to import PO');
+        }
+
+        return response.json();
       }
-      
-      return response.json();
     },
     onSuccess: (data) => {
-      toast({
-        title: "PO imported successfully",
-        description: `PO ${data.po_number} has been created`,
-      });
+      if (data.results) {
+        // Multiple POs imported
+        toast({
+          title: "Multiple POs imported successfully",
+          description: `${data.totalPOs} Zepto POs have been imported`,
+        });
+      } else {
+        // Single PO imported
+        toast({
+          title: "PO imported successfully",
+          description: `PO has been created`,
+        });
+      }
       setFile(null);
       setParsedData(null);
       setShowPreview(false);
@@ -172,10 +223,8 @@ export default function ZeptoPoUpload() {
       return;
     }
 
-    importMutation.mutate({ 
-      header: parsedData.header, 
-      lines: parsedData.lines 
-    });
+    // Pass the entire parsedData which could contain either single PO or poList
+    importMutation.mutate(parsedData);
   };
 
   return (
@@ -286,66 +335,168 @@ export default function ZeptoPoUpload() {
                 {/* Summary Information */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="p-3 bg-blue-50 rounded-lg">
-                    <p className="text-sm font-medium text-blue-800">PO Number</p>
+                    <p className="text-sm font-medium text-blue-800">
+                      {parsedData.poList ? "Total POs" : "PO Number"}
+                    </p>
                     <p className="text-lg font-bold text-blue-900">
-                      {parsedData.header?.po_number || "N/A"}
+                      {parsedData.poList ? parsedData.poList.length : (parsedData.header?.po_number || "N/A")}
                     </p>
                   </div>
                   <div className="p-3 bg-green-50 rounded-lg">
                     <p className="text-sm font-medium text-green-800">Total Items</p>
-                    <p className="text-lg font-bold text-green-900">{parsedData.totalItems || 0}</p>
+                    <p className="text-lg font-bold text-green-900">
+                      {parsedData.poList
+                        ? parsedData.poList.reduce((sum, po) => sum + (po.lines?.length || 0), 0)
+                        : (parsedData.totalItems || parsedData.lines?.length || 0)
+                      }
+                    </p>
                   </div>
                   <div className="p-3 bg-purple-50 rounded-lg">
                     <p className="text-sm font-medium text-purple-800">Total Quantity</p>
-                    <p className="text-lg font-bold text-purple-900">{parsedData.totalQuantity || 0}</p>
+                    <p className="text-lg font-bold text-purple-900">
+                      {parsedData.poList
+                        ? parsedData.poList.reduce((sum, po) => sum + po.header.total_quantity, 0)
+                        : (parsedData.totalQuantity || parsedData.header?.total_quantity || 0)
+                      }
+                    </p>
                   </div>
                   <div className="p-3 bg-yellow-50 rounded-lg">
                     <p className="text-sm font-medium text-yellow-800">Total Amount</p>
-                    <p className="text-lg font-bold text-yellow-900">₹{parsedData.totalAmount || "0"}</p>
+                    <p className="text-lg font-bold text-yellow-900">
+                      ₹{parsedData.poList
+                        ? parsedData.poList.reduce((sum, po) => sum + parseFloat(po.header.total_amount || '0'), 0).toFixed(2)
+                        : (parsedData.totalAmount || parsedData.header?.total_amount || "0")
+                      }
+                    </p>
                   </div>
                 </div>
 
                 {/* PO Header Preview */}
                 <div className="space-y-2">
-                  <h4 className="font-medium">PO Header Information</h4>
-                  <div className="bg-gray-50 p-3 rounded-lg">
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <div><strong>PO Number:</strong> {parsedData.header?.po_number || "N/A"}</div>
-                      <div><strong>PO Date:</strong> {parsedData.header?.po_date || "N/A"}</div>
-                      <div><strong>Status:</strong> <Badge variant="outline">{parsedData.header?.status || "Open"}</Badge></div>
-                      <div><strong>Vendor:</strong> Zepto</div>
+                  <h4 className="font-medium">
+                    {parsedData.poList ? `PO Headers (${parsedData.poList.length} POs)` : "PO Header Information"}
+                  </h4>
+
+                  {parsedData.poList ? (
+                    <div className="space-y-3">
+                      {parsedData.poList.slice(0, 3).map((po, index) => (
+                        <div key={index} className="bg-gray-50 p-3 rounded-lg border">
+                          <div className="flex justify-between items-center mb-2">
+                            <h5 className="font-medium text-sm">PO #{index + 1}</h5>
+                            <Badge variant="secondary">{po.lines?.length || 0} items</Badge>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 text-sm">
+                            <div><strong>PO Number:</strong> {po.header?.po_number || "N/A"}</div>
+                            <div><strong>PO Date:</strong> {po.header?.po_date || "N/A"}</div>
+                            <div><strong>Status:</strong> <Badge variant="outline">{po.header?.status || "Open"}</Badge></div>
+                            <div><strong>Vendor Code:</strong> {po.header?.vendor_code || "N/A"}</div>
+                            <div><strong>Vendor Name:</strong> {po.header?.vendor_name || "N/A"}</div>
+                            <div><strong>PO Amount:</strong> ₹{po.header?.po_amount || po.header?.total_amount || "N/A"}</div>
+                            <div><strong>Delivery Location:</strong> {po.header?.delivery_location || "N/A"}</div>
+                            <div><strong>Total Quantity:</strong> {po.header?.total_quantity || 0}</div>
+                            <div><strong>Brands:</strong> {po.header?.unique_brands?.length || 0} unique</div>
+                          </div>
+                        </div>
+                      ))}
+                      {parsedData.poList.length > 3 && (
+                        <p className="text-sm text-gray-500 text-center">
+                          Showing first 3 of {parsedData.poList.length} POs. All POs will be imported.
+                        </p>
+                      )}
                     </div>
-                  </div>
+                  ) : (
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <div className="grid grid-cols-3 gap-2 text-sm">
+                        <div><strong>PO Number:</strong> {parsedData.header?.po_number || "N/A"}</div>
+                        <div><strong>PO Date:</strong> {parsedData.header?.po_date || "N/A"}</div>
+                        <div><strong>Status:</strong> <Badge variant="outline">{parsedData.header?.status || "Open"}</Badge></div>
+                        <div><strong>Vendor Code:</strong> {parsedData.header?.vendor_code || "N/A"}</div>
+                        <div><strong>Vendor Name:</strong> {parsedData.header?.vendor_name || "N/A"}</div>
+                        <div><strong>PO Amount:</strong> ₹{parsedData.header?.po_amount || "N/A"}</div>
+                        <div><strong>Delivery Location:</strong> {parsedData.header?.delivery_location || "N/A"}</div>
+                        <div><strong>PO Expiry Date:</strong> {parsedData.header?.po_expiry_date || "N/A"}</div>
+                        <div><strong>Total Brands:</strong> {parsedData.header?.unique_brands?.length || 0}</div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Line Items Preview */}
                 <div className="space-y-2">
                   <h4 className="font-medium">Line Items Preview</h4>
-                  <div className="border rounded-lg overflow-hidden">
-                    <Table>
+                  <div className="border rounded-lg overflow-x-auto max-w-full">
+                    <Table className="min-w-full whitespace-nowrap">
                       <TableHeader>
                         <TableRow>
-                          <TableHead>SKU</TableHead>
-                          <TableHead>Description</TableHead>
-                          <TableHead>PO Quantity</TableHead>
-                          <TableHead>Cost Price</TableHead>
-                          <TableHead>Total Value</TableHead>
+                          <TableHead className="min-w-[100px]">PO No</TableHead>
+                          <TableHead className="min-w-[120px]">SKU</TableHead>
+                          <TableHead className="min-w-[250px]">SKU Desc</TableHead>
+                          <TableHead className="min-w-[100px]">Brand</TableHead>
+                          <TableHead className="min-w-[120px]">EAN</TableHead>
+                          <TableHead className="min-w-[100px]">HSN</TableHead>
+                          <TableHead className="min-w-[100px]">MRP</TableHead>
+                          <TableHead className="min-w-[80px]">Qty</TableHead>
+                          <TableHead className="min-w-[120px]">Unit Base Cost</TableHead>
+                          <TableHead className="min-w-[120px]">Landing Cost</TableHead>
+                          <TableHead className="min-w-[120px]">Total Amount</TableHead>
+                          <TableHead className="min-w-[80px]">CGST %</TableHead>
+                          <TableHead className="min-w-[80px]">SGST %</TableHead>
+                          <TableHead className="min-w-[80px]">IGST %</TableHead>
+                          <TableHead className="min-w-[80px]">CESS %</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {parsedData.lines.map((line, index) => (
-                          <TableRow key={index}>
-                            <TableCell className="font-medium">{line.sku || "N/A"}</TableCell>
-                            <TableCell>{line.sku || "N/A"}</TableCell>
-                            <TableCell>{line.po_qty || "N/A"}</TableCell>
-                            <TableCell>₹{line.cost_price || "N/A"}</TableCell>
-                            <TableCell>₹{line.total_value || "N/A"}</TableCell>
-                          </TableRow>
-                        ))}
+                        {(() => {
+                          const allLines = parsedData.poList
+                            ? parsedData.poList.flatMap((po, poIndex) =>
+                                po.lines?.map((line: any, lineIndex: number) => ({
+                                  ...line,
+                                  po_number_display: po.header.po_number,
+                                  display_key: `${poIndex}-${lineIndex}`
+                                })) || []
+                              )
+                            : parsedData.lines || [];
+
+                          return allLines.slice(0, 10).map((line: any, index: number) => (
+                            <TableRow key={line.display_key || index}>
+                              <TableCell className="min-w-[100px] font-medium">{line.po_number || line.po_number_display || "-"}</TableCell>
+                              <TableCell className="min-w-[120px] font-mono text-xs" title={line.sku}>
+                                {line.sku ? `${line.sku.substring(0, 12)}...` : "-"}
+                              </TableCell>
+                              <TableCell className="min-w-[250px]" title={line.sku_desc}>
+                                <div className="max-w-[250px] truncate">
+                                  {line.sku_desc || "-"}
+                                </div>
+                              </TableCell>
+                              <TableCell className="min-w-[100px]">{line.brand || "-"}</TableCell>
+                              <TableCell className="min-w-[120px] font-mono text-xs">{line.ean_no || "-"}</TableCell>
+                              <TableCell className="min-w-[100px]">{line.hsn_code || "-"}</TableCell>
+                              <TableCell className="min-w-[100px] text-right">{line.mrp && Number(line.mrp) > 0 ? `₹${Number(line.mrp).toFixed(2)}` : "-"}</TableCell>
+                              <TableCell className="min-w-[80px] text-center">{line.po_qty || "-"}</TableCell>
+                              <TableCell className="min-w-[120px] text-right">{line.cost_price && Number(line.cost_price) > 0 ? `₹${Number(line.cost_price).toFixed(2)}` : "-"}</TableCell>
+                              <TableCell className="min-w-[120px] text-right">{line.landing_cost && Number(line.landing_cost) > 0 ? `₹${Number(line.landing_cost).toFixed(2)}` : "-"}</TableCell>
+                              <TableCell className="min-w-[120px] text-right font-medium">{line.total_value && Number(line.total_value) > 0 ? `₹${Number(line.total_value).toFixed(2)}` : "-"}</TableCell>
+                              <TableCell className="min-w-[80px] text-center">{line.cgst && Number(line.cgst) > 0 ? `${Number(line.cgst).toFixed(0)}%` : "0%"}</TableCell>
+                              <TableCell className="min-w-[80px] text-center">{line.sgst && Number(line.sgst) > 0 ? `${Number(line.sgst).toFixed(0)}%` : "0%"}</TableCell>
+                              <TableCell className="min-w-[80px] text-center">{line.igst && Number(line.igst) > 0 ? `${Number(line.igst).toFixed(0)}%` : "0%"}</TableCell>
+                              <TableCell className="min-w-[80px] text-center">{line.cess && Number(line.cess) > 0 ? `${Number(line.cess).toFixed(0)}%` : "0%"}</TableCell>
+                            </TableRow>
+                          ));
+                        })()}
                       </TableBody>
                     </Table>
                   </div>
+                  {(() => {
+                    const totalLines = parsedData.poList
+                      ? parsedData.poList.reduce((sum, po) => sum + (po.lines?.length || 0), 0)
+                      : parsedData.lines?.length || 0;
 
+                    return totalLines > 10 ? (
+                      <p className="text-sm text-gray-500 text-center">
+                        Showing first 10 of {totalLines} line items across {parsedData.poList?.length || 1} PO(s). All items will be imported.
+                      </p>
+                    ) : null;
+                  })()}
                 </div>
 
                 {/* Import Action */}

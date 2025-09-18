@@ -10,7 +10,13 @@ import { ArrowLeft, Package, Calendar, User, Hash, Banknote, Eye, CheckCircle, A
 interface ZeptoPoDetails {
   id: number;
   po_number: string;
+  po_date?: string;
   status: string;
+  vendor_code?: string;
+  vendor_name?: string;
+  po_amount?: string;
+  delivery_location?: string;
+  po_expiry_date?: string;
   total_quantity: number;
   total_cost_value: string;
   total_tax_amount: string;
@@ -26,6 +32,7 @@ interface ZeptoPoDetails {
     line_number: number;
     po_number: string;
     sku: string;
+    sku_desc?: string;
     brand: string;
     sku_id: string;
     sap_id: string;
@@ -36,6 +43,7 @@ interface ZeptoPoDetails {
     grn_qty: number;
     remaining_qty: number;
     cost_price: string;
+    landing_cost?: string;
     cgst: string;
     sgst: string;
     igst: string;
@@ -102,11 +110,13 @@ export default function ZeptoPoDetails() {
       'Closed': 'bg-gray-100 text-gray-800 border-gray-200',
       'Cancelled': 'bg-red-100 text-red-800 border-red-200',
       'Pending': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+      'PENDING_ACKNOWLEDGEMENT': 'bg-orange-100 text-orange-800 border-orange-200',
+      'PENDING_ASN_CREATION': 'bg-yellow-100 text-yellow-800 border-yellow-200',
     };
 
     return (
-      <Badge 
-        variant="outline" 
+      <Badge
+        variant="outline"
         className={statusColors[status as keyof typeof statusColors] || 'bg-blue-100 text-blue-800 border-blue-200'}
       >
         {status}
@@ -225,9 +235,41 @@ export default function ZeptoPoDetails() {
                   <p className="text-lg font-semibold">{po.po_number}</p>
                 </div>
                 <div>
+                  <label className="text-sm font-medium text-muted-foreground">PO Date</label>
+                  <div className="flex items-center gap-1">
+                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                    <p>{po.po_date ? new Date(po.po_date).toLocaleDateString() : '-'}</p>
+                  </div>
+                </div>
+                <div>
                   <label className="text-sm font-medium text-muted-foreground">Status</label>
                   <div className="mt-1">
                     {getStatusBadge(po.status)}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">Vendor Code</label>
+                  <p className="text-lg">{po.vendor_code || '-'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">Vendor Name</label>
+                  <p className="text-lg">{po.vendor_name || '-'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">PO Amount</label>
+                  <p className="text-lg font-semibold">
+                    {po.po_amount && Number(po.po_amount) > 0 ? `₹${Number(po.po_amount).toLocaleString()}` : '-'}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">Delivery Location</label>
+                  <p className="text-lg">{po.delivery_location || '-'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">PO Expiry Date</label>
+                  <div className="flex items-center gap-1">
+                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                    <p>{po.po_expiry_date ? new Date(po.po_expiry_date).toLocaleDateString() : '-'}</p>
                   </div>
                 </div>
                 <div>
@@ -282,40 +324,71 @@ export default function ZeptoPoDetails() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Line #</TableHead>
                         <TableHead>SKU</TableHead>
+                        <TableHead>Product Description</TableHead>
                         <TableHead>Brand</TableHead>
-                        <TableHead>HSN Code</TableHead>
-                        <TableHead>PO Qty</TableHead>
-                        <TableHead>Cost Price</TableHead>
-                        <TableHead>CGST</TableHead>
-                        <TableHead>SGST</TableHead>
-                        <TableHead>IGST</TableHead>
+                        <TableHead>EAN</TableHead>
+                        <TableHead>HSN</TableHead>
                         <TableHead>MRP</TableHead>
-                        <TableHead>Total Value</TableHead>
-                        <TableHead>Status</TableHead>
+                        <TableHead>Qty</TableHead>
+                        <TableHead>Unit Base Cost</TableHead>
+                        <TableHead>Landing Cost</TableHead>
+                        <TableHead>Total Amount</TableHead>
+                        <TableHead>CGST %</TableHead>
+                        <TableHead>SGST %</TableHead>
+                        <TableHead>IGST %</TableHead>
+                        <TableHead>CESS %</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {po.poLines.map((line) => (
+                      {po.poLines.map((line, index) => (
                         <TableRow key={line.id}>
-                          <TableCell className="font-medium">{line.line_number}</TableCell>
                           <TableCell>
                             <div className="max-w-xs">
-                              <p className="font-medium truncate" title={line.sku}>{line.sku}</p>
-                              <p className="text-xs text-muted-foreground">{line.sku_id}</p>
+                              <p className="font-mono text-xs truncate" title={line.sku}>
+                                {line.sku ? `${line.sku.substring(0, 8)}...` : `Line ${index + 1}`}
+                              </p>
                             </div>
                           </TableCell>
-                          <TableCell>{line.brand}</TableCell>
-                          <TableCell>{line.hsn_code}</TableCell>
-                          <TableCell className="text-right">{line.po_qty.toLocaleString()}</TableCell>
-                          <TableCell className="text-right">₹{Number(line.cost_price).toFixed(2)}</TableCell>
-                          <TableCell className="text-right">₹{Number(line.cgst).toFixed(2)}</TableCell>
-                          <TableCell className="text-right">₹{Number(line.sgst).toFixed(2)}</TableCell>
-                          <TableCell className="text-right">₹{Number(line.igst).toFixed(2)}</TableCell>
-                          <TableCell className="text-right">₹{Number(line.mrp).toFixed(2)}</TableCell>
-                          <TableCell className="text-right font-medium">₹{Number(line.total_value).toFixed(2)}</TableCell>
-                          <TableCell>{getLineStatusBadge(line.status)}</TableCell>
+                          <TableCell>
+                            <div className="max-w-[300px]">
+                              <p className="text-sm" title={line.sku_desc}>
+                                {line.sku_desc || '-'}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell>{line.brand || '-'}</TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {line.ean_no && line.ean_no !== '0' ? line.ean_no : '-'}
+                          </TableCell>
+                          <TableCell>{line.hsn_code || '-'}</TableCell>
+                          <TableCell className="text-right">
+                            {line.mrp && Number(line.mrp) > 0 ? `₹${Number(line.mrp).toFixed(2)}` : '-'}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {line.po_qty && line.po_qty > 0 ? line.po_qty.toLocaleString() : '-'}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {line.cost_price && Number(line.cost_price) > 0 ? `₹${Number(line.cost_price).toFixed(2)}` : '-'}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {line.landing_cost && Number(line.landing_cost) > 0 ? `₹${Number(line.landing_cost).toFixed(2)}` : '-'}
+                          </TableCell>
+                          <TableCell className="text-right font-medium">
+                            {line.total_value && Number(line.total_value) > 0 ? `₹${Number(line.total_value).toFixed(2)}` : '-'}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {line.cgst && Number(line.cgst) > 0 ? `${Number(line.cgst).toFixed(0)}%` : '0%'}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {line.sgst && Number(line.sgst) > 0 ? `${Number(line.sgst).toFixed(0)}%` : '0%'}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {line.igst && Number(line.igst) > 0 ? `${Number(line.igst).toFixed(0)}%` : '0%'}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {line.cess && Number(line.cess) > 0 ? `${Number(line.cess).toFixed(0)}%` : '0%'}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
