@@ -39,6 +39,11 @@ import { z } from "zod";
 import { seedTestData } from "./seed-data";
 import { parseFlipkartGroceryPO, parseZeptoPO, parseCityMallPO, parseBlinkitPO } from "./csv-parser";
 import { parseBlinkitPDF, validateBlinkitPDFData } from "./blinkit-pdf-parser";
+import { extractBlinkitDataFromPDF } from "./blinkit-pdf-extractor";
+import { convertBlinkitPDFToExcel, parseExcelDataForAPI, extractRealBlinkitData } from "./pdf-to-excel-converter";
+import { insertBlinkitPoData, validateBlinkitPoData, formatBlinkitPoForPreview } from "./blinkit-db-operations";
+import { insertZeptoPoToDatabase, insertMultipleZeptoPoToDatabase } from "./zepto-db-operations";
+import { parseBlinkitExcelFile } from "./blinkit-excel-parser";
 import { parseSwiggyPO } from "./swiggy-parser";
 import { parseBigBasketPO } from "./bigbasket-parser";
 import { parseZomatoPO } from "./zomato-parser";
@@ -1909,29 +1914,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Check if it's a PDF file
           if (filename.endsWith('.pdf')) {
             console.log("Processing Blinkit PDF file...");
-            // For PDF files, we expect the data to be parsed on the frontend
-            // and sent as JSON in the request body
-            const pdfData = req.body.pdfData || req.body;
 
-            if (validateBlinkitPDFData(pdfData)) {
-              console.log("Valid Blinkit PDF data received");
-              const blinkitResult = parseBlinkitPDF(pdfData, uploadedBy);
-              console.log("Found", blinkitResult.poList.length, "POs in Blinkit PDF");
+            try {
+              // NEW: Extract REAL data from Blinkit PDF matching database schema
+              console.log("🔍 Extracting REAL data from Blinkit PDF...");
+              const { text } = await import('./pdf-text-extractor').then(m => m.extractTextFromPDF(req.file.buffer));
+              const lines = text.split('\n').map(line => line.trim()).filter(line => line);
+
+              // Extract real data matching exact database schema
+              const realData = extractRealBlinkitData(lines, text);
+              console.log("✅ Successfully extracted REAL data:", {
+                po_number: realData.po_header.po_number,
+                buyer_name: realData.po_header.buyer_name,
+                vendor_name: realData.po_header.vendor_name,
+                total_items: realData.po_lines.length,
+                total_quantity: realData.po_header.total_quantity,
+                total_amount: realData.po_header.total_amount
+              });
+
+              // Validate extracted data
+              const validation = validateBlinkitPoData(realData);
+              if (!validation.valid) {
+                console.warn("⚠️ Data validation failed:", validation.errors);
+              }
+
+              // Format data for preview
+              const previewData = formatBlinkitPoForPreview(realData);
 
               return res.json({
-                poList: blinkitResult.poList.map(po => ({
-                  header: po.header,
-                  lines: po.lines,
-                  totalItems: po.lines.length,
-                  totalQuantity: po.totalQuantity,
-                  totalAmount: po.totalAmount.toString()
-                })),
-                detectedVendor: 'blinkit',
-                totalPOs: blinkitResult.poList.length,
-                source: 'pdf'
+                success: true,
+                data: {
+                  // Include both naming conventions for compatibility
+                  po_header: previewData.header,
+                  po_lines: previewData.lines,
+                  header: previewData.header,  // Added for frontend compatibility
+                  lines: previewData.lines,    // Added for frontend compatibility
+                  summary: previewData.summary,
+                  validation: validation,
+                  source: 'pdf_real_data_extracted'
+                },
+                message: `Successfully extracted data for PO ${realData.po_header.po_number} with ${realData.po_lines.length} line items`
               });
-            } else {
-              // If no valid PDF data provided, return mock data for demo
+            } catch (pdfError) {
+              console.error("PDF extraction failed, trying fallback:", pdfError);
+
+              // Fallback: Check if JSON data was sent in request body
+              const pdfData = req.body.pdfData || req.body;
+              if (validateBlinkitPDFData(pdfData)) {
+                console.log("Using fallback JSON data from request body");
+                const blinkitResult = parseBlinkitPDF(pdfData, uploadedBy);
+
+                return res.json({
+                  poList: blinkitResult.poList.map(po => ({
+                    header: po.header,
+                    lines: po.lines,
+                    totalItems: po.lines.length,
+                    totalQuantity: po.totalQuantity,
+                    totalAmount: po.totalAmount
+                  })),
+                  detectedVendor: 'blinkit',
+                  totalPOs: blinkitResult.poList.length,
+                  source: 'pdf'
+                });
+              } else {
+                // If no valid PDF data provided, return mock data for demo
               console.log("No valid PDF data provided, using mock data for demo");
               const mockPdfData = {
                 orderDetails: {
@@ -2019,31 +2065,107 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 totalPOs: blinkitResult.poList.length,
                 source: 'pdf'
               });
+              }
             }
           } else {
             // Handle Excel/CSV files
-            console.log("Processing Blinkit Excel/CSV file with multiple POs (platform param)...");
-            const blinkitResult = parseBlinkitPO(req.file.buffer, uploadedBy);
-            console.log("Found", blinkitResult.poList.length, "POs in Blinkit file");
-            // Return the multiple POs structure for Blinkit
-            return res.json({
-              poList: blinkitResult.poList.map(po => ({
-                header: po.header,
-                lines: po.lines,
-                totalItems: po.lines.length,
-                totalQuantity: po.header.total_quantity,
-                totalAmount: po.lines.reduce((sum, line) => sum + parseFloat(line.total_amount || '0'), 0).toFixed(2)
-              })),
-              detectedVendor: 'blinkit',
-              totalPOs: blinkitResult.poList.length
-            });
+            console.log("Processing Blinkit Excel file...");
+
+            try {
+              // Try to parse as real Blinkit Excel format first
+              console.log("🔍 Attempting to parse as real Blinkit Excel format...");
+              const realExcelData = parseBlinkitExcelFile(req.file.buffer);
+
+              // Validate the extracted data
+              const validation = validateBlinkitPoData(realExcelData);
+
+              console.log("✅ Successfully parsed real Blinkit Excel file:", {
+                po_number: realExcelData.po_header.po_number,
+                vendor_name: realExcelData.po_header.vendor_name,
+                total_items: realExcelData.po_lines.length,
+                validation_valid: validation.valid
+              });
+
+              // Format for preview
+              const previewData = formatBlinkitPoForPreview(realExcelData);
+
+              return res.json({
+                success: true,
+                data: {
+                  // Include both naming conventions for compatibility
+                  po_header: previewData.header,
+                  po_lines: previewData.lines,
+                  header: previewData.header,  // Added for frontend compatibility
+                  lines: previewData.lines,    // Added for frontend compatibility
+                  summary: previewData.summary,
+                  validation: validation,
+                  source: 'excel_real_data_extracted'
+                },
+                message: `Successfully extracted data from Excel for PO ${realExcelData.po_header.po_number} with ${realExcelData.po_lines.length} line items`
+              });
+
+            } catch (realExcelError) {
+              console.warn("⚠️ Real Excel format parsing failed, trying legacy CSV parser:", realExcelError);
+
+              try {
+                // Fallback to legacy CSV parser
+                const blinkitResult = parseBlinkitPO(req.file.buffer, uploadedBy);
+                console.log("Found", blinkitResult.poList.length, "POs in Blinkit file (legacy format)");
+
+                return res.json({
+                  poList: blinkitResult.poList.map(po => ({
+                    header: po.header,
+                    lines: po.lines,
+                    totalItems: po.lines.length,
+                    totalQuantity: po.header.total_quantity,
+                    totalAmount: po.lines.reduce((sum, line) => sum + parseFloat(line.total_amount || '0'), 0).toFixed(2)
+                  })),
+                  detectedVendor: 'blinkit',
+                  totalPOs: blinkitResult.poList.length,
+                  source: 'legacy_format'
+                });
+              } catch (legacyError) {
+                console.error("❌ Both real Excel and legacy parsing failed:", legacyError);
+
+                return res.status(400).json({
+                  error: "Unable to parse Blinkit file",
+                  details: "This file format is not supported. Please ensure you're uploading a valid Blinkit Purchase Order Excel file.",
+                  suggestion: "Try uploading the file in PDF format or check if the Excel file has the correct structure with proper headers."
+                });
+              }
+            }
           }
         } else if (platformParam === "flipkart") {
           detectedVendor = "flipkart";
           parsedData = await parseFlipkartGroceryPO(req.file.buffer.toString('utf-8'), uploadedBy);
         } else if (platformParam === "zepto") {
           detectedVendor = "zepto";
-          parsedData = parseZeptoPO(req.file.buffer.toString('utf-8'), uploadedBy);
+          const zeptoResult = parseZeptoPO(req.file.buffer.toString('utf-8'), uploadedBy);
+          console.log("Found", zeptoResult.poList.length, "POs in Zepto file");
+          if (zeptoResult.poList.length > 1) {
+            console.log("Multiple POs detected:", zeptoResult.poList.map(po => po.header.po_number));
+            // Return multiple PO structure for frontend
+            return res.json({
+              success: true,
+              data: {
+                poList: zeptoResult.poList,
+                detectedVendor: "zepto",
+                totalPOs: zeptoResult.poList.length,
+                source: 'zepto_multiple_pos'
+              },
+              message: `Found ${zeptoResult.poList.length} Zepto POs in the file`
+            });
+          }
+          const firstPO = zeptoResult.poList[0];
+          if (firstPO) {
+            parsedData = {
+              header: firstPO.header,
+              lines: firstPO.lines,
+              source: 'zepto_single_po'
+            };
+          } else {
+            parsedData = null;
+          }
         } else if (platformParam === "citymall") {
           detectedVendor = "citymall";
           parsedData = await parseCityMallPO(req.file.buffer.toString('utf-8'), uploadedBy, filename);
@@ -2066,7 +2188,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
           parsedData = await parseFlipkartGroceryPO(req.file.buffer.toString('utf-8'), uploadedBy);
         } else if (filename.includes('zepto')) {
           detectedVendor = "zepto";
-          parsedData = parseZeptoPO(req.file.buffer.toString('utf-8'), uploadedBy);
+          const zeptoResult = parseZeptoPO(req.file.buffer.toString('utf-8'), uploadedBy);
+          console.log("Found", zeptoResult.poList.length, "POs in Zepto file (filename detection)");
+          if (zeptoResult.poList.length > 1) {
+            console.log("Multiple POs detected:", zeptoResult.poList.map(po => po.header.po_number));
+            // Return multiple PO structure for frontend
+            return res.json({
+              success: true,
+              data: {
+                poList: zeptoResult.poList,
+                detectedVendor: "zepto",
+                totalPOs: zeptoResult.poList.length,
+                source: 'zepto_multiple_pos'
+              },
+              message: `Found ${zeptoResult.poList.length} Zepto POs in the file`
+            });
+          }
+          const firstPO = zeptoResult.poList[0];
+          if (firstPO) {
+            parsedData = {
+              header: firstPO.header,
+              lines: firstPO.lines,
+              source: 'zepto_single_po'
+            };
+          } else {
+            parsedData = null;
+          }
         } else if (filename.includes('city') || filename.includes('mall')) {
           detectedVendor = "citymall";
           parsedData = await parseCityMallPO(req.file.buffer.toString('utf-8'), uploadedBy, filename);
@@ -2099,7 +2246,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Try different parsers until one works
           const parsers = [
             { name: "flipkart", parser: (buffer: Buffer, user: string) => parseFlipkartGroceryPO(buffer.toString('utf-8'), user) },
-            { name: "zepto", parser: (buffer: Buffer, user: string) => parseZeptoPO(buffer.toString('utf-8'), user) },
+            { name: "zepto", parser: (buffer: Buffer, user: string) => {
+              const zeptoResult = parseZeptoPO(buffer.toString('utf-8'), user);
+              // Convert multiple PO structure to single PO for fallback detection
+              return zeptoResult.poList.length > 0 ? zeptoResult.poList[0] : { header: {}, lines: [] };
+            } },
             { name: "citymall", parser: (buffer: Buffer, user: string) => parseCityMallPO(buffer.toString('utf-8'), user, filename) },
             { name: "blinkit", parser: (buffer: Buffer, user: string) => {
               const result = parseBlinkitPO(buffer, user);
@@ -2198,10 +2349,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         bodyKeys: Object.keys(req.body)
       });
       
+      // Handle Zepto multi-PO structure
+      if (vendor === "zepto" && poList && Array.isArray(poList)) {
+        console.log(`🔄 Processing ${poList.length} Zepto POs for import...`);
+        const insertResult = await insertMultipleZeptoPoToDatabase(poList);
+
+        if (!insertResult.success) {
+          throw new Error(insertResult.message);
+        }
+
+        return res.status(201).json({
+          message: insertResult.message,
+          data: insertResult.data,
+          success: true
+        });
+      }
+
       // Handle Blinkit multi-PO structure
       if (vendor === "blinkit" && poList && Array.isArray(poList)) {
         const importResults = [];
-        
+
         for (const po of poList) {
           try {
             // Check if PO number exists
@@ -2481,6 +2648,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
 
           createdPo = await storage.createBlinkitPo(filteredHeader, filteredLines);
+        } else if (vendor === 'zepto') {
+          // Handle Zepto using the specialized database operations
+          const zeptoPoData = {
+            header: cleanHeader,
+            lines: cleanLines
+          };
+          const insertResult = await insertZeptoPoToDatabase(zeptoPoData);
+          if (!insertResult.success) {
+            throw new Error(insertResult.message);
+          }
+          createdPo = insertResult.data;
         } else if (vendor === 'swiggy') {
           createdPo = await storage.createSwiggyPo(cleanHeader, cleanLines);
         } else if (vendor === 'bigbasket') {
@@ -5229,9 +5407,147 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  const httpServer = createServer(app);
-  
+  // NEW ENDPOINT: Confirm and Insert Blinkit PO Data into Database
+  app.post("/api/blinkit/confirm-insert", async (req, res) => {
+    try {
+      console.log('🔄 Received request to confirm and insert Blinkit PO data...');
 
-  
+      // Extract data from request body
+      const { po_header, po_lines } = req.body;
+
+      if (!po_header || !po_lines) {
+        return res.status(400).json({
+          success: false,
+          error: "Missing required data: po_header and po_lines"
+        });
+      }
+
+      // Validate the data
+      const blinkitPoData = { po_header, po_lines };
+      const validation = validateBlinkitPoData(blinkitPoData);
+
+      if (!validation.valid) {
+        console.warn('❌ Validation failed:', validation.errors);
+        return res.status(400).json({
+          success: false,
+          error: "Data validation failed",
+          validation_errors: validation.errors
+        });
+      }
+
+      console.log('✅ Data validation passed');
+
+      // Insert into database
+      const insertResult = await insertBlinkitPoData(blinkitPoData);
+
+      if (!insertResult.success) {
+        console.error('❌ Database insertion failed:', insertResult.message);
+        return res.status(500).json({
+          success: false,
+          error: "Database insertion failed",
+          message: insertResult.message
+        });
+      }
+
+      console.log('🎉 Successfully inserted Blinkit PO data!');
+
+      // Return success response with database information
+      res.json({
+        success: true,
+        message: insertResult.message,
+        data: {
+          blinkit_header_id: insertResult.headerId,
+          master_po_id: insertResult.masterId,
+          po_number: po_header.po_number,
+          total_items: po_lines.length,
+          total_quantity: po_header.total_quantity,
+          total_amount: po_header.total_amount,
+          database_tables: {
+            blinkit_po_header: "1 record inserted",
+            blinkit_po_lines: `${po_lines.length} records inserted`,
+            po_master: "1 record inserted (with platform_id: 3)",
+            po_lines: `${po_lines.length} records inserted`
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Error in confirm-insert endpoint:', error);
+      res.status(500).json({
+        success: false,
+        error: "Internal server error",
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // NEW ENDPOINT: Confirm and Insert Zepto PO Data into Database
+  app.post("/api/zepto/confirm-insert", async (req, res) => {
+    try {
+      console.log('🔄 Received request to confirm and insert Zepto PO data...');
+
+      // Extract data from request body
+      const { po_header, po_lines } = req.body;
+
+      if (!po_header || !po_lines) {
+        return res.status(400).json({
+          success: false,
+          error: "Missing required data: po_header and po_lines"
+        });
+      }
+
+      console.log('✅ Data validation passed');
+
+      // Prepare data for insertion
+      const zeptoPoData = {
+        header: po_header,
+        lines: po_lines
+      };
+
+      // Insert into database
+      const insertResult = await insertZeptoPoToDatabase(zeptoPoData);
+
+      if (!insertResult.success) {
+        console.error('❌ Database insertion failed:', insertResult.message);
+        return res.status(500).json({
+          success: false,
+          error: "Database insertion failed",
+          message: insertResult.message
+        });
+      }
+
+      console.log('🎉 Successfully inserted Zepto PO data!');
+
+      // Return success response with database information
+      res.json({
+        success: true,
+        message: insertResult.message,
+        data: {
+          zepto_header_id: insertResult.data?.id,
+          po_number: po_header.po_number,
+          total_items: po_lines.length,
+          total_quantity: po_header.total_quantity,
+          total_amount: po_header.total_amount,
+          database_tables: {
+            zepto_po_header: "1 record inserted",
+            zepto_po_lines: `${po_lines.length} records inserted`
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Error in zepto confirm-insert endpoint:', error);
+      res.status(500).json({
+        success: false,
+        error: "Internal server error",
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  const httpServer = createServer(app);
+
+
+
   return httpServer;
 }

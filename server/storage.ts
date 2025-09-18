@@ -487,11 +487,11 @@ export interface IStorage {
   sessionStore: session.Store;
 }
 
+import connectPgSimple from "connect-pg-simple";
 import session from "express-session";
-import MemoryStore from "memorystore";
+import { pool } from "./db";
 
-// Use MemoryStore instead of PostgreSQL session store for SQL Server compatibility
-const MemorySessionStore = MemoryStore(session);
+const PostgresSessionStore = connectPgSimple(session);
 
 export class DatabaseStorage implements IStorage {
   sessionStore: session.Store;
@@ -510,8 +510,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   constructor() {
-    this.sessionStore = new MemorySessionStore({
-      checkPeriod: 86400000, // Prune expired entries every 24h
+    this.sessionStore = new PostgresSessionStore({
+      pool: pool as any,
+      createTableIfMissing: true,
     });
   }
   // Enhanced user methods with session store

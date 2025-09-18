@@ -6,6 +6,9 @@ import dotenv from "dotenv";
 // Load environment variables
 dotenv.config();
 
+// FORCE SERVER RESTART - LIVE FIX V5 ACTIVE
+console.log('🚀 SERVER RESTART - LIVE FIX V5 LOADED - LINE ITEMS EXTRACTION FIXED');
+
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));

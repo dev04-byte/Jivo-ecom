@@ -321,17 +321,24 @@ interface ParsedZeptoPO {
   lines: InsertZeptoPoLines[];
 }
 
-export function parseZeptoPO(csvContent: string, uploadedBy: string): ParsedZeptoPO {
+interface ParsedZeptoPOMultiple {
+  poList: Array<{
+    header: InsertZeptoPoHeader;
+    lines: InsertZeptoPoLines[];
+  }>;
+}
+
+export function parseZeptoPO(csvContent: string, uploadedBy: string): ParsedZeptoPOMultiple {
   // Clean the CSV content to remove any BOM or extra whitespace
   const cleanContent = csvContent.replace(/^\uFEFF/, '').trim();
-  
+
   // First, let's check if there are multiple header rows
   const csvLines = cleanContent.split('\n');
   console.log('First 3 lines of CSV:');
   csvLines.slice(0, 3).forEach((line, idx) => {
     console.log(`Line ${idx + 1}: ${line}`);
   });
-  
+
   const records = parse(cleanContent, {
     columns: true,
     skip_empty_lines: true,
@@ -341,94 +348,166 @@ export function parseZeptoPO(csvContent: string, uploadedBy: string): ParsedZept
   });
 
   if (records.length === 0) {
-    throw new Error('CSV file is empty or invalid');
+    throw new Error('CSV file is empty or contains no data rows. Please ensure the CSV file has actual data beyond just headers.');
   }
 
-  // Get PO number from first record
-  const firstRecord = records[0] as Record<string, string>;
-  const poNumber = firstRecord['PO No.'];
-  if (!poNumber) {
-    throw new Error('PO Number not found in CSV');
-  }
-
-  const lines: InsertZeptoPoLines[] = [];
-  const brands = new Set<string>();
-  let totalQuantity = 0;
-  let totalCostValue = 0;
-  let totalTaxAmount = 0;
-  let totalAmount = 0;
-
-  // Process each line item
-  records.forEach((record: any, index: number) => {
-    try {
-      // Debug logging for first record
-      if (index === 0) {
-        console.log('Zepto CSV columns:', Object.keys(record));
-        console.log('SAP Id value:', record['SAP Id']);
-        console.log('All column variations:');
-        Object.keys(record).forEach(key => {
-          if (key.toLowerCase().includes('sap')) {
-            console.log(`  "${key}": "${record[key]}"`);
-          }
-        });
-        console.log('First record full data:', record);
-      }
-      
-      const line: InsertZeptoPoLines = {
-        line_number: index + 1,
-        po_number: record['PO No.'] || poNumber,
-        sku: record['SKU'] || '',
-        brand: record['Brand'] || '',
-        sku_id: record['SKU Id'] || '',
-        sap_id: record['SAP Id'] || '',
-        hsn_code: record['HSN Code'] || '',
-        ean_no: record['EAN No.'] || '',
-        po_qty: parseInt(record['PO Qty']) || 0,
-        asn_qty: parseInt(record['ASN Qty']) || 0,
-        grn_qty: parseInt(record['GRN Qty']) || 0,
-        remaining_qty: parseInt(record['Remaining']) || 0,
-        cost_price: parseDecimal(record['Cost Price']),
-        cgst: parseDecimal(record['CGST']),
-        sgst: parseDecimal(record['SGST']),
-        igst: parseDecimal(record['IGST']),
-        cess: parseDecimal(record['CESS']),
-        mrp: parseDecimal(record['MRP']),
-        total_value: parseDecimal(record['Total Value']),
-        status: 'Pending',
-        created_by: uploadedBy
-      };
-
-      lines.push(line);
-
-      // Add brand to set
-      if (line.brand) {
-        brands.add(line.brand);
-      }
-
-      // Update totals
-      totalQuantity += line.po_qty || 0;
-      totalCostValue += Number(line.cost_price || 0) * (line.po_qty || 0);
-      totalTaxAmount += (Number(line.cgst || 0) + Number(line.sgst || 0) + Number(line.igst || 0) + Number(line.cess || 0)) * (line.po_qty || 0);
-      totalAmount += Number(line.total_value) || 0;
-
-    } catch (error) {
-      console.warn(`Error parsing Zepto PO line ${index + 1}:`, error);
-    }
+  // Check if all records are empty (only headers, no data)
+  const hasValidData = records.some((record: any) => {
+    return Object.values(record).some(value => value && value.toString().trim() !== '');
   });
 
-  const header: InsertZeptoPoHeader = {
-    po_number: poNumber,
-    status: 'Open',
-    total_quantity: totalQuantity,
-    total_cost_value: totalCostValue.toString(),
-    total_tax_amount: totalTaxAmount.toString(),
-    total_amount: totalAmount.toString(),
-    unique_brands: Array.from(brands),
-    created_by: uploadedBy,
-    uploaded_by: uploadedBy
-  };
+  if (!hasValidData) {
+    throw new Error('CSV file contains only headers with no actual data. Please upload a CSV file with PO line items.');
+  }
 
-  return { header, lines };
+  // Group records by PO Number
+  const poGroups = new Map<string, any[]>();
+
+  records.forEach((record: any) => {
+    const hasData = Object.values(record).some(value => value && value.toString().trim() !== '');
+    if (!hasData) return;
+
+    const poNumber = record['PO No.']?.trim();
+    if (!poNumber) return;
+
+    if (!poGroups.has(poNumber)) {
+      poGroups.set(poNumber, []);
+    }
+    poGroups.get(poNumber)!.push(record);
+  });
+
+  if (poGroups.size === 0) {
+    throw new Error('No valid PO numbers found in CSV. Please ensure the CSV has valid data in the "PO No." column.');
+  }
+
+  // Process each PO group
+  const poList: Array<{header: InsertZeptoPoHeader; lines: InsertZeptoPoLines[]}> = [];
+
+  for (const [poNumber, poRecords] of poGroups) {
+    const lines: InsertZeptoPoLines[] = [];
+    const brands = new Set<string>();
+    let totalQuantity = 0;
+    let totalCostValue = 0;
+    let totalTaxAmount = 0;
+    let totalAmount = 0;
+
+    // Process each line item for this PO
+    poRecords.forEach((record: any, index: number) => {
+      try {
+        // Debug logging for first valid record of first PO
+        if (poList.length === 0 && lines.length === 0) {
+          console.log('Zepto CSV columns:', Object.keys(record));
+          console.log('First valid record full data:', record);
+        }
+
+        // Use sequential line numbers since Line No column is empty
+        const lineNumber = index + 1;
+
+        // Map to correct CSV columns based on actual data structure
+        const line: InsertZeptoPoLines = {
+          line_number: lineNumber,
+          po_number: poNumber,
+          sku: record['SKU'] || '',  // Use the GUID from SKU column
+          sku_desc: record['SKU Desc'] || '',  // Product description
+          brand: record['Brand'] || '',
+          sku_id: record['SKU Code'] || '',  // This is empty in the actual file
+          sap_id: record['SKU'] || '',  // Use SKU as SAP ID since SKU Code is empty
+          hsn_code: record['HSN'] || '',
+          ean_no: record['EAN'] || '',
+          po_qty: parseInt(record['Qty']) || 0,
+          asn_qty: parseInt(record['ASN Quantity']) || 0,
+          grn_qty: parseInt(record['GRN Quantity']) || 0,
+          remaining_qty: (parseInt(record['Qty']) || 0) - (parseInt(record['ASN Quantity']) || 0) - (parseInt(record['GRN Quantity']) || 0),
+          cost_price: parseDecimal(record['Unit Base Cost']),
+          landing_cost: parseDecimal(record['Landing Cost']),
+          cgst: parseDecimal(record['CGST %']),
+          sgst: parseDecimal(record['SGST %']),
+          igst: parseDecimal(record['IGST %']),
+          cess: parseDecimal(record['CESS %']),
+          mrp: parseDecimal(record['MRP']),
+          total_value: parseDecimal(record['Total Amount']),
+          status: record['Status'] || 'PENDING_ACKNOWLEDGEMENT',  // Use actual status from CSV
+          created_by: record['Created By'] || uploadedBy
+        };
+
+        lines.push(line);
+
+        // Add brand to set
+        if (line.brand) {
+          brands.add(line.brand);
+        }
+
+        // Update totals
+        totalQuantity += line.po_qty || 0;
+        totalCostValue += Number(line.cost_price || 0) * (line.po_qty || 0);
+
+        // Calculate tax amounts per item
+        const itemTaxAmount = ((Number(line.cgst || 0) + Number(line.sgst || 0) + Number(line.igst || 0) + Number(line.cess || 0)) / 100) * Number(line.cost_price || 0) * (line.po_qty || 0);
+        totalTaxAmount += itemTaxAmount;
+
+        totalAmount += Number(line.total_value) || 0;
+
+      } catch (error) {
+        console.warn(`Error parsing Zepto PO line ${index + 1} for PO ${poNumber}:`, error);
+      }
+    });
+
+    // Create header for this PO using first record
+    const firstRecord = poRecords[0];
+
+    // Parse date properly - handle various date formats including "9/17/2025 12:04"
+    const parseZeptoDate = (dateStr: string): Date => {
+      try {
+        if (!dateStr) return new Date();
+
+        // Handle "9/17/2025 12:04" format (M/D/YYYY H:mm)
+        if (dateStr.includes('/')) {
+          const date = new Date(dateStr);
+          if (!isNaN(date.getTime())) {
+            return date;
+          }
+        }
+
+        // Handle "2024-01-15" format
+        if (dateStr.includes('-') && dateStr.split('-').length === 3) {
+          return new Date(dateStr);
+        }
+
+        // Handle other formats
+        const date = new Date(dateStr);
+        if (!isNaN(date.getTime())) {
+          return date;
+        }
+        return new Date();
+      } catch {
+        return new Date();
+      }
+    };
+
+    const header: InsertZeptoPoHeader = {
+      po_number: poNumber,
+      po_date: parseZeptoDate(firstRecord['PO Date']),
+      status: firstRecord['Status'] || 'Open',
+      vendor_code: firstRecord['Vendor Code'] || '',
+      vendor_name: firstRecord['Vendor Name'] || '',
+      po_amount: parseDecimal(firstRecord['PO Amount']) || totalAmount.toString(),
+      delivery_location: firstRecord['Del Location'] || '',
+      po_expiry_date: firstRecord['PO Expiry Date'] ? parseZeptoDate(firstRecord['PO Expiry Date']) : null,
+      total_quantity: totalQuantity,
+      total_cost_value: totalCostValue.toString(),
+      total_tax_amount: totalTaxAmount.toString(),
+      total_amount: totalAmount.toString(),
+      unique_brands: Array.from(brands),
+      created_by: firstRecord['Created By'] || uploadedBy,
+      uploaded_by: uploadedBy
+    };
+
+    poList.push({ header, lines });
+  }
+
+  console.log(`✅ Successfully parsed ${poList.length} Zepto POs with ${poList.reduce((sum, po) => sum + po.lines.length, 0)} total line items`);
+
+  return { poList };
 }
 
 interface ParsedCityMallPO {

@@ -28,7 +28,7 @@ export function parseBlinkitPDF(pdfData: any, uploadedBy: string): {
     const header: any = {
       // ACTUAL Database columns
       po_number: orderDetails?.poNumber || `BL${Date.now()}`,
-      po_date: orderDetails?.date ? new Date(orderDetails.date.replace(/Sept\./g, 'Sep')).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      po_date: orderDetails?.date ? parseBlinkitDate(orderDetails.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       po_type: orderDetails?.poType || 'PO',
       currency: orderDetails?.currency || 'INR',
       buyer_name: buyer?.company || 'HANDS ON TRADES PRIVATE LIMITED',
@@ -53,14 +53,14 @@ export function parseBlinkitPDF(pdfData: any, uploadedBy: string): {
       spoc_phone: buyer?.phone || '+91 9068342018',
       spoc_email: vendor?.email || 'marketplace@jivo.in',
       payment_terms: orderDetails?.paymentTerms || '30 Days',
-      po_expiry_date: orderDetails?.expiryDate ? new Date(orderDetails.expiryDate.replace(/Sept\./g, 'Sep')).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      po_delivery_date: orderDetails?.deliveryDate ? new Date(orderDetails.deliveryDate.replace(/Sept\./g, 'Sep')).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      po_expiry_date: orderDetails?.expiryDate ? parseBlinkitDate(orderDetails.expiryDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      po_delivery_date: orderDetails?.deliveryDate ? parseBlinkitDate(orderDetails.deliveryDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       total_quantity: summary?.totalQuantity || items.reduce((sum, item) => sum + (item.quantity || 0), 0),
       total_items: summary?.totalItems || items.length,
-      total_weight: summary?.totalWeight ? String(summary.totalWeight).replace(/[^0-9.]/g, '') : '0',
-      total_amount: summary?.totalAmount?.toString() || '0',
+      total_weight: summary?.totalWeight ? String(summary.totalWeight) : calculateTotalWeightFromItems(items),
+      total_amount: summary?.totalAmount?.toString() || calculateTotalAmountFromItems(items),
       cart_discount: summary?.cartDiscount?.toString() || '0',
-      net_amount: summary?.netAmount?.toString() || summary?.totalAmount?.toString() || '0'
+      net_amount: summary?.netAmount?.toString() || summary?.totalAmount?.toString() || calculateTotalAmountFromItems(items)
     };
 
     // Create lines from PDF items matching ACTUAL database schema
@@ -103,14 +103,45 @@ export function parseBlinkitPDF(pdfData: any, uploadedBy: string): {
 // Helper function to parse Blinkit date format
 function parseBlinkitDate(dateString: string): Date {
   try {
-    // Handle format like "Sept. 10, 2025, 12:38 p.m."
-    if (dateString.includes(',')) {
-      const datePart = dateString.split(',')[0].trim();
-      return new Date(datePart);
+    if (!dateString || typeof dateString !== 'string') {
+      console.warn('Invalid date string provided:', dateString);
+      return new Date();
     }
-    return new Date(dateString);
+
+    // Handle format like "Sept. 10, 2025, 12:38 p.m."
+    let cleanDateString = dateString.trim();
+
+    // Replace common abbreviations
+    cleanDateString = cleanDateString
+      .replace(/Sept\./g, 'Sep')
+      .replace(/Oct\./g, 'Oct')
+      .replace(/Nov\./g, 'Nov')
+      .replace(/Dec\./g, 'Dec')
+      .replace(/Jan\./g, 'Jan')
+      .replace(/Feb\./g, 'Feb')
+      .replace(/Mar\./g, 'Mar')
+      .replace(/Apr\./g, 'Apr')
+      .replace(/Jun\./g, 'Jun')
+      .replace(/Jul\./g, 'Jul')
+      .replace(/Aug\./g, 'Aug');
+
+    // If it contains comma, take only the date part
+    if (cleanDateString.includes(',')) {
+      const datePart = cleanDateString.split(',')[0].trim();
+      cleanDateString = datePart;
+    }
+
+    const parsedDate = new Date(cleanDateString);
+
+    // Check if date is valid
+    if (isNaN(parsedDate.getTime())) {
+      console.warn('Could not parse date, using current date:', dateString);
+      return new Date();
+    }
+
+    return parsedDate;
   } catch (error) {
-    console.warn('Could not parse date:', dateString);
+    console.warn('Error parsing date, using current date:', dateString, error);
     return new Date();
   }
 }
@@ -132,6 +163,63 @@ function extractGrammage(description: string): string {
   }
 
   return '';
+}
+
+// Helper function to calculate total weight from items
+function calculateTotalWeightFromItems(items: any[]): string {
+  if (!items || items.length === 0) return '0';
+
+  let totalWeight = 0;
+
+  for (const item of items) {
+    const description = item.productDescription || '';
+
+    // Extract weight from product description (e.g., "(2 l)", "(500 ml)", "(1 kg)")
+    const weightMatch = description.match(/\(([^)]+)\)$/) || description.match(/(\d+(?:\.\d+)?\s*(?:l|ml|kg|g|gm|litre?s?|gram?s?|kilo?s?))/i);
+
+    if (weightMatch) {
+      let weightStr = weightMatch[1].toLowerCase().replace(/[(),]/g, '').trim();
+      let weight = parseFloat(weightStr);
+
+      if (!isNaN(weight)) {
+        // Convert to grams for consistency
+        if (weightStr.includes('kg') || weightStr.includes('kilo')) {
+          weight *= 1000; // kg to grams
+        } else if (weightStr.includes('l') || weightStr.includes('litre')) {
+          weight *= 1000; // assuming liquid density ~1g/ml
+        }
+        // ml and g are already in base units
+
+        totalWeight += weight * (item.quantity || 1);
+      }
+    }
+  }
+
+  // Convert back to kg for display
+  return totalWeight > 0 ? (totalWeight / 1000).toFixed(2) : '0';
+}
+
+// Helper function to calculate total amount from items
+function calculateTotalAmountFromItems(items: any[]): string {
+  if (!items || items.length === 0) return '0';
+
+  let totalAmount = 0;
+
+  for (const item of items) {
+    const itemAmount = (item.totalAmount || item.amount || 0);
+    const quantity = item.quantity || 1;
+
+    if (typeof itemAmount === 'number') {
+      totalAmount += itemAmount;
+    } else if (typeof itemAmount === 'string') {
+      const parsed = parseFloat(itemAmount.replace(/[^0-9.-]/g, ''));
+      if (!isNaN(parsed)) {
+        totalAmount += parsed;
+      }
+    }
+  }
+
+  return totalAmount > 0 ? totalAmount.toFixed(2) : '0';
 }
 
 // Helper function to validate PDF data structure
