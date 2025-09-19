@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { FileText, Upload, ArrowRight, Check, X, Database } from "lucide-react";
+import { FileText, Upload, ArrowRight, Check, X, Database, Eye, ExternalLink } from "lucide-react";
+import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -123,6 +124,18 @@ const safeDisplay = (value: any, defaultValue: string = '', type?: 'currency' | 
   return stringValue;
 };
 
+// Helper function to conditionally render fields (hide empty ones instead of showing "Not available")
+const renderField = (label: string, value: any, className: string = '') => {
+  if (!value || value === '' || value === 'Not available') {
+    return null; // Don't render empty fields
+  }
+  return (
+    <div className={className}>
+      <span className="font-medium">{label}:</span> {value}
+    </div>
+  );
+};
+
 export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentProps) {
   const [currentStep, setCurrentStep] = useState<Step>("platform");
   const [selectedPlatform, setSelectedPlatform] = useState<string>("");
@@ -130,8 +143,10 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
   const [parsedData, setParsedData] = useState<any>(null);
   const [dragActive, setDragActive] = useState(false);
   const [isPDFFile, setIsPDFFile] = useState(false);
+  const [importedPOs, setImportedPOs] = useState<Array<{id: number, po_number: string, platform: string}>>([]);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
 
   const selectedPlatformData = PLATFORMS.find(p => p.id === selectedPlatform);
 
@@ -147,6 +162,10 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
   const handleZeptoImport = async (importData: { header: any, lines: any[] }) => {
     try {
       console.log('🔄 Importing Zepto PO to database...');
+      console.log('📦 Frontend sending data:', JSON.stringify({
+        po_header: importData.header,
+        po_lines: importData.lines
+      }, null, 2));
 
       const response = await fetch('/api/zepto/confirm-insert', {
         method: 'POST',
@@ -159,22 +178,98 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to import PO to database');
+      console.log('📡 Response status:', response.status);
+      console.log('📡 Response headers:', Object.fromEntries(response.headers.entries()));
+
+      const responseText = await response.text();
+      console.log('📄 Raw response text:', responseText);
+
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('❌ Failed to parse response as JSON:', parseError);
+        console.error('📄 Raw response was:', responseText);
+        throw new Error('Server returned invalid JSON response');
       }
 
-      const result = await response.json();
+      if (!response.ok) {
+        console.error('Server response:', result);
 
-      toast({
-        title: "Import successful!",
-        description: `PO ${importData.header.po_number} has been imported to the database`,
-      });
+        // Check if it's a duplicate PO error
+        if (response.status === 409 || result.type === 'duplicate_po') {
+          toast({
+            title: "Duplicate PO Detected",
+            description: result.message || `PO ${importData.header.po_number} already exists in the database`,
+            variant: "destructive",
+          });
+          return result;
+        }
 
-      // Invalidate queries to refresh data
-      queryClient.invalidateQueries({ queryKey: ["/api/zepto-pos"] });
+        const errorMessage = result.error || result.message || 'Failed to import PO to database';
+        const errorDetails = result.details ? JSON.stringify(result.details, null, 2) : '';
 
-      console.log('✅ Import completed successfully');
+        if (errorDetails) {
+          console.error('Error details:', errorDetails);
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      // Only show success if the response was actually successful
+      if (response.ok && result.success !== false) {
+        // Store imported PO details for navigation
+        if (result.data && result.data.zepto_header_id) {
+          const importedPO = {
+            id: result.data.zepto_header_id,
+            po_number: importData.header.po_number,
+            platform: 'zepto'
+          };
+          setImportedPOs(prev => [...prev, importedPO]);
+        }
+
+        toast({
+          title: "Import successful!",
+          description: `PO ${importData.header.po_number} has been imported to the database and will appear in Platform Purchase Orders`,
+        action: (
+          <div className="flex gap-2">
+            {result.data?.zepto_header_id && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setLocation(`/zepto-pos/${result.data.zepto_header_id}`)}
+                className="gap-2"
+              >
+                <Eye className="h-4 w-4" />
+                View Details
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLocation('/platform-po')}
+              className="gap-2"
+            >
+              <ArrowRight className="h-4 w-4" />
+              All POs
+            </Button>
+          </div>
+        ),
+        });
+
+        // Invalidate queries to refresh data
+        queryClient.invalidateQueries({ queryKey: ["/api/zepto-pos"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/pos"] }); // For Platform Purchase Orders page
+
+        console.log('✅ Import completed successfully');
+      } else {
+        // Handle case where response is ok but success is false
+        toast({
+          title: "Import Failed",
+          description: result.message || "Failed to import PO",
+          variant: "destructive",
+        });
+      }
     } catch (error) {
       console.error('❌ Import failed:', error);
 
@@ -302,6 +397,27 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
         });
       }
 
+      // Handle new Swiggy multi-PO response
+      if (data.multiPO && data.poList && data.totalPOs) {
+        toast({
+          title: "Swiggy POs Found",
+          description: `Found ${data.totalPOs} Swiggy POs in the file`,
+        });
+
+        // Store the Swiggy multi-PO data
+        setParsedData({
+          success: true,
+          poList: data.poList,
+          detectedVendor: data.detectedVendor,
+          totalPOs: data.totalPOs,
+          multiPO: true,
+          source: 'swiggy_multiple_pos'
+        });
+
+        setCurrentStep("preview");
+        return;
+      }
+
       // Handle different response structures (legacy)
       let transformedData;
       if (data.poList && Array.isArray(data.poList) && data.poList.length > 0) {
@@ -362,11 +478,48 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
         // Multi-PO response (Blinkit)
         const successfulImports = data.results.filter((r: any) => r.status === 'success');
         const failedImports = data.results.filter((r: any) => r.status === 'failed');
-        
-        toast({
-          title: "PO import completed",
-          description: `Successfully imported ${successfulImports.length} of ${data.results.length} POs${failedImports.length > 0 ? `. ${failedImports.length} failed.` : ''}`,
-        });
+        const duplicateImports = data.results.filter((r: any) => r.status === 'duplicate');
+
+        // Check if we have a summary in the response
+        if (data.summary) {
+          const { success, duplicates, failed, total } = data.summary;
+
+          if (success === 0 && duplicates > 0) {
+            // All were duplicates
+            toast({
+              title: "Duplicate POs Detected",
+              description: data.message || `All ${duplicates} PO(s) already exist in the database. No new POs were imported.`,
+              variant: "destructive",
+            });
+          } else if (success === 0 && failed > 0) {
+            // All failed
+            toast({
+              title: "Import Failed",
+              description: data.message || `Failed to import all ${total} POs`,
+              variant: "destructive",
+            });
+          } else if (success < total) {
+            // Partial success
+            toast({
+              title: "Partial Import Success",
+              description: data.message || `Imported ${success} of ${total} POs. ${duplicates > 0 ? `${duplicates} duplicates found. ` : ''}${failed > 0 ? `${failed} failed.` : ''}`,
+              variant: "default",
+            });
+          } else {
+            // All successful
+            toast({
+              title: "Import Successful",
+              description: data.message || `Successfully imported all ${success} POs`,
+            });
+          }
+        } else {
+          // Fallback to old logic if no summary
+          toast({
+            title: duplicateImports.length > 0 ? "Import Completed with Issues" : "PO import completed",
+            description: `Successfully imported ${successfulImports.length} of ${data.results.length} POs${duplicateImports.length > 0 ? `. ${duplicateImports.length} duplicates found.` : ''}${failedImports.length > 0 ? `. ${failedImports.length} failed.` : ''}`,
+            variant: successfulImports.length === 0 ? "destructive" : "default",
+          });
+        }
         
         // For multi-PO imports, just update the list instead of redirecting to edit
         if (successfulImports.length > 0) {
@@ -460,6 +613,12 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
 
       if (!response.ok) {
         const error = await response.json();
+
+        // Check if it's a duplicate PO error
+        if (response.status === 409 || error.type === 'duplicate_po') {
+          throw new Error(error.message || `PO already exists in the database`);
+        }
+
         throw new Error(error.message || error.error || 'Failed to insert data into database');
       }
 
@@ -935,15 +1094,6 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                               <Badge variant="outline" className="text-green-600 border-green-600">
                                 Real {parsedData.source === 'pdf_real_data_extracted' ? 'PDF' : 'Excel'} Data
                               </Badge>
-                              {parsedData.validation?.valid ? (
-                                <Badge className="bg-green-100 text-green-800">
-                                  ✅ Valid
-                                </Badge>
-                              ) : (
-                                <Badge variant="destructive">
-                                  ❌ Validation Issues
-                                </Badge>
-                              )}
                             </div>
                           </CardTitle>
                           <CardDescription>
@@ -951,17 +1101,6 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                           </CardDescription>
                         </CardHeader>
                         <CardContent>
-                          {/* Validation Errors */}
-                          {parsedData.validation && !parsedData.validation.valid && (
-                            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                              <h6 className="font-semibold text-red-800 mb-2">Validation Issues:</h6>
-                              <ul className="list-disc list-inside text-sm text-red-700">
-                                {parsedData.validation.errors?.map((error: string, index: number) => (
-                                  <li key={index}>{error}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
 
                           {/* Complete Header Information */}
                           <div className="bg-gray-50 p-4 rounded-lg">
@@ -970,36 +1109,36 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                               {/* Order Details */}
                               <div className="space-y-2">
                                 <h6 className="font-semibold text-gray-700 pb-2 border-b">Order Details</h6>
-                                <div><span className="font-medium">PO Number:</span> {parsedData.po_header?.po_number || 'Not available'}</div>
-                                <div><span className="font-medium">PO Date:</span> {parsedData.po_header?.po_date || 'Not available'}</div>
-                                <div><span className="font-medium">PO Type:</span> {parsedData.po_header?.po_type || 'Not available'}</div>
-                                <div><span className="font-medium">Currency:</span> {parsedData.po_header?.currency || 'Not available'}</div>
-                                <div><span className="font-medium">Payment Terms:</span> {parsedData.po_header?.payment_terms || 'Not available'}</div>
-                                <div><span className="font-medium">Expiry Date:</span> {parsedData.po_header?.po_expiry_date || 'Not available'}</div>
-                                <div><span className="font-medium">Delivery Date:</span> {parsedData.po_header?.po_delivery_date || 'Not available'}</div>
+                                {renderField("PO Number", parsedData.po_header?.po_number)}
+                                {renderField("PO Date", parsedData.po_header?.po_date)}
+                                {renderField("PO Type", parsedData.po_header?.po_type)}
+                                {renderField("Currency", parsedData.po_header?.currency)}
+                                {renderField("Payment Terms", parsedData.po_header?.payment_terms)}
+                                {renderField("Expiry Date", parsedData.po_header?.po_expiry_date)}
+                                {renderField("Delivery Date", parsedData.po_header?.po_delivery_date)}
                               </div>
 
                               {/* Vendor Information */}
                               <div className="space-y-2">
                                 <h6 className="font-semibold text-gray-700 pb-2 border-b">Vendor Information</h6>
-                                <div><span className="font-medium">Company:</span> {parsedData.po_header?.vendor_name || 'Not available'}</div>
-                                <div><span className="font-medium">Vendor No:</span> {parsedData.po_header?.vendor_no || 'Not available'}</div>
-                                <div><span className="font-medium">Contact:</span> {parsedData.po_header?.vendor_contact_name || 'Not available'}</div>
-                                <div><span className="font-medium">Phone:</span> {parsedData.po_header?.vendor_contact_phone || 'Not available'}</div>
-                                <div><span className="font-medium">Email:</span> {parsedData.po_header?.vendor_contact_email || 'Not available'}</div>
-                                <div><span className="font-medium">GST:</span> {parsedData.po_header?.vendor_gst_no || 'Not available'}</div>
-                                <div><span className="font-medium">PAN:</span> {parsedData.po_header?.vendor_pan || 'Not available'}</div>
+                                {renderField("Company", parsedData.po_header?.vendor_name)}
+                                {renderField("Vendor No", parsedData.po_header?.vendor_no)}
+                                {renderField("Contact", parsedData.po_header?.vendor_contact_name)}
+                                {renderField("Phone", parsedData.po_header?.vendor_contact_phone)}
+                                {renderField("Email", parsedData.po_header?.vendor_contact_email)}
+                                {renderField("GST", parsedData.po_header?.vendor_gst_no)}
+                                {renderField("PAN", parsedData.po_header?.vendor_pan)}
                               </div>
 
                               {/* Buyer Information */}
                               <div className="space-y-2">
                                 <h6 className="font-semibold text-gray-700 pb-2 border-b">Buyer Information</h6>
-                                <div><span className="font-medium">Company:</span> {parsedData.po_header?.buyer_name || 'Not available'}</div>
-                                <div><span className="font-medium">Unit:</span> {parsedData.po_header?.buyer_unit || 'Not available'}</div>
-                                <div><span className="font-medium">Contact:</span> {parsedData.po_header?.buyer_contact_name || 'Not available'}</div>
-                                <div><span className="font-medium">Phone:</span> {parsedData.po_header?.buyer_contact_phone || 'Not available'}</div>
-                                <div><span className="font-medium">PAN:</span> {parsedData.po_header?.buyer_pan || 'Not available'}</div>
-                                <div><span className="font-medium">CIN:</span> {parsedData.po_header?.buyer_cin || 'Not available'}</div>
+                                {renderField("Company", parsedData.po_header?.buyer_name)}
+                                {renderField("Unit", parsedData.po_header?.buyer_unit)}
+                                {renderField("Contact", parsedData.po_header?.buyer_contact_name)}
+                                {renderField("Phone", parsedData.po_header?.buyer_contact_phone)}
+                                {renderField("PAN", parsedData.po_header?.buyer_pan)}
+                                {renderField("CIN", parsedData.po_header?.buyer_cin)}
                               </div>
                             </div>
                           </div>
@@ -1030,9 +1169,22 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                       {parsedData.po_lines && parsedData.po_lines.length > 0 && (
                         <Card>
                           <CardHeader>
-                            <CardTitle>Line Items ({parsedData.po_lines.length})</CardTitle>
+                            <CardTitle>Line Items ({parsedData.po_lines.filter((line: any) => {
+                              // Filter out terms & conditions and non-product items
+                              const itemCode = (line.item_code || '').toString().toLowerCase();
+                              const description = (line.product_description || '').toString().toLowerCase();
+
+                              return !itemCode.includes('terms') &&
+                                     !itemCode.includes('condition') &&
+                                     !itemCode.includes('total') &&
+                                     !itemCode.includes('advise') &&
+                                     !description.includes('terms') &&
+                                     !description.includes('condition') &&
+                                     !description.includes('total') &&
+                                     itemCode.length <= 50;
+                            }).length})</CardTitle>
                             <CardDescription>
-                              Complete details for all line items extracted from the PDF
+                              Product line items only (terms & conditions excluded)
                             </CardDescription>
                           </CardHeader>
                           <CardContent>
@@ -1057,12 +1209,27 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {parsedData.po_lines.map((line: any, index: number) => (
+                                  {parsedData.po_lines
+                                    .filter((line: any) => {
+                                      // Filter out terms & conditions and non-product items
+                                      const itemCode = (line.item_code || '').toString().toLowerCase();
+                                      const description = (line.product_description || '').toString().toLowerCase();
+
+                                      return !itemCode.includes('terms') &&
+                                             !itemCode.includes('condition') &&
+                                             !itemCode.includes('total') &&
+                                             !itemCode.includes('advise') &&
+                                             !description.includes('terms') &&
+                                             !description.includes('condition') &&
+                                             !description.includes('total') &&
+                                             itemCode.length <= 50;
+                                    })
+                                    .map((line: any, index: number) => (
                                     <tr key={index} className="border-t hover:bg-gray-50">
-                                      <td className="p-2 font-medium text-blue-600">{line.item_code || 'Not available'}</td>
-                                      <td className="p-2">{line.hsn_code || 'Not available'}</td>
-                                      <td className="p-2 text-sm">{line.product_upc || 'Not available'}</td>
-                                      <td className="p-2 text-sm">{line.product_description || 'Not available'}</td>
+                                      <td className="p-2 font-medium text-blue-600">{line.item_code || ''}</td>
+                                      <td className="p-2">{line.hsn_code || ''}</td>
+                                      <td className="p-2 text-sm">{line.product_upc || ''}</td>
+                                      <td className="p-2 text-sm">{line.product_description || ''}</td>
                                       <td className="p-2">{safeDisplay(line.basic_cost_price, '₹0.00', 'currency')}</td>
                                       <td className="p-2">{safeDisplay(line.igst_percent, '0%', 'percent')}</td>
                                       <td className="p-2">{line.cess_percent || '0'}%</td>
@@ -1086,21 +1253,13 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                       <div className="flex space-x-3 pt-4 border-t">
                         <Button
                           onClick={() => {
-                            if (parsedData.validation?.valid) {
-                              // Use the Blinkit confirm-insert endpoint directly
-                              confirmMutation.mutate({
-                                po_header: parsedData.po_header,
-                                po_lines: parsedData.po_lines
-                              });
-                            } else {
-                              toast({
-                                title: "Validation Failed",
-                                description: "Please fix validation errors before importing to database",
-                                variant: "destructive",
-                              });
-                            }
+                            // Use the Blinkit confirm-insert endpoint directly
+                            confirmMutation.mutate({
+                              po_header: parsedData.po_header,
+                              po_lines: parsedData.po_lines
+                            });
                           }}
-                          disabled={confirmMutation.isPending || !parsedData.validation?.valid}
+                          disabled={confirmMutation.isPending}
                           className="flex-1 bg-green-600 hover:bg-green-700"
                         >
                           {confirmMutation.isPending ? "Importing to Database..." : "Import to Database"}
@@ -1123,6 +1282,7 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                         </Badge>
                       </div>
                       
+
                       {parsedData.poList.map((po: any, index: number) => (
                         <Card key={index} className="border-l-4 border-l-blue-500">
                           <CardHeader className="pb-3">
@@ -1163,32 +1323,32 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
                                     <div className="space-y-2">
                                       <h6 className="font-semibold text-gray-700">Order Details</h6>
-                                      <div><span className="font-medium">PO Number:</span> {po.header?.po_number || 'Not available'}</div>
-                                      <div><span className="font-medium">Order Date:</span> {po.header?.po_date || 'Not available'}</div>
-                                      <div><span className="font-medium">Delivery Date:</span> {po.header?.po_delivery_date || 'Not available'}</div>
-                                      <div><span className="font-medium">Expiry Date:</span> {po.header?.po_expiry_date || 'Not available'}</div>
-                                      <div><span className="font-medium">Payment Terms:</span> {po.header?.payment_terms || 'Not available'}</div>
-                                      <div><span className="font-medium">Currency:</span> {po.header?.currency || 'Not available'}</div>
+                                      <div><span className="font-medium">PO Number:</span> {po.header?.po_number || 'N/A'}</div>
+                                      <div><span className="font-medium">Order Date:</span> {po.header?.po_date ? new Date(po.header.po_date).toLocaleDateString() : 'Date not specified'}</div>
+                                      <div><span className="font-medium">Delivery Date:</span> {po.header?.po_delivery_date ? new Date(po.header.po_delivery_date).toLocaleDateString() : po.header?.expected_delivery_date ? new Date(po.header.expected_delivery_date).toLocaleDateString() : 'Date not specified'}</div>
+                                      <div><span className="font-medium">Expiry Date:</span> {po.header?.po_expiry_date ? new Date(po.header.po_expiry_date).toLocaleDateString() : 'Date not specified'}</div>
+                                      <div><span className="font-medium">Payment Terms:</span> {po.header?.payment_terms || 'Terms via platform'}</div>
+                                      <div><span className="font-medium">Currency:</span> {po.header?.currency || 'INR'}</div>
                                     </div>
 
                                     <div className="space-y-2">
                                       <h6 className="font-semibold text-gray-700">Vendor Information</h6>
-                                      <div><span className="font-medium">Company:</span> {po.header?.vendor_name || 'Not available'}</div>
-                                      <div><span className="font-medium">Contact:</span> {po.header?.vendor_contact_name || 'Not available'}</div>
-                                      <div><span className="font-medium">Phone:</span> {po.header?.vendor_contact_phone || 'Not available'}</div>
-                                      <div><span className="font-medium">Email:</span> {po.header?.vendor_contact_email || 'Not available'}</div>
-                                      <div><span className="font-medium">GST:</span> {po.header?.vendor_gst_no || 'Not available'}</div>
-                                      <div><span className="font-medium">PAN:</span> {po.header?.vendor_pan || 'Not available'}</div>
+                                      <div><span className="font-medium">Company:</span> {po.header?.vendor_name || 'Vendor details via platform'}</div>
+                                      <div><span className="font-medium">Contact:</span> {po.header?.vendor_contact_name || 'Contact via platform'}</div>
+                                      <div><span className="font-medium">Phone:</span> {po.header?.vendor_contact_phone || 'Contact via platform'}</div>
+                                      <div><span className="font-medium">Email:</span> {po.header?.vendor_contact_email || 'Contact via platform'}</div>
+                                      <div><span className="font-medium">GST:</span> {po.header?.vendor_gst_no || 'GST info via platform'}</div>
+                                      <div><span className="font-medium">PAN:</span> {po.header?.vendor_pan || 'PAN info via platform'}</div>
                                     </div>
 
                                     <div className="space-y-2">
                                       <h6 className="font-semibold text-gray-700">Buyer Information</h6>
-                                      <div><span className="font-medium">Company:</span> {po.header?.buyer_name || 'Not available'}</div>
-                                      <div><span className="font-medium">Contact:</span> {po.header?.buyer_contact_name || 'Not available'}</div>
-                                      <div><span className="font-medium">Phone:</span> {po.header?.buyer_contact_phone || 'Not available'}</div>
-                                      <div><span className="font-medium">GST:</span> {po.header?.delivered_to_gst_no || 'Not available'}</div>
-                                      <div><span className="font-medium">PAN:</span> {po.header?.buyer_pan || 'Not available'}</div>
-                                      <div><span className="font-medium">Address:</span> {po.header?.delivered_to_address || 'Not available'}</div>
+                                      <div><span className="font-medium">Company:</span> {po.header?.buyer_name || 'Buyer details via platform'}</div>
+                                      <div><span className="font-medium">Contact:</span> {po.header?.buyer_contact_name || 'Contact via platform'}</div>
+                                      <div><span className="font-medium">Phone:</span> {po.header?.buyer_contact_phone || 'Contact via platform'}</div>
+                                      <div><span className="font-medium">GST:</span> {po.header?.delivered_to_gst_no || 'GST info via platform'}</div>
+                                      <div><span className="font-medium">PAN:</span> {po.header?.buyer_pan || 'PAN info via platform'}</div>
+                                      <div><span className="font-medium">Address:</span> {po.header?.delivered_to_address || 'Address via platform'}</div>
                                     </div>
                                   </div>
                                 )}
@@ -1294,11 +1454,11 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                             ) : (
                                               <>
                                                 <td className="p-2 font-medium">{line.line_number || lineIndex + 1}</td>
-                                                <td className="p-2 font-medium text-blue-600">{line.item_code || 'Not available'}</td>
-                                                <td className="p-2">{line.hsn_code || 'Not available'}</td>
-                                                <td className="p-2 text-sm">{line.product_upc || 'Not available'}</td>
-                                                <td className="p-2 text-sm">{line.product_description || 'Not available'}</td>
-                                                <td className="p-2">{line.grammage || 'Not available'}</td>
+                                                <td className="p-2 font-medium text-blue-600">{line.item_code || 'SKU-N/A'}</td>
+                                                <td className="p-2">{line.hsn_code || line.category_id || 'HSN via system'}</td>
+                                                <td className="p-2 text-sm">{line.product_upc || line.item_code || 'UPC via system'}</td>
+                                                <td className="p-2 text-sm">{line.product_description || line.item_description || 'Description via system'}</td>
+                                                <td className="p-2">{line.grammage || 'Unit'}</td>
                                                 <td className="p-2">{safeDisplay(line.basic_cost_price, '₹0.00', 'currency')}</td>
                                                 <td className="p-2">{safeDisplay(line.igst_percent, '0%', 'percent')}</td>
                                                 <td className="p-2">{line.cess_percent || '0'}%</td>
@@ -1408,7 +1568,18 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                           <CardHeader>
                             <CardTitle className="text-base">Complete Line Items Data</CardTitle>
                             <CardDescription>
-                              Showing all {parsedData.lines.length} items with complete details
+                              Showing {parsedData.lines.filter((line: any) => {
+                                const itemCode = (line.item_code || '').toString().toLowerCase();
+                                const description = (line.product_description || '').toString().toLowerCase();
+                                return !itemCode.includes('terms') &&
+                                       !itemCode.includes('condition') &&
+                                       !itemCode.includes('total') &&
+                                       !itemCode.includes('advise') &&
+                                       !description.includes('terms') &&
+                                       !description.includes('condition') &&
+                                       !description.includes('total') &&
+                                       itemCode.length <= 50;
+                              }).length} product items (terms & conditions excluded)
                             </CardDescription>
                           </CardHeader>
                           <CardContent>
@@ -1523,7 +1694,22 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {parsedData.lines.map((line: any, index: number) => (
+                                  {parsedData.lines
+                                    .filter((line: any) => {
+                                      // Filter out terms & conditions and non-product items
+                                      const itemCode = (line.item_code || '').toString().toLowerCase();
+                                      const description = (line.product_description || '').toString().toLowerCase();
+
+                                      return !itemCode.includes('terms') &&
+                                             !itemCode.includes('condition') &&
+                                             !itemCode.includes('total') &&
+                                             !itemCode.includes('advise') &&
+                                             !description.includes('terms') &&
+                                             !description.includes('condition') &&
+                                             !description.includes('total') &&
+                                             itemCode.length <= 50;
+                                    })
+                                    .map((line: any, index: number) => (
                                     <tr key={index} className="border-b last:border-b-0 hover:bg-gray-50">
                                       {/* Blinkit PDF data */}
                                       {parsedData.source === 'pdf' || selectedPlatformData?.id === 'blinkit' ? (
@@ -1740,6 +1926,63 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                 <Database className="h-5 w-5 mr-2" />
                 Import Data into Database
               </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Import Data into Database Button - Bottom of page for Swiggy POs */}
+      {currentStep === 'preview' && selectedPlatformData?.id === 'swiggy' && parsedData && (
+        <Card className="mt-6">
+          <CardContent className="pt-6">
+            <div className="flex justify-center">
+              <Button
+                onClick={() => {
+                  const uploadData = { poList: parsedData.poList };
+
+                  fetch('/api/swiggy/confirm-insert', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(uploadData),
+                  })
+                  .then(response => response.json())
+                  .then(data => {
+                    toast({
+                      title: "Import Successful",
+                      description: `${parsedData.poList?.length || 1} Swiggy PO(s) imported to swiggy_po_header and swiggy_po_lines tables`,
+                    });
+                    queryClient.invalidateQueries({ queryKey: ["/api/pos"] });
+                    resetForm();
+                    onComplete?.();
+                  })
+                  .catch(error => {
+                    toast({
+                      title: "Import Failed",
+                      description: error.message || 'Failed to import Swiggy POs',
+                      variant: "destructive",
+                    });
+                  });
+                }}
+                className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 text-lg"
+                size="lg"
+              >
+                <Database className="h-5 w-5 mr-2" />
+                📥 Import All Swiggy Data into Database
+              </Button>
+            </div>
+            <div className="mt-4 text-center">
+              <p className="text-sm text-gray-600">
+                {parsedData.poList?.length ? (
+                  <>
+                    Total POs: <strong>{parsedData.poList.length}</strong> |
+                    Total Items: <strong>{parsedData.poList.reduce((acc: number, po: any) => acc + (po.lines?.length || 0), 0)}</strong>
+                  </>
+                ) : (
+                  "Ready to import Swiggy PO data"
+                )}
+              </p>
             </div>
           </CardContent>
         </Card>

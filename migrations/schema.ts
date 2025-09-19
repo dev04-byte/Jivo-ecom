@@ -3248,7 +3248,7 @@ export const zeptoPoLinesLog = pgTable("zepto_po_lines_log", {
 	originalCess: numeric("original_cess"),
 	originalMrp: numeric("original_mrp"),
 	originalTotalValue: numeric("original_total_value"),
-	originalStatus: varchar("original_status", { length: 20 }).default('Pending'),
+	originalStatus: varchar("original_status", { length: 50 }).default('Pending'),
 	originalCreatedBy: varchar("original_created_by", { length: 100 }),
 	originalCreatedAt: timestamp("original_created_at", { mode: 'string' }).defaultNow(),
 }, (table) => [

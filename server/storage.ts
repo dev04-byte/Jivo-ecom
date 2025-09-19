@@ -755,6 +755,53 @@ export class DatabaseStorage implements IStorage {
       console.error('Error fetching Blinkit POs from blinkit_po_header:', error);
     }
 
+    // Fetch Swiggy POs from swiggy_pos (original Swiggy data)
+    try {
+      const swiggyPos = await this.getAllSwiggyPos();
+      console.log(`📊 getAllPos: Found ${swiggyPos.length} Swiggy POs from swiggy_pos (original data)`);
+
+      for (const swiggyPo of swiggyPos) {
+        // Use original Swiggy data exactly as uploaded
+        const originalSwiggyPo = {
+          id: swiggyPo.id,
+          po_number: swiggyPo.po_number,
+          po_date: swiggyPo.po_date,
+          platform: { id: 4, pf_name: "Swiggy" },
+          vendor_name: swiggyPo.vendor_name || '',
+          status: swiggyPo.status || 'Active',
+          created_at: swiggyPo.created_at,
+          updated_at: swiggyPo.updated_at,
+          order_date: swiggyPo.po_date,
+          expiry_date: swiggyPo.po_expiry_date,
+          city: '',
+          state: '',
+          serving_distributor: swiggyPo.vendor_name || '',
+          // Original Swiggy line items with exact field names
+          orderItems: swiggyPo.poLines.map(line => ({
+            id: line.id,
+            po_id: swiggyPo.id,
+            item_code: line.item_code,
+            item_name: line.item_description,
+            product_description: line.item_description,
+            quantity: line.quantity,
+            basic_rate: line.unit_base_cost?.toString() || '0',
+            landing_rate: line.unit_base_cost?.toString() || '0',
+            total_amount: line.line_total?.toString() || '0',
+            hsn_code: line.hsn_code,
+            tax_amount: line.total_tax_amount?.toString() || '0',
+            mrp: line.mrp?.toString() || '0',
+            platform_code: line.item_code,
+            sap_code: line.item_code,
+            uom: 'PCS'
+          }))
+        };
+
+        result.push(originalSwiggyPo as any);
+      }
+    } catch (error) {
+      console.error('Error fetching Swiggy POs from swiggy_pos:', error);
+    }
+
     // PRIORITY 2: Fetch POs from po_master table (but exclude Blinkit and Zepto to avoid duplicates)
     const posWithPlatforms = await db
       .select({

@@ -1,5 +1,6 @@
 import { db } from './db';
 import { blinkitPoHeader, blinkitPoLines } from '@shared/schema';
+import { eq } from 'drizzle-orm';
 
 interface BlinkitPoHeader {
   po_number: string;
@@ -97,6 +98,31 @@ export async function insertBlinkitPoData(data: BlinkitPoData): Promise<{ header
       console.error(`❌ FOUND TONNES IN HEADER.${key}: "${value}"`);
     }
   });
+
+  // Check for existing PO with same number in blinkit_po_header table
+  const poNumberToCheck = data.po_header.po_number || '';
+  console.log(`🔍 Checking for duplicate PO number: ${poNumberToCheck} in blinkit_po_header table...`);
+
+  const existingPo = await db
+    .select({
+      id: blinkitPoHeader.id,
+      po_number: blinkitPoHeader.po_number,
+      po_date: blinkitPoHeader.po_date,
+      vendor_name: blinkitPoHeader.vendor_name,
+      total_amount: blinkitPoHeader.total_amount
+    })
+    .from(blinkitPoHeader)
+    .where(eq(blinkitPoHeader.po_number, poNumberToCheck))
+    .limit(1);
+
+  if (existingPo.length > 0) {
+    const existing = existingPo[0];
+    const duplicateMessage = `PO ${data.po_header.po_number} already exists in blinkit_po_header table (ID: ${existing.id}, Date: ${existing.po_date}, Vendor: ${existing.vendor_name}). Duplicate imports are not allowed.`;
+    console.log('❌ ' + duplicateMessage);
+    throw new Error(duplicateMessage);
+  }
+
+  console.log(`✅ No duplicate found for PO ${poNumberToCheck}. Proceeding with insertion...`);
 
   try {
     // Start database transaction

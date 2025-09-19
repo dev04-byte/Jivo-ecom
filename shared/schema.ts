@@ -520,9 +520,9 @@ export type InsertFlipkartGroceryPoLines = z.infer<typeof insertFlipkartGroceryP
 // Zepto PO Schema
 export const zeptoPoHeader = pgTable("zepto_po_header", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  po_number: varchar("po_number", { length: 50 }).notNull(),
+  po_number: varchar("po_number", { length: 50 }).notNull().unique(),
   po_date: timestamp("po_date"),
-  status: varchar("status", { length: 20 }).default("Open"),
+  status: varchar("status", { length: 50 }).default("Open"),
   vendor_code: varchar("vendor_code", { length: 50 }),
   vendor_name: varchar("vendor_name", { length: 200 }),
   po_amount: decimal("po_amount", { precision: 15, scale: 2 }),
@@ -549,7 +549,7 @@ export const zeptoPoLines = pgTable("zepto_po_lines", {
   brand: varchar("brand", { length: 100 }),
   sku_id: varchar("sku_id", { length: 100 }),
   sap_id: varchar("sap_id", { length: 50 }),
-  hsn_code: varchar("hsn_code", { length: 20 }),
+  hsn_code: varchar("hsn_code", { length: 50 }),
   ean_no: varchar("ean_no", { length: 50 }),
   po_qty: integer("po_qty").default(0),
   asn_qty: integer("asn_qty").default(0),
@@ -563,7 +563,7 @@ export const zeptoPoLines = pgTable("zepto_po_lines", {
   cess: decimal("cess", { precision: 10, scale: 2 }),
   mrp: decimal("mrp", { precision: 10, scale: 2 }),
   total_value: decimal("total_value", { precision: 15, scale: 2 }),
-  status: varchar("status", { length: 20 }).default("Pending"),
+  status: varchar("status", { length: 50 }).default("Pending"),
   created_by: varchar("created_by", { length: 100 }),
   created_at: timestamp("created_at").defaultNow()
 });
@@ -675,7 +675,7 @@ export type InsertCityMallPoLines = z.infer<typeof insertCityMallPoLinesSchema>;
 // Blinkit PO Tables
 export const blinkitPoHeader = pgTable("blinkit_po_header", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  po_number: varchar("po_number", { length: 50 }),
+  po_number: varchar("po_number", { length: 50 }).unique(),
   po_date: date("po_date"),
   po_type: varchar("po_type", { length: 20 }),
   currency: varchar("currency", { length: 10 }),
@@ -764,7 +764,7 @@ export type BlinkitPoLines = typeof blinkitPoLines.$inferSelect;
 export type InsertBlinkitPoLines = z.infer<typeof insertBlinkitPoLinesSchema>;
 
 // Swiggy PO tables
-export const swiggyPos = pgTable("swiggy_pos", {
+export const swiggyPos = pgTable("swiggy_po_header", {
   id: serial("id").primaryKey(),
   po_number: varchar("po_number", { length: 100 }).notNull().unique(),
   po_date: timestamp("po_date"),

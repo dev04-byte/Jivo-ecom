@@ -8,22 +8,28 @@ interface ParsedSwiggyPO {
 
 export function parseSwiggyPO(fileBuffer: Buffer, uploadedBy: string): ParsedSwiggyPO {
   try {
+    console.log('📄 Starting Swiggy PO Excel parsing...');
+
     // Read the Excel XML file
     const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+    console.log(`📋 Found ${workbook.SheetNames.length} sheets: ${workbook.SheetNames.join(', ')}`);
+
     const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-    
+
     // Convert to JSON to get all data - use different options to handle merged cells
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
-      header: 1, 
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
       defval: '',
       range: 0,
       raw: false,
       dateNF: 'mmm d, yyyy'
     }) as any[][];
-    
+
+    console.log(`📊 Parsed ${jsonData.length} rows from Excel file`);
+
     // Also try to get raw cell data to find dates
-    const rawData = XLSX.utils.sheet_to_json(worksheet, { 
-      header: 1, 
+    const rawData = XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
       defval: '',
       range: 0,
       raw: true
@@ -58,22 +64,27 @@ export function parseSwiggyPO(fileBuffer: Buffer, uploadedBy: string): ParsedSwi
 
         
         // Extract PO Number - check current and next several cells
-        if (cellStr === 'PO No :') {
+        if (cellStr === 'PO No :' || cellStr === 'PO No:' || cellStr === 'PO Number :' || cellStr === 'PO Number:') {
           // Look in next few cells for the PO number
           for (let k = j + 1; k < Math.min(j + 10, row.length); k++) {
             if (row[k] && row[k].toString().trim()) {
               const potentialPO = row[k].toString().trim();
-              if (potentialPO.startsWith('JCNPO') || potentialPO.startsWith('SOTY-')) {
+              // Accept any alphanumeric PO number with minimum length
+              if (potentialPO.length >= 4 && /^[A-Za-z0-9\-_]+$/.test(potentialPO)) {
                 poNumber = potentialPO;
+                console.log(`✅ Found PO Number: ${potentialPO}`);
                 break;
               }
             }
           }
         }
-        
-        // Also check if the cell itself contains a PO number
-        if (cellStr.startsWith('JCNPO') || cellStr.startsWith('SOTY-')) {
+
+        // Also check if the cell itself contains a PO number (broader patterns)
+        if ((cellStr.startsWith('JCNPO') || cellStr.startsWith('SOTY-') ||
+             cellStr.startsWith('SWG') || cellStr.startsWith('PO') ||
+             /^[A-Za-z]{2,4}[0-9\-_]/.test(cellStr)) && cellStr.length >= 4) {
           poNumber = cellStr;
+          console.log(`✅ Found PO Number in cell: ${cellStr}`);
         }
         
         // Extract dates - look in next several cells for the date value
@@ -240,7 +251,7 @@ export function parseSwiggyPO(fileBuffer: Buffer, uploadedBy: string): ParsedSwi
             hsn_code: findHsnCode(row),
             quantity: parseInt(row[5]?.toString() || '0'),
             mrp: parseDecimal(row[6]?.toString()),
-            unit_base_cost: findUnitCost(row)?.toString() || null,
+            unit_base_cost: findUnitCost(row) || null,
             taxable_value: parseDecimal(row[9]?.toString()),
             cgst_rate: parseDecimal(row[10]?.toString()),
             cgst_amount: parseDecimal(row[12]?.toString()),
@@ -260,9 +271,9 @@ export function parseSwiggyPO(fileBuffer: Buffer, uploadedBy: string): ParsedSwi
           // Update totals
           totalQuantity += line.quantity || 0;
           totalTaxableValue += Number(line.taxable_value || 0);
-          totalTaxAmount += (Number(line.cgst_amount || 0) + Number(line.sgst_amount || 0) + 
-                            Number(line.igst_amount || 0) + Number(line.cess_amount || 0) + 
-                            Number(line.additional_cess || 0));
+          totalTaxAmount += Number(line.cgst_amount || 0) + Number(line.sgst_amount || 0) +
+                            Number(line.igst_amount || 0) + Number(line.cess_amount || 0) +
+                            Number(line.additional_cess || 0);
           totalAmount += Number(line.line_total || 0);
         } catch (error) {
           console.warn(`Error parsing Swiggy PO line ${i}:`, error);
@@ -273,7 +284,9 @@ export function parseSwiggyPO(fileBuffer: Buffer, uploadedBy: string): ParsedSwi
 
     // Check if PO number was found
     if (!poNumber) {
-      throw new Error('po no is not available please check you upload po');
+      console.error('❌ No PO number found. Debugging information:');
+      console.error('First 10 rows of data:', jsonData.slice(0, 10));
+      throw new Error('PO number not found in file. Please ensure the file contains a valid PO number in the header section. Expected formats: JCNPO*, SOTY-*, SWG*, or any alphanumeric PO number with "PO No:" or "PO Number:" label.');
     }
 
     // Generate PO number if not found (this line should never be reached now)
@@ -295,10 +308,10 @@ export function parseSwiggyPO(fileBuffer: Buffer, uploadedBy: string): ParsedSwi
 
     const header: InsertSwiggyPo = {
       po_number: poNumber,
-      po_date: poDate ? new Date(poDate + 'T00:00:00Z') : null,
-      po_release_date: poReleaseDate ? new Date(poReleaseDate + 'T00:00:00Z') : null,
-      expected_delivery_date: expectedDeliveryDate ? new Date(expectedDeliveryDate + 'T00:00:00Z') : null,
-      po_expiry_date: poExpiryDate ? new Date(poExpiryDate + 'T00:00:00Z') : null,
+      po_date: poDate || null,
+      po_release_date: poReleaseDate || null,
+      expected_delivery_date: expectedDeliveryDate || null,
+      po_expiry_date: poExpiryDate || null,
       vendor_name: vendorName && vendorName !== "N/A" && vendorName !== "Aug 4, 2025" ? vendorName : null,
       payment_terms: paymentTerms || null,
       total_items: filteredLines.length,
@@ -385,11 +398,11 @@ function findUnitCost(row: any[]): number | null {
 
 function parseDecimal(value: string | undefined): string | null {
   if (!value) return null;
-  
+
   try {
     const cleanValue = value.toString().replace(/[^\d.-]/g, '').trim();
     if (cleanValue === '') return null;
-    
+
     const parsed = parseFloat(cleanValue);
     return isNaN(parsed) ? null : parsed.toString();
   } catch (error) {

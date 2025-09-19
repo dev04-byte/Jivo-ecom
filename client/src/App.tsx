@@ -31,6 +31,7 @@ import CityMallPoDetails from "@/pages/city-mall-po-details";
 import UploadBlinkitPo from "./pages/upload/UploadBlinkitPo";
 import ViewBlinkitPos from "./pages/ViewBlinkitPos";
 import SwiggyUpload from "./pages/SwiggyUpload";
+import SwiggyPoList from "./pages/SwiggyPoList";
 import UnifiedPoUpload from "@/pages/unified-po-upload";
 import SapSync from "@/pages/sap-sync";
 import SqlQuery from "@/pages/SqlQuery";
@@ -161,7 +162,13 @@ function AppRouter() {
           <SwiggyUpload />
         </ResponsiveLayout>
       )} />
-      
+
+      <ProtectedRoute path="/swiggy-pos" component={() => (
+        <ResponsiveLayout>
+          <SwiggyPoList />
+        </ResponsiveLayout>
+      )} />
+
       <ProtectedRoute path="/unified-po-upload" component={() => (
         <ResponsiveLayout>
           <UnifiedPoUpload />

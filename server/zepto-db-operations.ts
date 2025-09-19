@@ -1,5 +1,6 @@
 import { db } from './db';
 import { zeptoPoHeader, zeptoPoLines } from '@shared/schema';
+import { eq } from 'drizzle-orm';
 
 interface ZeptoPoHeader {
   po_number: string;
@@ -120,11 +121,40 @@ export const insertZeptoPoToDatabase = async (data: ParsedZeptoPO): Promise<{ su
     console.log('🔄 Starting Zepto PO database insertion with PostgreSQL support...');
     console.log('📦 Raw header data:', JSON.stringify(data.header, null, 2));
 
+    // Check for existing PO with same number in zepto_po_header table
+    const poNumberToCheck = String(data.header.po_number || `ZEPTO_${Date.now()}`);
+    console.log(`🔍 Checking for duplicate PO number: ${poNumberToCheck} in zepto_po_header table...`);
+
+    const existingPo = await db
+      .select({
+        id: zeptoPoHeader.id,
+        po_number: zeptoPoHeader.po_number,
+        po_date: zeptoPoHeader.po_date,
+        vendor_name: zeptoPoHeader.vendor_name,
+        total_amount: zeptoPoHeader.total_amount,
+        created_at: zeptoPoHeader.created_at
+      })
+      .from(zeptoPoHeader)
+      .where(eq(zeptoPoHeader.po_number, poNumberToCheck))
+      .limit(1);
+
+    if (existingPo.length > 0) {
+      const existing = existingPo[0];
+      const duplicateMessage = `PO ${data.header.po_number} already exists in zepto_po_header table (ID: ${existing.id}, Date: ${existing.po_date}, Vendor: ${existing.vendor_name}, Created: ${existing.created_at}). Duplicate imports are not allowed.`;
+      console.log('❌ ' + duplicateMessage);
+      return {
+        success: false,
+        message: duplicateMessage
+      };
+    }
+
+    console.log(`✅ No duplicate found for PO ${poNumberToCheck}. Proceeding with insertion...`);
+
     // Create header object with all available columns matching the database schema
     const safeHeaderData = {
       po_number: String(data.header.po_number || `ZEPTO_${Date.now()}`),
       po_date: parseDate(data.header.po_date),
-      status: String(data.header.status || 'Open').substring(0, 20),
+      status: String(data.header.status || 'Open').substring(0, 50),
       vendor_code: data.header.vendor_code ? String(data.header.vendor_code).substring(0, 50) : null,
       vendor_name: data.header.vendor_name ? String(data.header.vendor_name).substring(0, 200) : null,
       po_amount: data.header.po_amount ? parseDecimal(data.header.po_amount) : null,

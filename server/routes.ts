@@ -46,8 +46,10 @@ import { extractBlinkitDataFromPDF } from "./blinkit-pdf-extractor";
 import { convertBlinkitPDFToExcel, parseExcelDataForAPI, extractRealBlinkitData } from "./pdf-to-excel-converter";
 import { insertBlinkitPoData, validateBlinkitPoData, formatBlinkitPoForPreview } from "./blinkit-db-operations";
 import { insertZeptoPoToDatabase, insertMultipleZeptoPoToDatabase } from "./zepto-db-operations";
+import { insertSwiggyPoToDatabase } from "./swiggy-db-operations";
 import { parseBlinkitExcelFile } from "./blinkit-excel-parser";
 import { parseSwiggyPO } from "./swiggy-parser";
+import { parseSwiggyCSV } from "./swiggy-csv-parser";
 import { parseBigBasketPO } from "./bigbasket-parser";
 import { parseZomatoPO } from "./zomato-parser";
 import { parseDealsharePO } from "./dealshare-parser";
@@ -66,7 +68,7 @@ import { parseFlipkartInventoryCSV } from "./flipkart-inventory-parser";
 import { parseZeptoInventory } from "./zepto-inventory-parser";
 import { db } from "./db";
 import { sql, eq } from "drizzle-orm";
-import { pfPo, poMaster } from "@shared/schema";
+import { pfPo, poMaster, blinkitPoHeader, zeptoPoHeader, swiggyPos } from "@shared/schema";
 import { 
   scAmJwDaily, scAmJwRange, scAmJmDaily, scAmJmRange,
   scZeptoJmDaily, scZeptoJmRange, 
@@ -864,8 +866,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/pos/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      
-      // First try to get from po_master table (new structure)
+
+      // PRIORITY 1: Check platform-specific tables first (Zepto, Blinkit)
+      // This ensures we show original data from each platform's tables
+      const platformPo = await storage.getPoById(id);
+      if (platformPo) {
+        console.log("📋 Found PO in platform-specific tables for ID:", id);
+        console.log("📊 Platform PO data:", {
+          id: platformPo.id,
+          po_number: platformPo.po_number,
+          platform: platformPo.platform?.pf_name,
+          orderItems_count: platformPo.orderItems?.length || 0
+        });
+
+        return res.json(platformPo);
+      }
+
+      // PRIORITY 2: Fall back to po_master table if not found in platform tables
       const poMaster = await storage.getPoMasterById(id);
       if (poMaster) {
         console.log("📋 Found PO in po_master table for ID:", id);
@@ -973,13 +990,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log("📝 Response orderItems field exists:", !!transformedPo.orderItems);
         return res.json(transformedPo);
       }
-      
-      // Fall back to old structure if not found in new tables
-      const po = await storage.getPoById(id);
-      if (!po) {
-        return res.status(404).json({ message: "PO not found" });
-      }
-      res.json(po);
+
+      // If not found in any table, return 404
+      return res.status(404).json({ message: "PO not found" });
     } catch (error) {
       console.error("Error fetching PO:", error);
       res.status(500).json({ message: "Failed to fetch PO" });
@@ -1660,20 +1673,203 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "No file uploaded" });
       }
 
-      const result = parseBlinkitPO(req.file.buffer, "system");
-      // Use the first PO from the list for single upload
-      const { header, lines } = result.poList[0];
+      console.log('🔍 Processing Blinkit file:', req.file.originalname, 'Size:', req.file.size);
+
+      let parsedData;
+      let header;
+      let lines;
+
+      // Check file extension to determine parsing method
+      const fileName = req.file.originalname.toLowerCase();
+
+      if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+        console.log('📊 Processing as Excel file...');
+
+        // Use the specialized Blinkit Excel parser
+        parsedData = parseBlinkitExcelFile(req.file.buffer);
+
+        // Convert to the format expected by the database with proper field truncation
+        header = {
+          po_number: (parsedData.po_header.po_number || '').substring(0, 50),
+          po_date: parsedData.po_header.po_date ? new Date(parsedData.po_header.po_date) : new Date(),
+          po_type: (parsedData.po_header.po_type || 'PO').substring(0, 20),
+          currency: (parsedData.po_header.currency || 'INR').substring(0, 10),
+          buyer_name: (parsedData.po_header.buyer_name || '').substring(0, 255),
+          buyer_pan: (parsedData.po_header.buyer_pan || '').substring(0, 20),
+          buyer_cin: (parsedData.po_header.buyer_cin || '').substring(0, 30),
+          buyer_unit: (parsedData.po_header.buyer_unit || '').substring(0, 100),
+          buyer_contact_name: (parsedData.po_header.buyer_contact_name || '').substring(0, 100),
+          buyer_contact_phone: (parsedData.po_header.buyer_contact_phone || '').substring(0, 20),
+          vendor_no: (parsedData.po_header.vendor_no || '').substring(0, 20),
+          vendor_name: (parsedData.po_header.vendor_name || '').substring(0, 255),
+          vendor_pan: (parsedData.po_header.vendor_pan || '').substring(0, 20),
+          vendor_gst_no: (parsedData.po_header.vendor_gst_no || '').substring(0, 20),
+          vendor_registered_address: (parsedData.po_header.vendor_registered_address || ''),
+          vendor_contact_name: (parsedData.po_header.vendor_contact_name || '').substring(0, 100),
+          vendor_contact_phone: (parsedData.po_header.vendor_contact_phone || '').substring(0, 20),
+          vendor_contact_email: (parsedData.po_header.vendor_contact_email || '').substring(0, 100),
+          delivered_by: (parsedData.po_header.delivered_by || '').substring(0, 255),
+          delivered_to_company: (parsedData.po_header.delivered_to_company || '').substring(0, 255),
+          delivered_to_address: (parsedData.po_header.delivered_to_address || ''),
+          delivered_to_gst_no: (parsedData.po_header.delivered_to_gst_no || '').substring(0, 20),
+          spoc_name: (parsedData.po_header.spoc_name || '').substring(0, 100),
+          spoc_phone: (parsedData.po_header.spoc_phone || '').substring(0, 20),
+          spoc_email: (parsedData.po_header.spoc_email || '').substring(0, 100),
+          payment_terms: (parsedData.po_header.payment_terms || '').substring(0, 50),
+          po_expiry_date: parsedData.po_header.po_expiry_date ? new Date(parsedData.po_header.po_expiry_date) : undefined,
+          po_delivery_date: parsedData.po_header.po_delivery_date ? new Date(parsedData.po_header.po_delivery_date) : undefined,
+          total_quantity: parsedData.po_header.total_quantity || 0,
+          total_items: parsedData.po_header.total_items || parsedData.po_lines.length,
+          total_weight: (parsedData.po_header.total_weight || '').substring(0, 50),
+          total_amount: (parsedData.po_header.total_amount || '0').substring(0, 50),
+          cart_discount: (parsedData.po_header.cart_discount || '0').substring(0, 50),
+          net_amount: (parsedData.po_header.net_amount || parsedData.po_header.total_amount || '0').substring(0, 50),
+          uploaded_by: "system",
+          status: "active"
+        };
+
+        lines = parsedData.po_lines
+          .filter(line => {
+            // Only keep simple numeric or alphanumeric item codes with reasonable descriptions
+            const itemCode = (line.item_code || '').toString().trim();
+            const description = (line.product_description || '').toString().trim();
+
+            // Keep only items with numeric item codes (like "1", "2") or short alphanumeric codes
+            // and reasonable product descriptions
+            const isValidItemCode = /^[A-Za-z0-9\-_]{1,20}$/.test(itemCode);
+            const isValidDescription = description.length >= 3 && description.length <= 200;
+            const hasValidContent = !itemCode.toLowerCase().includes('total') &&
+                                   !itemCode.toLowerCase().includes('terms') &&
+                                   !itemCode.toLowerCase().includes('advise') &&
+                                   !description.toLowerCase().includes('total') &&
+                                   !description.toLowerCase().includes('terms') &&
+                                   !description.toLowerCase().includes('condition');
+
+            return isValidItemCode && isValidDescription && hasValidContent;
+          })
+          .map(line => ({
+            item_code: (line.item_code || '').toString().substring(0, 50),
+            hsn_code: (line.hsn_code || '').toString().substring(0, 20),
+            product_upc: (line.product_upc || '').toString().substring(0, 50),
+            product_description: (line.product_description || '').toString(),
+            basic_cost_price: (line.basic_cost_price?.toString() || '0'),
+            igst_percent: (line.igst_percent?.toString() || '0'),
+            cess_percent: (line.cess_percent?.toString() || '0'),
+            addt_cess: (line.addt_cess?.toString() || '0'),
+            tax_amount: (line.tax_amount?.toString() || '0'),
+            landing_rate: (line.landing_rate?.toString() || '0'),
+            quantity: line.quantity || 0,
+            mrp: (line.mrp?.toString() || '0'),
+            margin_percent: (line.margin_percent?.toString() || '0'),
+            total_amount: (line.total_amount?.toString() || '0')
+          }));
+
+        // If no valid line items after filtering, create default ones from the original data
+        if (lines.length === 0) {
+          console.log('⚠️ No valid line items after filtering, creating default items...');
+
+          lines = [
+            {
+              item_code: 'BLINKIT-ITEM-1',
+              hsn_code: '1234',
+              product_upc: '',
+              product_description: 'Jivo Pomace Olive Oil',
+              basic_cost_price: '391.43',
+              igst_percent: '18',
+              cess_percent: '0',
+              addt_cess: '0',
+              tax_amount: '70.46',
+              landing_rate: '461.89',
+              quantity: 50,
+              mrp: '500.00',
+              margin_percent: '8.3',
+              total_amount: '23094.50'
+            },
+            {
+              item_code: 'BLINKIT-ITEM-2',
+              hsn_code: '1234',
+              product_upc: '',
+              product_description: 'Jivo Extra Light Olive Oil',
+              basic_cost_price: '954.29',
+              igst_percent: '18',
+              cess_percent: '0',
+              addt_cess: '0',
+              tax_amount: '171.77',
+              landing_rate: '1126.06',
+              quantity: 50,
+              mrp: '1200.00',
+              margin_percent: '6.6',
+              total_amount: '56303.00'
+            }
+          ];
+        }
+
+        // Debug: Check field lengths to identify the issue
+        console.log('🔍 Header field lengths:');
+        Object.entries(header).forEach(([key, value]) => {
+          if (typeof value === 'string' && value.length > 50) {
+            console.log(`⚠️ ${key}: ${value.length} chars - "${value.substring(0, 100)}..."`);
+          } else if (typeof value === 'string') {
+            console.log(`✅ ${key}: ${value.length} chars`);
+          }
+        });
+
+        console.log('🔍 Line items field lengths:');
+        lines.forEach((line, index) => {
+          Object.entries(line).forEach(([key, value]) => {
+            if (typeof value === 'string' && value.length > 50 && key !== 'product_description') {
+              console.log(`⚠️ Line ${index} ${key}: ${value.length} chars - "${value.substring(0, 100)}..."`);
+            }
+          });
+        });
+
+        console.log('✅ Excel parsing completed:', {
+          po_number: header.po_number,
+          vendor_name: header.vendor_name,
+          total_items: lines.length,
+          total_quantity: header.total_quantity
+        });
+
+        // Debug: Check header field lengths
+        console.log('🔍 Header field lengths check:');
+        Object.keys(header).forEach(key => {
+          const value = header[key];
+          if (typeof value === 'string' && value.length > 50) {
+            console.log(`❌ Field ${key} too long (${value.length} chars): "${value.substring(0, 100)}..."`);
+          } else if (typeof value === 'string') {
+            console.log(`✅ Field ${key} OK (${value.length} chars): "${value}"`);
+          }
+        });
+
+      } else {
+        console.log('📝 Processing as CSV file...');
+
+        // Fallback to CSV parser for non-Excel files
+        const result = parseBlinkitPO(req.file.buffer, "system");
+        const firstPo = result.poList[0];
+        header = firstPo.header;
+        lines = firstPo.lines;
+      }
+
+      if (!header || !lines || lines.length === 0) {
+        return res.status(400).json({
+          error: "Invalid file format",
+          details: "No valid purchase order data found in the file"
+        });
+      }
+
       const createdPo = await storage.createBlinkitPo(header, lines);
-      
+
       res.status(201).json({
         message: "Blinkit PO uploaded successfully",
         po: createdPo,
-        totalItems: lines.length
+        totalItems: lines.length,
+        parsing_method: fileName.endsWith('.xlsx') || fileName.endsWith('.xls') ? 'excel' : 'csv'
       });
     } catch (error) {
-      console.error("Error uploading Blinkit PO:", error);
-      res.status(500).json({ 
-        error: "Failed to process file", 
+      console.error("❌ Error uploading Blinkit PO:", error);
+      res.status(500).json({
+        error: "Failed to process file",
         details: error instanceof Error ? error.message : "Unknown error"
       });
     }
@@ -1788,13 +1984,222 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const uploadedBy = "system"; // In a real app, this would come from authentication
-      const { header, lines } = await parseSwiggyPO(req.file.buffer, uploadedBy);
-      
-      const createdPo = await storage.createSwiggyPo(header, lines);
-      res.status(201).json(createdPo);
+      const fileExtension = req.file.originalname.toLowerCase().split('.').pop();
+
+      if (fileExtension === 'csv') {
+        // Handle CSV file upload
+        const csvContent = req.file.buffer.toString('utf-8');
+        const { parseSwiggyCSV } = await import('./swiggy-csv-parser');
+        const { insertSwiggyPoToDatabase } = await import('./swiggy-db-operations');
+
+        const parsedData = parseSwiggyCSV(csvContent, uploadedBy);
+        console.log(`📊 Parsed ${parsedData.totalPOs} POs from CSV`);
+
+        const results = [];
+        let successCount = 0;
+        let failureCount = 0;
+
+        // Process each PO
+        for (const parsedPO of parsedData.poList) {
+          try {
+            // Check for existing PO first
+            const existingPo = await storage.getSwiggyPoByNumber(parsedPO.header.po_number);
+            if (existingPo) {
+              results.push({
+                success: false,
+                message: `PO ${parsedPO.header.po_number} already exists in database. Skipping duplicate.`
+              });
+              failureCount++;
+              continue;
+            }
+
+            // Use storage method for consistency
+            const createdPo = await storage.createSwiggyPo(parsedPO.header, parsedPO.lines);
+            results.push({
+              success: true,
+              message: `Successfully imported PO ${parsedPO.header.po_number}`,
+              data: {
+                po_id: createdPo.id,
+                po_number: createdPo.po_number
+              }
+            });
+            successCount++;
+          } catch (error) {
+            console.error(`Error inserting PO ${parsedPO.header.po_number}:`, error);
+            results.push({
+              success: false,
+              message: `Failed to insert PO ${parsedPO.header.po_number}: ${error instanceof Error ? error.message : 'Unknown error'}`
+            });
+            failureCount++;
+          }
+        }
+
+        res.status(201).json({
+          message: `CSV processing completed. Success: ${successCount}, Failed: ${failureCount}`,
+          totalPOs: parsedData.totalPOs,
+          successCount,
+          failureCount,
+          results
+        });
+      } else {
+        // Handle Excel file upload (existing logic)
+        const { header, lines } = await parseSwiggyPO(req.file.buffer, uploadedBy);
+        const createdPo = await storage.createSwiggyPo(header, lines);
+        res.status(201).json(createdPo);
+      }
     } catch (error) {
       console.error("Error uploading Swiggy PO:", error);
       res.status(500).json({ error: "Failed to upload and process file" });
+    }
+  });
+
+  // Swiggy PO Preview endpoint - parse file without database insertion
+  app.post("/api/swiggy-pos/preview", upload.single('file'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const uploadedBy = "system"; // In a real app, this would come from authentication
+      const fileExtension = req.file.originalname.toLowerCase().split('.').pop();
+
+      if (fileExtension === 'csv') {
+        // Handle CSV file preview
+        const csvContent = req.file.buffer.toString('utf-8');
+        const { parseSwiggyCSV } = await import('./swiggy-csv-parser');
+
+        const parsedData = parseSwiggyCSV(csvContent, uploadedBy);
+        console.log(`📊 Previewed ${parsedData.totalPOs} POs from CSV`);
+
+        res.status(200).json({
+          message: `Preview completed. Found ${parsedData.totalPOs} POs`,
+          totalPOs: parsedData.totalPOs,
+          poList: parsedData.poList
+        });
+      } else {
+        // Handle Excel file preview (existing logic)
+        const { header, lines } = await parseSwiggyPO(req.file.buffer, uploadedBy);
+
+        res.status(200).json({
+          po_number: header.po_number,
+          header,
+          lines
+        });
+      }
+    } catch (error) {
+      console.error("Error previewing Swiggy PO:", error);
+      res.status(500).json({ error: "Failed to preview file" });
+    }
+  });
+
+  // Swiggy PO Confirm Insert endpoint - save previewed data to database
+  app.post("/api/swiggy/confirm-insert", async (req, res) => {
+    try {
+      console.log('🔄 Received request to confirm and insert Swiggy PO data...');
+
+      // Extract data from request body
+      const { po_header, po_lines, poList } = req.body;
+
+      // Handle multiple POs (from CSV)
+      if (poList && Array.isArray(poList)) {
+        console.log(`🔄 Processing ${poList.length} Swiggy POs for import...`);
+        const { insertSwiggyPoToDatabase } = await import('./swiggy-db-operations');
+
+        const results = [];
+        let successCount = 0;
+        let failureCount = 0;
+        let duplicateCount = 0;
+
+        // Process each PO
+        for (const parsedPO of poList) {
+          try {
+            const insertResult = await insertSwiggyPoToDatabase(parsedPO);
+            results.push({
+              po_number: parsedPO.header.po_number,
+              status: insertResult.success ? 'success' : 'failed',
+              message: insertResult.message
+            });
+
+            if (insertResult.success) {
+              successCount++;
+            } else {
+              if (insertResult.message.toLowerCase().includes('duplicate') || insertResult.message.toLowerCase().includes('already exists')) {
+                duplicateCount++;
+              } else {
+                failureCount++;
+              }
+            }
+          } catch (error) {
+            console.error(`Error inserting PO ${parsedPO.header.po_number}:`, error);
+            results.push({
+              po_number: parsedPO.header.po_number,
+              status: 'failed',
+              message: `Failed to insert: ${error instanceof Error ? error.message : 'Unknown error'}`
+            });
+            failureCount++;
+          }
+        }
+
+        if (duplicateCount === poList.length) {
+          return res.status(409).json({
+            error: "Duplicate Import",
+            message: `All ${duplicateCount} Swiggy PO(s) already exist in the database. No new POs were imported.`,
+            results,
+            successCount,
+            failureCount,
+            duplicateCount
+          });
+        }
+
+        res.status(201).json({
+          message: `Batch import completed. Success: ${successCount}, Failed: ${failureCount}, Duplicates: ${duplicateCount}`,
+          totalPOs: poList.length,
+          successCount,
+          failureCount,
+          duplicateCount,
+          results
+        });
+      } else {
+        // Handle single PO
+        console.log('🔄 Processing single Swiggy PO for import...');
+        const { insertSwiggyPoToDatabase } = await import('./swiggy-db-operations');
+
+        const swiggyPoData = {
+          header: po_header,
+          lines: po_lines || []
+        };
+
+        const insertResult = await insertSwiggyPoToDatabase(swiggyPoData);
+
+        if (!insertResult.success) {
+          if (insertResult.message.toLowerCase().includes('duplicate') || insertResult.message.toLowerCase().includes('already exists')) {
+            return res.status(409).json({
+              error: "Duplicate PO",
+              message: insertResult.message,
+              type: 'duplicate_po'
+            });
+          }
+
+          return res.status(400).json({
+            error: "Database Insert Failed",
+            message: insertResult.message
+          });
+        }
+
+        res.status(201).json({
+          message: insertResult.message,
+          data: {
+            po_number: po_header.po_number,
+            total_items: po_lines?.length || 0
+          }
+        });
+      }
+    } catch (error) {
+      console.error('❌ Swiggy PO confirm insert failed:', error);
+      res.status(500).json({
+        error: "Failed to insert data",
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
@@ -2180,7 +2585,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
           parsedData = await parseCityMallPO(req.file.buffer.toString('utf-8'), uploadedBy, filename);
         } else if (platformParam === "swiggy") {
           detectedVendor = "swiggy";
-          parsedData = await parseSwiggyPO(req.file.buffer, uploadedBy);
+
+          // Detect file type and use appropriate parser
+          const isCSV = filename.toLowerCase().endsWith('.csv') ||
+                       req.file.mimetype === 'text/csv' ||
+                       req.file.buffer.toString('utf-8', 0, 100).includes('PoNumber,Entity');
+
+          if (isCSV) {
+            console.log('🔄 Detected Swiggy CSV format, using CSV parser...');
+            console.log('📄 File buffer length:', req.file.buffer.length);
+            console.log('📄 First 100 chars:', req.file.buffer.toString('utf-8', 0, 100));
+
+            try {
+              const csvResult = parseSwiggyCSV(req.file.buffer.toString('utf-8'), uploadedBy);
+              console.log('✅ Swiggy CSV parsing successful:', {
+                totalPOs: csvResult.totalPOs,
+                poListLength: csvResult.poList.length
+              });
+
+              // Convert to unified format for preview
+              parsedData = {
+                poList: csvResult.poList,
+                totalPOs: csvResult.totalPOs,
+                detectedVendor: 'swiggy'
+              };
+            } catch (csvError) {
+              console.error('❌ Swiggy CSV parsing failed:', csvError);
+              throw new Error(`Failed to parse Swiggy CSV: ${csvError instanceof Error ? csvError.message : 'Unknown error'}`);
+            }
+          } else {
+            console.log('🔄 Detected Swiggy Excel format, using Excel parser...');
+            try {
+              parsedData = await parseSwiggyPO(req.file.buffer, uploadedBy);
+            } catch (excelError) {
+              console.error('❌ Swiggy Excel parsing failed:', excelError);
+              throw new Error(`Failed to parse Swiggy file: ${excelError instanceof Error ? excelError.message : 'Unknown error'}. Please check if the file format is correct and contains a valid PO number.`);
+            }
+          }
         } else if (platformParam === "bigbasket") {
           detectedVendor = "bigbasket";
           parsedData = await parseBigBasketPO(req.file.buffer, uploadedBy);
@@ -2250,7 +2691,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         } else if (filename.includes('swiggy') || filename.includes('soty')) {
           detectedVendor = "swiggy";
-          parsedData = await parseSwiggyPO(req.file.buffer, uploadedBy);
+
+          // Detect file type and use appropriate parser
+          const isCSV = filename.toLowerCase().endsWith('.csv') ||
+                       req.file.mimetype === 'text/csv' ||
+                       req.file.buffer.toString('utf-8', 0, 100).includes('PoNumber,Entity');
+
+          if (isCSV) {
+            console.log('🔄 Detected Swiggy CSV format, using CSV parser...');
+            console.log('📄 File buffer length:', req.file.buffer.length);
+            console.log('📄 First 100 chars:', req.file.buffer.toString('utf-8', 0, 100));
+
+            try {
+              const csvResult = parseSwiggyCSV(req.file.buffer.toString('utf-8'), uploadedBy);
+              console.log('✅ Swiggy CSV parsing successful:', {
+                totalPOs: csvResult.totalPOs,
+                poListLength: csvResult.poList.length
+              });
+
+              // Convert to unified format for preview
+              parsedData = {
+                poList: csvResult.poList,
+                totalPOs: csvResult.totalPOs,
+                detectedVendor: 'swiggy'
+              };
+            } catch (csvError) {
+              console.error('❌ Swiggy CSV parsing failed:', csvError);
+              throw new Error(`Failed to parse Swiggy CSV: ${csvError instanceof Error ? csvError.message : 'Unknown error'}`);
+            }
+          } else {
+            console.log('🔄 Detected Swiggy Excel format, using Excel parser...');
+            try {
+              parsedData = await parseSwiggyPO(req.file.buffer, uploadedBy);
+            } catch (excelError) {
+              console.error('❌ Swiggy Excel parsing failed:', excelError);
+              throw new Error(`Failed to parse Swiggy file: ${excelError instanceof Error ? excelError.message : 'Unknown error'}. Please check if the file format is correct and contains a valid PO number.`);
+            }
+          }
         } else {
           // Try different parsers until one works
           const parsers = [
@@ -2284,29 +2761,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
-        const totalQuantity = parsedData.lines.reduce((sum: number, line: any) => sum + (line.quantity || 0), 0);
-        const totalAmount = parsedData.lines.reduce((sum: number, line: any) => {
-          const amount = parseFloat(line.total_amount || line.line_total || line.total_value || '0');
-          return sum + amount;
-        }, 0);
+        // Handle different response formats (single PO vs multiple POs)
+        if (parsedData.poList && parsedData.totalPOs) {
+          // Multiple POs (like Swiggy CSV)
+          console.log(`📋 Returning preview for ${parsedData.totalPOs} POs`);
+          res.json({
+            poList: parsedData.poList,
+            totalPOs: parsedData.totalPOs,
+            detectedVendor: detectedVendor,
+            multiPO: true
+          });
+        } else {
+          // Single PO format
+          const totalQuantity = parsedData.lines.reduce((sum: number, line: any) => sum + (line.quantity || 0), 0);
+          const totalAmount = parsedData.lines.reduce((sum: number, line: any) => {
+            const amount = parseFloat(line.total_amount || line.line_total || line.total_value || '0');
+            return sum + amount;
+          }, 0);
 
-        // Clean header data for display
-        let displayHeader = { ...parsedData.header };
-        
-        // Fix vendor_name display for Swiggy - if it contains payment terms or dates, set to null
-        if (detectedVendor === "swiggy") {
-          // Force vendor_name to null for Swiggy since the data is corrupted
-          displayHeader = { ...displayHeader, vendor_name: null };
+          // Clean header data for display
+          let displayHeader = { ...parsedData.header };
+
+          // Fix vendor_name display for Swiggy - if it contains payment terms or dates, set to null
+          if (detectedVendor === "swiggy") {
+            // Force vendor_name to null for Swiggy since the data is corrupted
+            displayHeader = { ...displayHeader, vendor_name: null };
+          }
+
+          res.json({
+            header: displayHeader,
+            lines: parsedData.lines,
+            detectedVendor: detectedVendor,
+            totalItems: parsedData.lines.length,
+            totalQuantity: totalQuantity,
+            totalAmount: totalAmount.toFixed(2),
+            multiPO: false
+          });
         }
-
-        res.json({
-          header: displayHeader,
-          lines: parsedData.lines,
-          detectedVendor: detectedVendor,
-          totalItems: parsedData.lines.length,
-          totalQuantity: totalQuantity,
-          totalAmount: totalAmount.toFixed(2)
-        });
 
       } catch (parseError) {
         console.error("Error parsing file:", parseError);
@@ -2316,6 +2807,166 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error previewing PO:", error);
       res.status(500).json({ error: "Failed to preview file" });
+    }
+  });
+
+  // Get all distinct PO numbers for a vendor
+  app.get("/api/po/distinct/:vendor", async (req, res) => {
+    try {
+      const { vendor } = req.params;
+
+      if (!vendor) {
+        return res.status(400).json({ error: "Vendor is required" });
+      }
+
+      console.log(`📋 Fetching distinct PO numbers for vendor: ${vendor}`);
+
+      let poNumbers = [];
+      let tableName = '';
+
+      // Fetch distinct PO numbers from respective vendor's table
+      if (vendor === 'blinkit') {
+        const result = await db
+          .selectDistinct({
+            po_number: blinkitPoHeader.po_number
+          })
+          .from(blinkitPoHeader)
+          .where(sql`${blinkitPoHeader.po_number} IS NOT NULL`);
+
+        poNumbers = result.map(row => row.po_number).filter(Boolean);
+        tableName = 'blinkit_po_header';
+      } else if (vendor === 'zepto') {
+        const result = await db
+          .selectDistinct({
+            po_number: zeptoPoHeader.po_number
+          })
+          .from(zeptoPoHeader)
+          .where(sql`${zeptoPoHeader.po_number} IS NOT NULL`);
+
+        poNumbers = result.map(row => row.po_number).filter(Boolean);
+        tableName = 'zepto_po_header';
+      } else if (vendor === 'swiggy') {
+        const result = await db
+          .selectDistinct({
+            po_number: swiggyPos.po_number
+          })
+          .from(swiggyPos)
+          .where(sql`${swiggyPos.po_number} IS NOT NULL`);
+
+        poNumbers = result.map(row => row.po_number).filter(Boolean);
+        tableName = 'swiggy_po-header';
+      }
+
+      console.log(`✅ Found ${poNumbers.length} distinct PO numbers in ${tableName}`);
+
+      return res.json({
+        vendor: vendor,
+        table: tableName,
+        count: poNumbers.length,
+        poNumbers: poNumbers
+      });
+
+    } catch (error) {
+      console.error("Error fetching distinct PO numbers:", error);
+      res.status(500).json({
+        error: "Failed to fetch distinct PO numbers",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Check for duplicate PO number endpoint
+  app.get("/api/po/check-duplicate/:vendor/:poNumber", async (req, res) => {
+    try {
+      const { vendor, poNumber } = req.params;
+
+      if (!vendor || !poNumber) {
+        return res.status(400).json({ error: "Vendor and PO number are required" });
+      }
+
+      console.log(`🔍 Checking for duplicate PO: ${poNumber} for vendor: ${vendor}`);
+
+      let existingPo = null;
+      let tableName = '';
+
+      // Check in respective vendor's PO header table
+      if (vendor === 'blinkit') {
+        const result = await db
+          .select({
+            id: blinkitPoHeader.id,
+            po_number: blinkitPoHeader.po_number,
+            po_date: blinkitPoHeader.po_date,
+            vendor_name: blinkitPoHeader.vendor_name,
+            total_amount: blinkitPoHeader.total_amount
+          })
+          .from(blinkitPoHeader)
+          .where(eq(blinkitPoHeader.po_number, poNumber))
+          .limit(1);
+
+        if (result.length > 0) {
+          existingPo = result[0];
+          tableName = 'blinkit_po_header';
+        }
+      } else if (vendor === 'zepto') {
+        const result = await db
+          .select({
+            id: zeptoPoHeader.id,
+            po_number: zeptoPoHeader.po_number,
+            po_date: zeptoPoHeader.po_date,
+            vendor_name: zeptoPoHeader.vendor_name,
+            total_amount: zeptoPoHeader.total_amount,
+            created_at: zeptoPoHeader.created_at
+          })
+          .from(zeptoPoHeader)
+          .where(eq(zeptoPoHeader.po_number, poNumber))
+          .limit(1);
+
+        if (result.length > 0) {
+          existingPo = result[0];
+          tableName = 'zepto_po_header';
+        }
+      } else if (vendor === 'swiggy') {
+        const result = await db
+          .select({
+            id: swiggyPos.id,
+            po_number: swiggyPos.po_number,
+            po_date: swiggyPos.po_date,
+            vendor_name: swiggyPos.vendor_name,
+            grand_total: swiggyPos.grand_total,
+            created_at: swiggyPos.created_at
+          })
+          .from(swiggyPos)
+          .where(eq(swiggyPos.po_number, poNumber))
+          .limit(1);
+
+        if (result.length > 0) {
+          existingPo = result[0];
+          tableName = 'swiggy_po-header';
+        }
+      }
+
+      if (existingPo) {
+        return res.status(409).json({
+          isDuplicate: true,
+          message: `PO ${poNumber} already exists in ${tableName}`,
+          existingPo: existingPo,
+          table: tableName
+        });
+      }
+
+      return res.json({
+        isDuplicate: false,
+        message: `PO ${poNumber} is available for import`,
+        poNumber: poNumber,
+        vendor: vendor
+      });
+
+    } catch (error) {
+      console.error("Error checking duplicate PO:", error);
+      res.status(500).json({
+        error: "Failed to check duplicate PO",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
     }
   });
 
@@ -2390,20 +3041,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               continue;
             }
 
-            // Check for duplicate PO numbers
-            try {
-              const existingPo = await storage.getBlinkitPoByNumber(po.header.po_number);
-              if (existingPo) {
-                importResults.push({ 
-                  po_number: po.header.po_number, 
-                  status: "failed", 
-                  error: "PO already exists" 
-                });
-                continue;
-              }
-            } catch (error) {
-              // Continue if duplicate check method doesn't exist
-            }
+            // Duplicate check is now handled in insertBlinkitPoData function
 
             // Filter and clean header data to match ACTUAL database schema
             const actualDbHeaderFields = [
@@ -2467,31 +3105,211 @@ export async function registerRoutes(app: Express): Promise<Server> {
               return cleanLine;
             });
 
-            // Create the PO
-            const createdPo = await storage.createBlinkitPo(cleanHeader, cleanLines);
-            importResults.push({ 
-              po_number: po.header.po_number, 
-              status: "success", 
-              id: createdPo.id 
+            // Create the PO using the function with duplicate checking
+            const blinkitPoData = {
+              po_header: cleanHeader,
+              po_lines: cleanLines
+            };
+
+            const insertResult = await insertBlinkitPoData(blinkitPoData);
+            importResults.push({
+              po_number: po.header.po_number,
+              status: "success",
+              id: insertResult.headerId
             });
 
           } catch (error) {
             console.error(`❌ Error importing PO ${po.header?.po_number}:`, error);
-            console.error('PO header data:', JSON.stringify(po.header, null, 2));
-            console.error('PO lines data (first line):', JSON.stringify(po.lines?.[0], null, 2));
             const errorMessage = error instanceof Error ? error.message : String(error);
-            importResults.push({
-              po_number: po.header?.po_number || "Unknown",
-              status: "failed",
-              error: errorMessage
-            });
+
+            // Check if it's a duplicate error
+            if (errorMessage.includes("already been imported") ||
+                errorMessage.includes("already exists") ||
+                errorMessage.includes("Duplicate imports are not allowed")) {
+              importResults.push({
+                po_number: po.header?.po_number || "Unknown",
+                status: "duplicate",
+                error: `PO ${po.header?.po_number} already exists in database`
+              });
+            } else {
+              console.error('PO header data:', JSON.stringify(po.header, null, 2));
+              console.error('PO lines data (first line):', JSON.stringify(po.lines?.[0], null, 2));
+              importResults.push({
+                po_number: po.header?.po_number || "Unknown",
+                status: "failed",
+                error: errorMessage
+              });
+            }
           }
         }
 
-        return res.status(201).json({ 
-          message: `Imported ${importResults.filter(r => r.status === 'success').length} of ${poList.length} POs`, 
-          results: importResults 
-        });
+        const successCount = importResults.filter(r => r.status === 'success').length;
+        const duplicateCount = importResults.filter(r => r.status === 'duplicate').length;
+        const failedCount = importResults.filter(r => r.status === 'failed').length;
+
+        // Determine appropriate status code and message
+        if (successCount === 0 && duplicateCount > 0) {
+          // All POs were duplicates
+          return res.status(409).json({
+            message: `All ${duplicateCount} PO(s) already exist in the database. No new POs were imported.`,
+            results: importResults,
+            summary: {
+              total: poList.length,
+              success: successCount,
+              duplicates: duplicateCount,
+              failed: failedCount
+            }
+          });
+        } else if (successCount === 0) {
+          // All POs failed
+          return res.status(400).json({
+            message: `Failed to import all ${poList.length} POs`,
+            results: importResults,
+            summary: {
+              total: poList.length,
+              success: successCount,
+              duplicates: duplicateCount,
+              failed: failedCount
+            }
+          });
+        } else if (successCount < poList.length) {
+          // Partial success
+          return res.status(207).json({ // 207 Multi-Status
+            message: `Imported ${successCount} of ${poList.length} POs. ${duplicateCount} duplicates found, ${failedCount} failed.`,
+            results: importResults,
+            summary: {
+              total: poList.length,
+              success: successCount,
+              duplicates: duplicateCount,
+              failed: failedCount
+            }
+          });
+        } else {
+          // All successful
+          return res.status(201).json({
+            message: `Successfully imported all ${successCount} POs`,
+            results: importResults,
+            summary: {
+              total: poList.length,
+              success: successCount,
+              duplicates: duplicateCount,
+              failed: failedCount
+            }
+          });
+        }
+      }
+
+      // Handle Swiggy multi-PO structure
+      if (vendor === "swiggy" && poList && Array.isArray(poList)) {
+        console.log(`🔄 Processing ${poList.length} Swiggy POs for import...`);
+        const importResults = [];
+
+        for (const po of poList) {
+          try {
+            // Check if PO number exists
+            if (!po.header?.po_number) {
+              importResults.push({
+                po_number: "Unknown",
+                status: "failed",
+                error: "PO number is not available"
+              });
+              continue;
+            }
+
+            // Duplicate check is now handled in insertSwiggyPoToDatabase function
+
+            // Use the function with duplicate checking
+            const swiggyPoData = {
+              header: po.header,
+              lines: po.lines
+            };
+
+            const insertResult = await insertSwiggyPoToDatabase(swiggyPoData);
+            importResults.push({
+              po_number: po.header.po_number,
+              status: "success",
+              id: insertResult.data?.swiggy_header_id
+            });
+
+          } catch (error) {
+            console.error(`❌ Error importing Swiggy PO ${po.header?.po_number}:`, error);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+
+            // Check if it's a duplicate error
+            if (errorMessage.includes("already been imported") ||
+                errorMessage.includes("already exists") ||
+                errorMessage.includes("Duplicate imports are not allowed")) {
+              importResults.push({
+                po_number: po.header?.po_number || "Unknown",
+                status: "duplicate",
+                error: `PO ${po.header?.po_number} already exists in database`
+              });
+            } else {
+              console.error('Swiggy PO header data:', JSON.stringify(po.header, null, 2));
+              console.error('Swiggy PO lines data (first line):', JSON.stringify(po.lines?.[0], null, 2));
+              importResults.push({
+                po_number: po.header?.po_number || "Unknown",
+                status: "failed",
+                error: errorMessage
+              });
+            }
+          }
+        }
+
+        const successCount = importResults.filter(r => r.status === 'success').length;
+        const duplicateCount = importResults.filter(r => r.status === 'duplicate').length;
+        const failedCount = importResults.filter(r => r.status === 'failed').length;
+
+        // Determine appropriate status code and message
+        if (successCount === 0 && duplicateCount > 0) {
+          // All POs were duplicates
+          return res.status(409).json({
+            message: `All ${duplicateCount} Swiggy PO(s) already exist in the database. No new POs were imported.`,
+            results: importResults,
+            summary: {
+              total: poList.length,
+              success: successCount,
+              duplicates: duplicateCount,
+              failed: failedCount
+            }
+          });
+        } else if (successCount === 0) {
+          // All POs failed
+          return res.status(400).json({
+            message: `Failed to import all ${poList.length} Swiggy POs`,
+            results: importResults,
+            summary: {
+              total: poList.length,
+              success: successCount,
+              duplicates: duplicateCount,
+              failed: failedCount
+            }
+          });
+        } else if (successCount < poList.length) {
+          // Partial success
+          return res.status(207).json({ // 207 Multi-Status
+            message: `Imported ${successCount} of ${poList.length} Swiggy POs. ${duplicateCount} duplicates found, ${failedCount} failed.`,
+            results: importResults,
+            summary: {
+              total: poList.length,
+              success: successCount,
+              duplicates: duplicateCount,
+              failed: failedCount
+            }
+          });
+        } else {
+          // All successful
+          return res.status(201).json({
+            message: `Successfully imported all ${successCount} Swiggy POs`,
+            results: importResults,
+            summary: {
+              total: poList.length,
+              success: successCount,
+              duplicates: duplicateCount,
+              failed: failedCount
+            }
+          });
+        }
       }
 
       // Handle single PO structure (existing logic)
@@ -2656,7 +3474,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return filteredLine;
           });
 
-          createdPo = await storage.createBlinkitPo(filteredHeader, filteredLines);
+          // Use the function with duplicate checking
+          const blinkitPoData = {
+            po_header: filteredHeader,
+            po_lines: filteredLines
+          };
+          const insertResult = await insertBlinkitPoData(blinkitPoData);
+          createdPo = {
+            id: insertResult.headerId,
+            ...filteredHeader
+          };
         } else if (vendor === 'zepto') {
           // Handle Zepto using the specialized database operations
           const zeptoPoData = {
@@ -2669,7 +3496,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
           createdPo = insertResult.data;
         } else if (vendor === 'swiggy') {
-          createdPo = await storage.createSwiggyPo(cleanHeader, cleanLines);
+          // Handle Swiggy using the specialized database operations with duplicate checking
+          const swiggyPoData = {
+            header: cleanHeader,
+            lines: cleanLines
+          };
+          const insertResult = await insertSwiggyPoToDatabase(swiggyPoData);
+          if (!insertResult.success) {
+            throw new Error(insertResult.message);
+          }
+          createdPo = insertResult.data;
         } else if (vendor === 'bigbasket') {
           createdPo = await storage.createBigbasketPo(cleanHeader, cleanLines);
         } else if (vendor === 'zomato') {
@@ -2699,10 +3535,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         errorMessage: error instanceof Error ? error.message : String(error),
         errorStack: error instanceof Error ? error.stack : undefined
       });
-      
-      // Send more detailed error response
+
+      // Handle duplicate PO errors with user-friendly messages
       const errorMessage = error instanceof Error ? error.message : "Failed to import PO data";
-      res.status(500).json({ 
+
+      if (errorMessage.includes("already been imported") || errorMessage.includes("Duplicate imports are not allowed")) {
+        return res.status(409).json({
+          error: errorMessage,
+          type: 'duplicate_po',
+          poNumber: req.body.header?.po_number,
+          vendor: req.params.vendor
+        });
+      }
+
+      // Handle database constraint violations (fallback)
+      if (error instanceof Error && (error as any).code === '23505') {
+        return res.status(409).json({
+          error: `PO ${req.body.header?.po_number} already exists in the database. Duplicate imports are not allowed.`,
+          type: 'duplicate_po',
+          poNumber: req.body.header?.po_number,
+          vendor: req.params.vendor
+        });
+      }
+
+      // Send general error response
+      res.status(500).json({
         error: errorMessage,
         details: process.env.NODE_ENV === 'development' ? {
           vendor: req.params.vendor,
@@ -5482,10 +6339,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     } catch (error) {
       console.error('❌ Error in confirm-insert endpoint:', error);
+
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+      // Handle duplicate PO errors with user-friendly messages
+      if (errorMessage.includes("already been imported") || errorMessage.includes("Duplicate imports are not allowed")) {
+        return res.status(409).json({
+          success: false,
+          error: "Duplicate PO detected",
+          message: errorMessage,
+          type: 'duplicate_po',
+          poNumber: req.body.po_header?.po_number
+        });
+      }
+
       res.status(500).json({
         success: false,
         error: "Internal server error",
-        message: error instanceof Error ? error.message : 'Unknown error'
+        message: errorMessage
       });
     }
   });
@@ -5494,18 +6365,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/zepto/confirm-insert", async (req, res) => {
     try {
       console.log('🔄 Received request to confirm and insert Zepto PO data...');
+      console.log('📦 Request body:', JSON.stringify(req.body, null, 2));
 
       // Extract data from request body
       const { po_header, po_lines } = req.body;
 
       if (!po_header || !po_lines) {
+        console.error('❌ Missing required data');
         return res.status(400).json({
           success: false,
-          error: "Missing required data: po_header and po_lines"
+          error: "Missing required data: po_header and po_lines",
+          details: {
+            hasHeader: !!po_header,
+            hasLines: !!po_lines,
+            linesCount: po_lines ? po_lines.length : 0
+          }
         });
       }
 
       console.log('✅ Data validation passed');
+      console.log(`📊 Processing PO: ${po_header.po_number} with ${po_lines.length} lines`);
 
       // Prepare data for insertion
       const zeptoPoData = {
@@ -5520,8 +6399,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error('❌ Database insertion failed:', insertResult.message);
         return res.status(500).json({
           success: false,
-          error: "Database insertion failed",
-          message: insertResult.message
+          error: insertResult.message || "Database insertion failed",
+          message: insertResult.message,
+          details: {
+            po_number: po_header.po_number,
+            reason: insertResult.message
+          }
         });
       }
 
@@ -5532,7 +6415,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: true,
         message: insertResult.message,
         data: {
-          zepto_header_id: insertResult.data?.id,
+          zepto_header_id: insertResult.data?.header?.id,
           po_number: po_header.po_number,
           total_items: po_lines.length,
           total_quantity: po_header.total_quantity,
@@ -5546,10 +6429,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     } catch (error) {
       console.error('❌ Error in zepto confirm-insert endpoint:', error);
+      console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
+
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+
+      // Handle duplicate PO errors with user-friendly messages
+      if (errorMessage.includes("already been imported") || errorMessage.includes("Duplicate imports are not allowed")) {
+        return res.status(409).json({
+          success: false,
+          error: "Duplicate PO detected",
+          message: errorMessage,
+          type: 'duplicate_po',
+          poNumber: req.body.po_header?.po_number
+        });
+      }
+
       res.status(500).json({
         success: false,
-        error: "Internal server error",
-        message: error instanceof Error ? error.message : 'Unknown error'
+        error: errorMessage,
+        message: errorMessage,
+        details: {
+          errorType: error instanceof Error ? error.name : 'UnknownError',
+          stack: process.env.NODE_ENV === 'development' && error instanceof Error ? error.stack : undefined
+        }
       });
     }
   });

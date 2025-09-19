@@ -10,8 +10,9 @@ dotenv.config();
 console.log('🚀 SERVER RESTART - LIVE FIX V5 LOADED - LINE ITEMS EXTRACTION FIXED');
 
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+// Increase body parser limits for large CSV imports (bulk Swiggy POs)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 
 // Logging middleware
 app.use((req, res, next) => {

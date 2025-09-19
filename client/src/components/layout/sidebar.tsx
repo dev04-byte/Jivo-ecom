@@ -1,14 +1,15 @@
 import { Link, useLocation } from "wouter";
-import { 
-  ChartLine, 
-  ShoppingCart, 
-  Truck, 
-  Upload, 
-  Package, 
-  Store, 
+import {
+  ChartLine,
+  ShoppingCart,
+  Truck,
+  Upload,
+  Package,
+  Store,
   User,
   Database,
-  Plus
+  Plus,
+  FileText
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +35,13 @@ const navigation: NavigationItem[] = [
     icon: ShoppingCart,
     active: true,
     description: "Create, upload & manage platform orders"
+  },
+  {
+    name: "Swiggy POs",
+    href: "/swiggy-pos",
+    icon: FileText,
+    active: true,
+    description: "View & import Swiggy purchase orders"
   },
   {
     name: "Distributor PO",
