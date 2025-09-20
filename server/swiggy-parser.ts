@@ -1,5 +1,7 @@
 import XLSX from 'xlsx';
 import type { InsertSwiggyPo, InsertSwiggyPoLine } from '@shared/schema';
+import { extractHsnCode } from './hsn-mapper';
+import { parseSwiggyCSVPO } from './swiggy-csv-parser-new';
 
 interface ParsedSwiggyPO {
   header: InsertSwiggyPo;
@@ -8,6 +10,16 @@ interface ParsedSwiggyPO {
 
 export function parseSwiggyPO(fileBuffer: Buffer, uploadedBy: string): ParsedSwiggyPO {
   try {
+    // First, try to detect if this is a CSV file
+    const fileContent = fileBuffer.toString('utf-8');
+
+    // Check if it's a CSV file by looking for CSV headers
+    if (fileContent.includes('PoNumber,Entity,FacilityId') ||
+        fileContent.includes('PoNumber') && fileContent.includes('VendorName') && fileContent.includes('SkuCode')) {
+      console.log('📄 Detected CSV format, using CSV parser...');
+      return parseSwiggyCSVPO(fileContent, uploadedBy);
+    }
+
     console.log('📄 Starting Swiggy PO Excel parsing...');
 
     // Read the Excel XML file
@@ -248,21 +260,38 @@ export function parseSwiggyPO(fileBuffer: Buffer, uploadedBy: string): ParsedSwi
             line_number: serialNumber,
             item_code: row[1]?.toString() || '',
             item_description: row[2]?.toString().replace(/\n/g, ' ') || '',
-            hsn_code: findHsnCode(row),
-            quantity: parseInt(row[5]?.toString() || '0'),
-            mrp: parseDecimal(row[6]?.toString()),
-            unit_base_cost: findUnitCost(row) || null,
-            taxable_value: parseDecimal(row[9]?.toString()),
-            cgst_rate: parseDecimal(row[10]?.toString()),
-            cgst_amount: parseDecimal(row[12]?.toString()),
-            sgst_rate: parseDecimal(row[13]?.toString()),
-            sgst_amount: parseDecimal(row[15]?.toString()),
-            igst_rate: parseDecimal(row[16]?.toString()),
-            igst_amount: parseDecimal(row[17]?.toString()),
-            cess_rate: parseDecimal(row[19]?.toString()),
-            cess_amount: parseDecimal(row[20]?.toString()),
-            additional_cess: parseDecimal(row[21]?.toString()),
-            line_total: parseDecimal(row[22]?.toString())
+            hsn_code: row[3]?.toString() || extractHsnCode({
+              description: row[2]?.toString().replace(/\n/g, ' ') || ''
+            }),
+            quantity: parseInt(row[4]?.toString() || '0'),
+            mrp: parseDecimal(row[5]?.toString()),
+            unit_base_cost: parseDecimal(row[6]?.toString()),
+            taxable_value: parseDecimal(row[7]?.toString()),
+            cgst_rate: parseDecimal(row[8]?.toString()),
+            cgst_amount: parseDecimal(row[9]?.toString()),
+            sgst_rate: parseDecimal(row[10]?.toString()),
+            sgst_amount: parseDecimal(row[11]?.toString()),
+            igst_rate: parseDecimal(row[12]?.toString()),
+            igst_amount: parseDecimal(row[13]?.toString()),
+            cess_rate: parseDecimal(row[14]?.toString()),
+            cess_amount: parseDecimal(row[15]?.toString()),
+            additional_cess: parseDecimal(row[16]?.toString()),
+            total_tax_amount: calculateTotalTax(
+              parseDecimal(row[9]?.toString()),  // cgst_amount
+              parseDecimal(row[11]?.toString()), // sgst_amount
+              parseDecimal(row[13]?.toString()), // igst_amount
+              parseDecimal(row[15]?.toString()), // cess_amount
+              parseDecimal(row[16]?.toString())  // additional_cess
+            ),
+            line_total: (() => {
+              const mrpValue = parseDecimal(row[5]?.toString());
+              const quantity = parseInt(row[4]?.toString() || '0');
+
+              if (mrpValue && quantity > 0) {
+                return (parseFloat(mrpValue) * quantity).toString();
+              }
+              return parseDecimal(row[17]?.toString());
+            })()
           };
 
           lines.push(line);
@@ -274,6 +303,8 @@ export function parseSwiggyPO(fileBuffer: Buffer, uploadedBy: string): ParsedSwi
           totalTaxAmount += Number(line.cgst_amount || 0) + Number(line.sgst_amount || 0) +
                             Number(line.igst_amount || 0) + Number(line.cess_amount || 0) +
                             Number(line.additional_cess || 0);
+
+          // Use the calculated line_total which already includes MRP × Quantity logic
           totalAmount += Number(line.line_total || 0);
         } catch (error) {
           console.warn(`Error parsing Swiggy PO line ${i}:`, error);
@@ -350,33 +381,7 @@ function parseSwiggyDate(dateStr: string | undefined): Date | undefined {
   }
 }
 
-// Helper function to find HSN code in a row (could be in different columns)
-function findHsnCode(row: any[]): string | null {
-  // Common positions for HSN codes in Swiggy files
-  const possibleIndexes = [3, 4, 5];
-  
-  for (const index of possibleIndexes) {
-    if (row[index]) {
-      const value = row[index].toString().trim();
-      // HSN codes are typically 8-digit numbers
-      if (/^\d{8}$/.test(value)) {
-        return value;
-      }
-    }
-  }
-  
-  // Also check for HSN codes anywhere in the row
-  for (let i = 0; i < row.length; i++) {
-    if (row[i]) {
-      const value = row[i].toString().trim();
-      if (/^\d{8}$/.test(value) && !isNaN(Number(value))) {
-        return value;
-      }
-    }
-  }
-  
-  return null;
-}
+// Helper function removed - using HSN mapper instead
 
 // Helper function to find unit cost in a row (could be in different columns)
 function findUnitCost(row: any[]): number | null {
@@ -408,4 +413,22 @@ function parseDecimal(value: string | undefined): string | null {
   } catch (error) {
     return null;
   }
+}
+
+function calculateTotalTax(
+  cgstAmount: string | null,
+  sgstAmount: string | null,
+  igstAmount: string | null,
+  cessAmount: string | null,
+  additionalCess: string | null
+): string | null {
+  const cgst = cgstAmount ? parseFloat(cgstAmount) : 0;
+  const sgst = sgstAmount ? parseFloat(sgstAmount) : 0;
+  const igst = igstAmount ? parseFloat(igstAmount) : 0;
+  const cess = cessAmount ? parseFloat(cessAmount) : 0;
+  const addCess = additionalCess ? parseFloat(additionalCess) : 0;
+
+  const total = cgst + sgst + igst + cess + addCess;
+
+  return total > 0 ? total.toString() : null;
 }

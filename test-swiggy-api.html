@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Swiggy API</title>
+</head>
+<body>
+    <h1>Testing Swiggy API</h1>
+    <button onclick="testApi()">Test API Call</button>
+    <div id="result"></div>
+
+    <script>
+        async function testApi() {
+            try {
+                console.log('Testing /api/swiggy-pos...');
+                const response = await fetch('/api/swiggy-pos');
+                console.log('Response status:', response.status);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                console.log('Data received:', data);
+
+                document.getElementById('result').innerHTML = `
+                    <h2>Success!</h2>
+                    <p>Received ${data.length} Swiggy POs</p>
+                    <pre>${JSON.stringify(data.slice(0, 1), null, 2)}</pre>
+                `;
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('result').innerHTML = `
+                    <h2>Error!</h2>
+                    <p>${error.message}</p>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

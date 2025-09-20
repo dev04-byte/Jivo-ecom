@@ -342,6 +342,7 @@ export default function FlipkartGroceryPODetails() {
                     <TableHead>Brand</TableHead>
                     <TableHead>HSN Code</TableHead>
                     <TableHead>Quantity</TableHead>
+                    <TableHead>Required By Date</TableHead>
                     <TableHead>Unit Price</TableHead>
                     <TableHead>Tax</TableHead>
                     <TableHead>Total</TableHead>
@@ -367,6 +368,9 @@ export default function FlipkartGroceryPODetails() {
                             Pending: {line.pending_quantity}
                           </div>
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        {line.required_by_date ? new Date(line.required_by_date).toLocaleDateString() : '-'}
                       </TableCell>
                       <TableCell>₹{parseFloat(line.supplier_price || '0').toFixed(2)}</TableCell>
                       <TableCell>₹{parseFloat(line.tax_amount || '0').toFixed(2)}</TableCell>

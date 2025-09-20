@@ -41,6 +41,7 @@ import { insertPfPoSchema, insertPfOrderItemsSchema, insertFlipkartGroceryPoHead
 import { z } from "zod";
 import { seedTestData } from "./seed-data";
 import { parseFlipkartGroceryPO, parseZeptoPO, parseCityMallPO, parseBlinkitPO } from "./csv-parser";
+import { parseFlipkartGroceryExcelPO } from "./flipkart-excel-parser";
 import { parseBlinkitPDF, validateBlinkitPDFData } from "./blinkit-pdf-parser";
 import { extractBlinkitDataFromPDF } from "./blinkit-pdf-extractor";
 import { convertBlinkitPDFToExcel, parseExcelDataForAPI, extractRealBlinkitData } from "./pdf-to-excel-converter";
@@ -1309,17 +1310,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // CSV parsing endpoint
+  // Flipkart file parsing endpoint (CSV/Excel)
   app.post("/api/parse-flipkart-csv", upload.single('file'), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
       }
 
-      const csvContent = req.file.buffer.toString('utf-8');
       const uploadedBy = req.body.uploadedBy || 'system';
-      
-      const parsedData = parseFlipkartGroceryPO(csvContent, uploadedBy);
+      const filename = req.file.originalname.toLowerCase();
+      let parsedData;
+
+      // Check if it's an Excel file
+      if (filename.endsWith('.xls') || filename.endsWith('.xlsx')) {
+        console.log("Processing Flipkart Excel file via CSV endpoint...");
+        parsedData = parseFlipkartGroceryExcelPO(req.file.buffer, uploadedBy);
+      } else {
+        console.log("Processing Flipkart CSV file via CSV endpoint...");
+        const csvContent = req.file.buffer.toString('utf-8');
+        parsedData = parseFlipkartGroceryPO(csvContent, uploadedBy);
+      }
       res.json(parsedData);
     } catch (error) {
       console.error('CSV parsing error:', error);
@@ -2551,7 +2561,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         } else if (platformParam === "flipkart") {
           detectedVendor = "flipkart";
-          parsedData = await parseFlipkartGroceryPO(req.file.buffer.toString('utf-8'), uploadedBy);
+
+          // Check if it's an Excel file
+          if (filename.endsWith('.xls') || filename.endsWith('.xlsx')) {
+            console.log("Processing Flipkart Excel file...");
+            parsedData = parseFlipkartGroceryExcelPO(req.file.buffer, uploadedBy);
+          } else {
+            console.log("Processing Flipkart CSV file...");
+            parsedData = parseFlipkartGroceryPO(req.file.buffer.toString('utf-8'), uploadedBy);
+          }
         } else if (platformParam === "zepto") {
           detectedVendor = "zepto";
           const zeptoResult = parseZeptoPO(req.file.buffer.toString('utf-8'), uploadedBy);
@@ -2635,7 +2653,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Fallback to filename detection if platform param not provided or recognized
         else if (filename.includes('flipkart') || filename.includes('grocery')) {
           detectedVendor = "flipkart";
-          parsedData = await parseFlipkartGroceryPO(req.file.buffer.toString('utf-8'), uploadedBy);
+
+          // Check if it's an Excel file
+          if (filename.endsWith('.xls') || filename.endsWith('.xlsx')) {
+            console.log("Processing Flipkart Excel file (filename detection)...");
+            parsedData = parseFlipkartGroceryExcelPO(req.file.buffer, uploadedBy);
+          } else {
+            console.log("Processing Flipkart CSV file (filename detection)...");
+            parsedData = parseFlipkartGroceryPO(req.file.buffer.toString('utf-8'), uploadedBy);
+          }
         } else if (filename.includes('zepto')) {
           detectedVendor = "zepto";
           const zeptoResult = parseZeptoPO(req.file.buffer.toString('utf-8'), uploadedBy);
@@ -2731,7 +2757,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else {
           // Try different parsers until one works
           const parsers = [
-            { name: "flipkart", parser: (buffer: Buffer, user: string) => parseFlipkartGroceryPO(buffer.toString('utf-8'), user) },
+            { name: "flipkart", parser: (buffer: Buffer, user: string) => {
+              // Try Excel first, then fall back to CSV
+              if (filename.endsWith('.xls') || filename.endsWith('.xlsx')) {
+                return parseFlipkartGroceryExcelPO(buffer, user);
+              } else {
+                return parseFlipkartGroceryPO(buffer.toString('utf-8'), user);
+              }
+            } },
             { name: "zepto", parser: (buffer: Buffer, user: string) => {
               const zeptoResult = parseZeptoPO(buffer.toString('utf-8'), user);
               // Convert multiple PO structure to single PO for fallback detection
@@ -3352,22 +3385,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Clean and convert dates to proper Date objects
       const cleanHeader = { ...header };
-      
-      // Convert all possible date fields
+
+      // Convert all possible date fields with proper null handling
       const dateFields = ['order_date', 'po_expiry_date', 'po_date', 'po_release_date', 'expected_delivery_date', 'appointment_date', 'expiry_date'];
       dateFields.forEach(field => {
-        if (cleanHeader[field]) {
-          cleanHeader[field] = safeConvertDate(cleanHeader[field]);
+        if (cleanHeader[field] !== undefined) {
+          if (cleanHeader[field] === null || cleanHeader[field] === "") {
+            cleanHeader[field] = null; // Explicitly set to null for nullable fields
+          } else {
+            cleanHeader[field] = safeConvertDate(cleanHeader[field]);
+          }
         }
       });
 
-      // Clean lines data
+      // Clean lines data with proper null handling
       const cleanLines = lines.map((line: any) => {
         const cleanLine = { ...line };
         const lineDateFields = ['required_by_date', 'po_expiry_date', 'delivery_date'];
         lineDateFields.forEach(field => {
-          if (cleanLine[field]) {
-            cleanLine[field] = safeConvertDate(cleanLine[field]);
+          if (cleanLine[field] !== undefined) {
+            if (cleanLine[field] === null || cleanLine[field] === "") {
+              cleanLine[field] = null; // Explicitly set to null for nullable fields
+            } else {
+              cleanLine[field] = safeConvertDate(cleanLine[field]);
+            }
           }
         });
         return cleanLine;
@@ -3421,7 +3462,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         // Use platform-specific methods to ensure data goes into both platform-specific AND consolidated tables
         if (vendor === 'flipkart') {
+          console.log('🔄 Creating Flipkart PO:', cleanHeader.po_number);
+          console.log('📄 Header data:', JSON.stringify(cleanHeader, null, 2));
+          console.log('📦 Lines data:', cleanLines.length, 'items');
           createdPo = await storage.createFlipkartGroceryPo(cleanHeader, cleanLines);
+          console.log('✅ Flipkart PO created:', createdPo.id);
+
+          // VERIFICATION: Immediately check if the PO exists in database
+          console.log('🔍 VERIFICATION: Checking if PO was actually saved...');
+          try {
+            const verificationPo = await storage.getFlipkartGroceryPoById(createdPo.id);
+            if (verificationPo) {
+              console.log('✅ VERIFICATION SUCCESS: PO found in database');
+            } else {
+              console.log('❌ VERIFICATION FAILED: PO NOT found in database immediately after creation');
+              throw new Error(`PO ${createdPo.id} was created but cannot be found in database`);
+            }
+          } catch (verificationError) {
+            console.error('❌ VERIFICATION ERROR:', verificationError);
+            throw new Error(`Database verification failed: ${verificationError.message}`);
+          }
         } else if (vendor === 'zepto') {
           console.log('📋 Creating Zepto PO:', cleanHeader.po_number);
           createdPo = await storage.createZeptoPo(cleanHeader, cleanLines);
@@ -3528,12 +3588,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.status(201).json(createdPo);
     } catch (error) {
-      console.error("Error importing PO:", error);
-      console.error("Error details:", {
+      console.error("🚨 CRITICAL ERROR importing PO:", error);
+      console.error("🚨 Error details:", {
         vendor: req.params.vendor,
         poNumber: req.body.header?.po_number,
         errorMessage: error instanceof Error ? error.message : String(error),
-        errorStack: error instanceof Error ? error.stack : undefined
+        errorStack: error instanceof Error ? error.stack : undefined,
+        errorCode: (error as any)?.code,
+        errorSeverity: (error as any)?.severity,
+        errorDetail: (error as any)?.detail,
+        errorConstraint: (error as any)?.constraint,
+        errorTable: (error as any)?.table,
+        errorColumn: (error as any)?.column
       });
 
       // Handle duplicate PO errors with user-friendly messages

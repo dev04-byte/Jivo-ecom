@@ -78,10 +78,10 @@ export const insertSwiggyPoToDatabase = async (data: SwiggyPoData): Promise<{ su
       payment_terms: data.header.payment_terms || null,
       total_items: data.lines.length || 0,
       total_quantity: data.lines.reduce((sum: number, line: any) => sum + (Number(line.quantity) || 0), 0),
-      total_taxable_value: data.header.total_taxable_value ? String(data.header.total_taxable_value) : null,
-      total_tax_amount: data.header.total_tax_amount ? String(data.header.total_tax_amount) : null,
-      grand_total: data.header.grand_total ? String(data.header.grand_total) : null,
-      unique_hsn_codes: data.header.unique_hsn_codes || [...new Set(data.lines.map((line: any) => line.hsn_code).filter(Boolean))],
+      total_taxable_value: data.header.total_taxable_value ? data.header.total_taxable_value : null,
+      total_tax_amount: data.header.total_tax_amount ? data.header.total_tax_amount : null,
+      grand_total: data.header.grand_total ? data.header.grand_total : null,
+      unique_hsn_codes: data.header.unique_hsn_codes || Array.from(new Set(data.lines.map((line: any) => line.hsn_code).filter(Boolean))),
       status: data.header.status || 'pending',
       created_by: data.header.created_by || 'system'
     };
@@ -111,21 +111,21 @@ export const insertSwiggyPoToDatabase = async (data: SwiggyPoData): Promise<{ su
           item_description: line.item_description || line.product_description || '',
           hsn_code: line.hsn_code || null, // Don't use category_id as it's too long for hsn_code field
           quantity: Number(line.quantity) || 0,
-          mrp: line.mrp ? (typeof line.mrp === 'string' ? Number(line.mrp) : line.mrp) : null,
-          unit_base_cost: line.unit_base_cost ? (typeof line.unit_base_cost === 'string' ? Number(line.unit_base_cost) : line.unit_base_cost) : null,
-          taxable_value: line.taxable_value ? (typeof line.taxable_value === 'string' ? Number(line.taxable_value) : line.taxable_value) : null,
+          mrp: line.mrp || null,
+          unit_base_cost: line.unit_base_cost || null,
+          taxable_value: line.taxable_value || null,
           // Map tax breakdown from parsed data
-          cgst_rate: line.cgst_rate ? (typeof line.cgst_rate === 'string' ? Number(line.cgst_rate) : line.cgst_rate) : null,
-          cgst_amount: line.cgst_amount ? (typeof line.cgst_amount === 'string' ? Number(line.cgst_amount) : line.cgst_amount) : null,
-          sgst_rate: line.sgst_rate ? (typeof line.sgst_rate === 'string' ? Number(line.sgst_rate) : line.sgst_rate) : null,
-          sgst_amount: line.sgst_amount ? (typeof line.sgst_amount === 'string' ? Number(line.sgst_amount) : line.sgst_amount) : null,
-          igst_rate: line.igst_rate ? (typeof line.igst_rate === 'string' ? Number(line.igst_rate) : line.igst_rate) : null,
-          igst_amount: line.igst_amount ? (typeof line.igst_amount === 'string' ? Number(line.igst_amount) : line.igst_amount) : null,
-          cess_rate: line.cess_rate ? (typeof line.cess_rate === 'string' ? Number(line.cess_rate) : line.cess_rate) : null,
-          cess_amount: line.cess_amount ? (typeof line.cess_amount === 'string' ? Number(line.cess_amount) : line.cess_amount) : null,
-          additional_cess: line.additional_cess ? (typeof line.additional_cess === 'string' ? Number(line.additional_cess) : line.additional_cess) : null,
-          total_tax_amount: line.total_tax_amount ? (typeof line.total_tax_amount === 'string' ? Number(line.total_tax_amount) : line.total_tax_amount) : null,
-          line_total: line.line_total ? (typeof line.line_total === 'string' ? Number(line.line_total) : line.line_total) : null
+          cgst_rate: line.cgst_rate || null,
+          cgst_amount: line.cgst_amount || null,
+          sgst_rate: line.sgst_rate || null,
+          sgst_amount: line.sgst_amount || null,
+          igst_rate: line.igst_rate || null,
+          igst_amount: line.igst_amount || null,
+          cess_rate: line.cess_rate || null,
+          cess_amount: line.cess_amount || null,
+          additional_cess: line.additional_cess || null,
+          total_tax_amount: line.total_tax_amount || null,
+          line_total: line.line_total || null
         }));
 
         await tx.insert(swiggyPoLines).values(linesData);

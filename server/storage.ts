@@ -802,7 +802,68 @@ export class DatabaseStorage implements IStorage {
       console.error('Error fetching Swiggy POs from swiggy_pos:', error);
     }
 
-    // PRIORITY 2: Fetch POs from po_master table (but exclude Blinkit and Zepto to avoid duplicates)
+    // Fetch Flipkart Grocery POs from flipkart_grocery_po_header (original Flipkart data)
+    try {
+      const flipkartPos = await this.getAllFlipkartGroceryPos();
+      console.log(`📊 getAllPos: Found ${flipkartPos.length} Flipkart Grocery POs from flipkart_grocery_po_header (original data)`);
+
+      for (const flipkartPo of flipkartPos) {
+        // DEBUG: Check what fields are available
+        console.log(`🔍 DEBUG Flipkart PO ${flipkartPo.po_number}:`, {
+          order_date: flipkartPo.order_date,
+          created_at: flipkartPo.created_at,
+          po_expiry_date: flipkartPo.po_expiry_date,
+          available_fields: Object.keys(flipkartPo)
+        });
+
+        // Use original Flipkart data exactly as uploaded
+        const originalFlipkartPo = {
+          id: flipkartPo.id,
+          po_number: flipkartPo.po_number,
+          po_date: flipkartPo.order_date || flipkartPo.created_at, // Flipkart uses order_date but fallback to created_at
+          order_date: flipkartPo.order_date || flipkartPo.created_at, // Frontend expects order_date
+          expiry_date: flipkartPo.expiry_date || null,
+          city: flipkartPo.location || '',
+          state: flipkartPo.state || '',
+          serving_distributor: flipkartPo.supplier_name || '',
+          platform: { id: 5, pf_name: "Flipkart" },
+          vendor_name: flipkartPo.supplier_name || '',
+          status: flipkartPo.status || 'Active',
+          total_amount: flipkartPo.total_amount || '0',
+          created_at: flipkartPo.created_at,
+          updated_at: flipkartPo.updated_at,
+          vendor_po_number: flipkartPo.po_number,
+          bill_amount: flipkartPo.total_amount || '0',
+          orderItems: flipkartPo.poLines.map((line, index) => ({
+            id: line.id,
+            po_id: flipkartPo.id,
+            platform_id: 5,
+            product_id: null,
+            item_code: line.fsn_isbn || '',
+            item_name: line.title || '',
+            item_description: line.title || '',
+            sap_code: line.fsn_isbn || '',
+            quantity: Number(line.quantity) || 0,
+            basic_rate: String(Number(line.supplier_price) || 0),
+            gst_rate: '0',
+            landing_rate: String(Number(line.supplier_price) || 0),
+            rate: Number(line.supplier_price) || 0,
+            amount: Number(line.total_amount) || 0,
+            create_on: flipkartPo.created_at,
+            create_by: flipkartPo.created_by || 'system',
+            modify_on: flipkartPo.updated_at,
+            modify_by: flipkartPo.created_by || 'system',
+            uom: line.uom || 'PCS'
+          }))
+        };
+
+        result.push(originalFlipkartPo as any);
+      }
+    } catch (error) {
+      console.error('Error fetching Flipkart Grocery POs from flipkart_grocery_po_header:', error);
+    }
+
+    // PRIORITY 2: Fetch POs from po_master table (but exclude Blinkit, Zepto, and Flipkart to avoid duplicates)
     const posWithPlatforms = await db
       .select({
         po: poMaster,
@@ -812,11 +873,12 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(pfMst, eq(poMaster.platform_id, pfMst.id))
       .where(and(
         ne(poMaster.series, 'Blinkit'), // Exclude Blinkit POs since we're showing original data
-        ne(poMaster.series, 'Zepto')    // Exclude Zepto POs since we're showing original data
+        ne(poMaster.series, 'Zepto'),   // Exclude Zepto POs since we're showing original data
+        ne(poMaster.series, 'Flipkart') // Exclude Flipkart POs since we're showing original data
       ))
       .orderBy(desc(poMaster.create_on));
 
-    console.log(`📊 getAllPos: Found ${posWithPlatforms.length} non-Blinkit/Zepto POs from po_master table`);
+    console.log(`📊 getAllPos: Found ${posWithPlatforms.length} non-Blinkit/Zepto/Flipkart POs from po_master table`);
 
     // Process POs from po_master table
     for (const poWithPlatform of posWithPlatforms) {
@@ -993,7 +1055,7 @@ export class DatabaseStorage implements IStorage {
     // Sort results by created_at descending (most recent uploads first)
     result.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
-    console.log(`📊 getAllPos: Returning ${result.length} POs total (po_master + Zepto + Blinkit)`);
+    console.log(`📊 getAllPos: Returning ${result.length} POs total (po_master + Zepto + Blinkit + Swiggy + Flipkart)`);
 
     return result;
   }
@@ -1101,7 +1163,99 @@ export class DatabaseStorage implements IStorage {
       console.error(`❌ getPoById: Error checking Blinkit tables for PO ${id}:`, error);
     }
 
-    // PRIORITY 2: Check po_master table (unified POs)
+    // PRIORITY 3: Check Swiggy-specific tables (original data)
+    console.log(`🔍 getPoById: Checking Swiggy tables for PO ${id}...`);
+    try {
+      const swiggyPo = await this.getSwiggyPoById(id);
+      if (swiggyPo) {
+        console.log(`✅ getPoById: Found Swiggy PO ${id} in swiggy_pos (using original data)`);
+
+        // Return RAW Swiggy table data PLUS frontend compatibility fields
+        const rawSwiggyPo = {
+          // Add platform info for frontend identification
+          platform: { id: 4, pf_name: "Swiggy" },
+          // All original swiggy_pos columns exactly as they are
+          ...swiggyPo,
+          // Frontend compatibility fields (mapped from raw data)
+          expiry_date: swiggyPo.po_expiry_date,
+          city: '',
+          state: '',
+          serving_distributor: swiggyPo.vendor_name,
+          // Convert poLines to exact swiggy_po_lines column names + frontend compatibility
+          orderItems: swiggyPo.poLines.map(line => ({
+            // All original swiggy_po_lines columns exactly as they are
+            ...line,
+            // Frontend compatibility fields (mapped from raw data)
+            item_name: line.item_description || 'Swiggy Product',
+            product_description: line.item_description,
+            quantity: line.quantity || 0,
+            basic_rate: line.unit_base_cost?.toString() || '0',
+            landing_rate: line.unit_base_cost?.toString() || '0',
+            total_amount: line.line_total?.toString() || '0',
+            tax_amount: line.total_tax_amount?.toString() || '0',
+            mrp: line.mrp?.toString() || '0',
+            hsn_code: line.hsn_code,
+            platform_code: line.item_code,
+            sap_code: line.item_code,
+            uom: 'PCS'
+          }))
+        };
+
+        console.log(`✅ getPoById: Returning RAW Swiggy PO ${id} with ${rawSwiggyPo.orderItems.length} items`);
+        return rawSwiggyPo as any;
+      }
+    } catch (error) {
+      console.error(`❌ getPoById: Error checking Swiggy tables for PO ${id}:`, error);
+    }
+
+    // PRIORITY 4: Check Flipkart-specific tables (original data)
+    console.log(`🔍 getPoById: Checking Flipkart tables for PO ${id}...`);
+    try {
+      const flipkartPo = await this.getFlipkartGroceryPoById(id);
+      if (flipkartPo) {
+        console.log(`✅ getPoById: Found Flipkart PO ${id} in flipkart_grocery_po_header (using original data)`);
+
+        // Return RAW Flipkart table data PLUS frontend compatibility fields
+        const rawFlipkartPo = {
+          // Add platform info for frontend identification
+          platform: { id: 2, pf_name: "Flipkart" },
+          // All original flipkart_grocery_po_header columns exactly as they are
+          ...flipkartPo,
+          // Frontend compatibility fields (mapped from raw data)
+          po_date: flipkartPo.order_date || flipkartPo.created_at,
+          order_date: flipkartPo.order_date || flipkartPo.created_at,
+          expiry_date: flipkartPo.expiry_date,
+          city: flipkartPo.location || '',
+          state: flipkartPo.state || '',
+          serving_distributor: flipkartPo.supplier_name || '',
+          vendor_name: flipkartPo.supplier_name || '',
+          // Convert poLines to exact flipkart_grocery_po_lines column names + frontend compatibility
+          orderItems: flipkartPo.poLines.map(line => ({
+            // All original flipkart_grocery_po_lines columns exactly as they are
+            ...line,
+            // Frontend compatibility fields (mapped from raw data)
+            item_name: line.title || 'Flipkart Product',
+            product_description: line.title,
+            quantity: line.quantity || 0,
+            basic_rate: line.supplier_price?.toString() || '0',
+            landing_rate: line.supplier_price?.toString() || '0',
+            total_amount: line.total_amount?.toString() || '0',
+            mrp: line.supplier_mrp?.toString() || '0',
+            hsn_code: line.hsn_code,
+            platform_code: line.fsn_isbn || line.ean,
+            sap_code: line.ean,
+            uom: 'PCS'
+          }))
+        };
+
+        console.log(`✅ getPoById: Returning RAW Flipkart PO ${id} with ${rawFlipkartPo.orderItems.length} items`);
+        return rawFlipkartPo as any;
+      }
+    } catch (error) {
+      console.error(`❌ getPoById: Error checking Flipkart tables for PO ${id}:`, error);
+    }
+
+    // PRIORITY 5: Check po_master table (unified POs)
     const masterPoResult = await db
       .select({
         master: poMaster,
@@ -1999,26 +2153,67 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createFlipkartGroceryPo(header: InsertFlipkartGroceryPoHeader, lines: InsertFlipkartGroceryPoLines[]): Promise<FlipkartGroceryPoHeader> {
-    return await db.transaction(async (tx) => {
-      // Insert into platform-specific tables
-      const [createdHeader] = await tx.insert(flipkartGroceryPoHeader).values(header).returning();
-      
-      if (lines.length > 0) {
-        const linesWithHeaderId = lines.map(line => ({
-          ...line,
-          header_id: createdHeader.id
-        }));
-        await tx.insert(flipkartGroceryPoLines).values(linesWithHeaderId);
-        
-        // Also insert into consolidated po_master and po_lines tables
-        await this.insertIntoPoMasterAndLines(tx, 'FlipkartGrocery', createdHeader, linesWithHeaderId);
-      } else {
-        // Insert header only into po_master
-        await this.insertIntoPoMasterAndLines(tx, 'FlipkartGrocery', createdHeader, []);
-      }
-      
-      return createdHeader;
-    });
+    console.log('💾 Storage: Starting createFlipkartGroceryPo operation');
+    console.log('💾 Storage: Header PO number:', header.po_number);
+    console.log('💾 Storage: Lines count:', lines.length);
+
+    try {
+      // SIMPLIFIED APPROACH: Direct insertion without consolidated tables
+      console.log('💾 Storage: Using simplified insertion approach');
+
+      return await db.transaction(async (tx) => {
+        console.log('💾 Storage: Transaction started for Flipkart PO');
+
+        // Step 1: Insert header
+        console.log('💾 Storage: Step 1 - Inserting header into flipkart_grocery_po_header...');
+        console.log('💾 Storage: Header data keys:', Object.keys(header));
+
+        const [createdHeader] = await tx.insert(flipkartGroceryPoHeader).values(header).returning();
+        console.log('💾 Storage: ✅ Header inserted successfully with ID:', createdHeader.id);
+
+        // Step 2: Insert lines if any
+        if (lines.length > 0) {
+          console.log('💾 Storage: Step 2 - Preparing lines for insertion...');
+
+          const linesWithHeaderId = lines.map((line, index) => {
+            console.log(`💾 Storage: Preparing line ${index + 1}:`, line.title || 'Unknown item');
+            return {
+              ...line,
+              header_id: createdHeader.id
+            };
+          });
+
+          console.log('💾 Storage: Inserting', linesWithHeaderId.length, 'lines into flipkart_grocery_po_lines...');
+          const insertedLines = await tx.insert(flipkartGroceryPoLines).values(linesWithHeaderId).returning();
+          console.log('💾 Storage: ✅ Lines inserted successfully, count:', insertedLines.length);
+        } else {
+          console.log('💾 Storage: Step 2 - No lines to insert');
+        }
+
+        console.log('💾 Storage: ✅ Transaction completed successfully');
+        console.log('💾 Storage: Final header ID:', createdHeader.id, 'PO Number:', createdHeader.po_number);
+
+        // Explicit verification within transaction
+        console.log('💾 Storage: Verifying insertion within transaction...');
+        const verification = await tx.select().from(flipkartGroceryPoHeader).where(eq(flipkartGroceryPoHeader.id, createdHeader.id));
+        if (verification.length > 0) {
+          console.log('💾 Storage: ✅ Verification successful - header exists in transaction');
+        } else {
+          console.log('💾 Storage: ❌ Verification failed - header not found in transaction');
+          throw new Error('Header verification failed within transaction');
+        }
+
+        return createdHeader;
+      });
+    } catch (error) {
+      console.error('💾 Storage: ❌ Transaction failed with error:', error);
+      console.error('💾 Storage: Error type:', typeof error);
+      console.error('💾 Storage: Error details:', error instanceof Error ? error.message : String(error));
+      console.error('💾 Storage: Error code:', (error as any)?.code);
+      console.error('💾 Storage: Error constraint:', (error as any)?.constraint);
+      console.error('💾 Storage: Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      throw error;
+    }
   }
 
   async updateFlipkartGroceryPo(id: number, header: Partial<InsertFlipkartGroceryPoHeader>, lines?: InsertFlipkartGroceryPoLines[]): Promise<FlipkartGroceryPoHeader> {

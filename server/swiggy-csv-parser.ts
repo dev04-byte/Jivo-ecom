@@ -1,5 +1,6 @@
 import Papa from 'papaparse';
 import type { InsertSwiggyPo, InsertSwiggyPoLine } from '@shared/schema';
+import { extractHsnCode } from './hsn-mapper';
 
 interface SwiggyCSVRow {
   PoNumber: string;
@@ -31,6 +32,7 @@ interface SwiggyCSVRow {
   PoAgeing: string;
   BrandName: string;
   ReferencePoNumber: string;
+  HsnCode?: string; // Optional HSN code field
 }
 
 interface SwiggyParsedPO {
@@ -116,11 +118,25 @@ export function parseSwiggyCSV(csvContent: string, uploadedBy: string): Multiple
       // Use first row for header information (assuming all rows in a PO group have same header data)
       const firstRow = poRows[0];
 
-      // Calculate totals
+      // Use PoAmount from first row as it contains the correct total (all rows in same PO have same PoAmount)
+      const poAmount = parseNumberOrZero(firstRow.PoAmount);
+
+      // Calculate totals from line items using MRP × Quantity logic
       const totalQuantity = poRows.reduce((sum: number, row: SwiggyCSVRow) => sum + parseNumberOrZero(row.OrderedQty), 0);
       const totalTaxableValue = poRows.reduce((sum: number, row: SwiggyCSVRow) => sum + parseNumberOrZero(row.PoLineValueWithoutTax), 0);
       const totalTaxAmount = poRows.reduce((sum: number, row: SwiggyCSVRow) => sum + parseNumberOrZero(row.Tax), 0);
-      const grandTotal = poRows.reduce((sum: number, row: SwiggyCSVRow) => sum + parseNumberOrZero(row.PoLineValueWithTax), 0);
+
+      // Calculate grand total using MRP × Quantity for each line
+      const mrpBasedTotal = poRows.reduce((sum: number, row: SwiggyCSVRow) => {
+        const mrp = parseNumberOrZero(row.Mrp);
+        const quantity = parseNumberOrZero(row.OrderedQty);
+        return sum + (mrp * quantity);
+      }, 0);
+
+      const calculatedGrandTotal = poRows.reduce((sum: number, row: SwiggyCSVRow) => sum + parseNumberOrZero(row.PoLineValueWithTax), 0);
+
+      // Use MRP-based total if all MRPs are available, otherwise use PoAmount or calculated total
+      const grandTotal = mrpBasedTotal > 0 ? mrpBasedTotal : (poAmount > 0 ? poAmount : calculatedGrandTotal);
 
       // Get unique categories (HSN codes not available in CSV format)
       const uniqueHsnCodes: string[] = [];
@@ -133,32 +149,62 @@ export function parseSwiggyCSV(csvContent: string, uploadedBy: string): Multiple
         expected_delivery_date: parseDate(firstRow.ExpectedDeliveryDate),
         po_expiry_date: parseDate(firstRow.PoExpiryDate),
         vendor_name: firstRow.VendorName || null,
-        payment_terms: null, // Not available in this CSV format
+        payment_terms: `${firstRow.InternalExternalPo || 'External'} PO`, // Use available info
         total_items: poRows.length,
         total_quantity: totalQuantity,
-        total_taxable_value: totalTaxableValue.toString(),
-        total_tax_amount: totalTaxAmount.toString(),
-        grand_total: grandTotal.toString(),
+        total_taxable_value: totalTaxableValue > 0 ? totalTaxableValue.toString() : null,
+        total_tax_amount: totalTaxAmount > 0 ? totalTaxAmount.toString() : null,
+        grand_total: grandTotal > 0 ? grandTotal.toString() : null,
+        total_amount: grandTotal > 0 ? grandTotal.toString() : null, // For unified component
         unique_hsn_codes: Array.from(new Set(poRows.map((row: SwiggyCSVRow) => row.CategoryId).filter(Boolean))), // Use categories as proxy
         status: firstRow.Status || 'pending',
-        created_by: uploadedBy
+        created_by: uploadedBy,
+        // Additional fields for unified component
+        delivery_city: firstRow.City || null,
+        facility_name: firstRow.FacilityName || null,
+        supplier_code: firstRow.SupplierCode || null
       };
 
       // Create lines matching InsertSwiggyPoLine schema
-      const lines = poRows.map((row: SwiggyCSVRow, index: number) => ({
+      const lines = poRows.map((row: SwiggyCSVRow, index: number) => {
+        // Use the HSN mapper to extract or infer HSN code
+        const hsnCode = extractHsnCode({
+          hsnCode: row.HsnCode,
+          description: row.SkuDescription,
+          category: row.CategoryId,
+          brandName: row.BrandName
+        });
+
+        return {
         line_number: index + 1,
         item_code: row.SkuCode || '',
         item_description: row.SkuDescription || '',
-        hsn_code: null, // HSN code not available in CSV format
+        hsn_code: hsnCode, // Extract using HSN mapper or null
         quantity: parseNumberOrZero(row.OrderedQty),
         mrp: parseNumber(row.Mrp)?.toString() || null,
         unit_base_cost: parseNumber(row.UnitBasedCost)?.toString() || null,
         taxable_value: parseNumber(row.PoLineValueWithoutTax)?.toString() || null,
 
-        // Tax fields - Calculate estimated breakdown from total tax (assuming 18% GST split equally)
-        cgst_rate: parseNumberOrZero(row.Tax) > 0 ? "9.00" : null,
+        // Tax fields - Calculate actual tax rates from CSV data
+        cgst_rate: (() => {
+          const taxableValue = parseNumberOrZero(row.PoLineValueWithoutTax);
+          const taxAmount = parseNumberOrZero(row.Tax);
+          if (taxableValue > 0 && taxAmount > 0) {
+            const taxRate = (taxAmount / taxableValue) * 100;
+            return (taxRate / 2).toString(); // Split between CGST and SGST
+          }
+          return null;
+        })(),
         cgst_amount: parseNumberOrZero(row.Tax) > 0 ? (parseNumberOrZero(row.Tax) / 2).toString() : null,
-        sgst_rate: parseNumberOrZero(row.Tax) > 0 ? "9.00" : null,
+        sgst_rate: (() => {
+          const taxableValue = parseNumberOrZero(row.PoLineValueWithoutTax);
+          const taxAmount = parseNumberOrZero(row.Tax);
+          if (taxableValue > 0 && taxAmount > 0) {
+            const taxRate = (taxAmount / taxableValue) * 100;
+            return (taxRate / 2).toString(); // Split between CGST and SGST
+          }
+          return null;
+        })(),
         sgst_amount: parseNumberOrZero(row.Tax) > 0 ? (parseNumberOrZero(row.Tax) / 2).toString() : null,
         igst_rate: null,
         igst_amount: null,
@@ -166,10 +212,21 @@ export function parseSwiggyCSV(csvContent: string, uploadedBy: string): Multiple
         cess_amount: null,
         additional_cess: null,
         total_tax_amount: parseNumber(row.Tax)?.toString() || null,
-        line_total: parseNumber(row.PoLineValueWithTax)?.toString() || null
-      }));
+        line_total: (() => {
+          const mrp = parseNumber(row.Mrp);
+          const quantity = parseNumberOrZero(row.OrderedQty);
+          if (mrp && quantity > 0) {
+            return (mrp * quantity).toString();
+          }
+          return parseNumber(row.PoLineValueWithTax)?.toString() || null;
+        })()
+      };
+    });
 
-      parsedPOs.push({ header, lines });
+      parsedPOs.push({
+        header,
+        lines
+      });
 
       console.log(`✅ Processed PO ${poNumber}: ${lines.length} items, Total: ${grandTotal}`);
     }

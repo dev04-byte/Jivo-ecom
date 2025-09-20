@@ -847,6 +847,49 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
     importMutation.mutate(dataToImport);
   };
 
+  const handleImportData = () => {
+    console.log('🚀 Starting database import from preview...');
+
+    if (!parsedData) {
+      toast({
+        title: "No data to import",
+        description: "Please parse the file first before importing",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!selectedPlatform) {
+      toast({
+        title: "Platform not selected",
+        description: "Please select a platform before importing",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate data based on platform
+    if (selectedPlatform === 'flipkart' && (!parsedData.header || !parsedData.lines || parsedData.lines.length === 0)) {
+      toast({
+        title: "Invalid data structure",
+        description: "Flipkart data requires both header and line items",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    console.log('✅ Data validation passed, proceeding with import...');
+    console.log('📊 Import data:', {
+      platform: selectedPlatform,
+      headerExists: !!parsedData.header,
+      linesCount: parsedData.lines?.length || 0,
+      totalAmount: parsedData.header?.total_amount || parsedData.totalAmount
+    });
+
+    // Use the existing handleImport function
+    handleImport();
+  };
+
   const handleAutoPopulatedData = (data: any, source: string) => {
     // Handle the auto-populated data - set it as parsedData and move to preview
     console.log('✅ Auto-populated data received:', { data, source });
@@ -1455,7 +1498,7 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                               <>
                                                 <td className="p-2 font-medium">{line.line_number || lineIndex + 1}</td>
                                                 <td className="p-2 font-medium text-blue-600">{line.item_code || 'SKU-N/A'}</td>
-                                                <td className="p-2">{line.hsn_code || line.category_id || 'HSN via system'}</td>
+                                                <td className="p-2">{line.category_id || 'Via Platform'}</td>
                                                 <td className="p-2 text-sm">{line.product_upc || line.item_code || 'UPC via system'}</td>
                                                 <td className="p-2 text-sm">{line.product_description || line.item_description || 'Description via system'}</td>
                                                 <td className="p-2">{line.grammage || 'Unit'}</td>
@@ -1502,35 +1545,54 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                 <div className="space-y-2">
                                   <h6 className="font-semibold text-gray-800 pb-2 border-b">Order Details</h6>
                                   <div><span className="font-medium text-gray-600">PO Number:</span> <span className="ml-2">{parsedData.header.po_number || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Order Date:</span> <span className="ml-2">{parsedData.header.po_date || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Delivery Date:</span> <span className="ml-2">{parsedData.header.po_delivery_date || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Expiry Date:</span> <span className="ml-2">{parsedData.header.po_expiry_date || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Payment Terms:</span> <span className="ml-2">{parsedData.header.payment_terms || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Currency:</span> <span className="ml-2">{parsedData.header.currency || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Status:</span> <span className="ml-2">{parsedData.header.status || 'Not available'}</span></div>
+                                  <div><span className="font-medium text-gray-600">Order Date:</span> <span className="ml-2">{
+                                    parsedData.header.po_date || parsedData.header.order_date
+                                      ? (parsedData.header.po_date || parsedData.header.order_date).toString().split('T')[0]
+                                      : 'Not available'
+                                  }</span></div>
+                                  <div><span className="font-medium text-gray-600">Expiry Date:</span> <span className="ml-2">{
+                                    parsedData.header.po_expiry_date
+                                      ? parsedData.header.po_expiry_date.toString().split('T')[0]
+                                      : 'Not available'
+                                  }</span></div>
+                                  <div><span className="font-medium text-gray-600">Mode of Payment:</span> <span className="ml-2">{parsedData.header.mode_of_payment || 'Not available'}</span></div>
+                                  {parsedData.header.credit_term && (
+                                    <div><span className="font-medium text-gray-600">Credit Term:</span> <span className="ml-2">{parsedData.header.credit_term}</span></div>
+                                  )}
+                                  {parsedData.header.category && (
+                                    <div><span className="font-medium text-gray-600">Category:</span> <span className="ml-2">{parsedData.header.category}</span></div>
+                                  )}
+                                  {parsedData.header.nature_of_supply && (
+                                    <div><span className="font-medium text-gray-600">Nature of Supply:</span> <span className="ml-2">{parsedData.header.nature_of_supply}</span></div>
+                                  )}
+                                  {parsedData.header.nature_of_transaction && (
+                                    <div><span className="font-medium text-gray-600">Nature of Transaction:</span> <span className="ml-2">{parsedData.header.nature_of_transaction}</span></div>
+                                  )}
+                                  {parsedData.header.contract_ref_id && (
+                                    <div><span className="font-medium text-gray-600">Contract Ref ID:</span> <span className="ml-2">{parsedData.header.contract_ref_id}</span></div>
+                                  )}
+                                  {parsedData.header.contract_version && (
+                                    <div><span className="font-medium text-gray-600">Contract Version:</span> <span className="ml-2">{parsedData.header.contract_version}</span></div>
+                                  )}
+                                  <div><span className="font-medium text-gray-600">Status:</span> <span className="ml-2">{parsedData.header.status || 'Open'}</span></div>
                                 </div>
 
                                 {/* Vendor Information Section */}
                                 <div className="space-y-2">
                                   <h6 className="font-semibold text-gray-800 pb-2 border-b">Vendor Information</h6>
-                                  <div><span className="font-medium text-gray-600">Company:</span> <span className="ml-2">{parsedData.header.vendor_name || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Contact:</span> <span className="ml-2">{parsedData.header.vendor_contact_name || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Phone:</span> <span className="ml-2">{parsedData.header.vendor_contact_phone || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Email:</span> <span className="ml-2">{parsedData.header.vendor_contact_email || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.vendor_gst_no || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">PAN Number:</span> <span className="ml-2">{parsedData.header.vendor_pan || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2">{parsedData.header.vendor_registered_address || 'Not available'}</span></div>
+                                  <div><span className="font-medium text-gray-600">Company:</span> <span className="ml-2">{parsedData.header.vendor_name || parsedData.header.supplier_name || 'Not available'}</span></div>
+                                  <div><span className="font-medium text-gray-600">Contact:</span> <span className="ml-2">{parsedData.header.vendor_contact_name || parsedData.header.supplier_contact || 'Not available'}</span></div>
+                                  <div><span className="font-medium text-gray-600">Email:</span> <span className="ml-2">{parsedData.header.vendor_contact_email || parsedData.header.supplier_email || 'Not available'}</span></div>
+                                  <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.vendor_gst_no || parsedData.header.supplier_gstin || 'Not available'}</span></div>
+                                  <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2">{parsedData.header.vendor_registered_address || parsedData.header.supplier_address || 'Not available'}</span></div>
                                 </div>
 
                                 {/* Buyer Information Section */}
                                 <div className="space-y-2">
                                   <h6 className="font-semibold text-gray-800 pb-2 border-b">Buyer Information</h6>
-                                  <div><span className="font-medium text-gray-600">Company:</span> <span className="ml-2">{parsedData.header.buyer_name || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Contact:</span> <span className="ml-2">{parsedData.header.buyer_contact || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Phone:</span> <span className="ml-2">{parsedData.header.buyer_phone || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.buyer_gst || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">PAN Number:</span> <span className="ml-2">{parsedData.header.buyer_pan || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2">{parsedData.header.buyer_address || 'Not available'}</span></div>
+                                  <div><span className="font-medium text-gray-600">Company:</span> <span className="ml-2">{parsedData.header.buyer_name || 'Flipkart India Private Limited'}</span></div>
+                                  <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.buyer_gst || parsedData.header.billed_to_gstin || 'Not available'}</span></div>
+                                  <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2">{parsedData.header.buyer_address || parsedData.header.billed_to_address || 'Not available'}</span></div>
                                 </div>
                               </div>
                             </div>
@@ -1562,6 +1624,7 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                         </div>
                       </div>
 
+
                       {/* Complete Line Items Preview */}
                       {parsedData.lines && parsedData.lines.length > 0 && (
                         <Card>
@@ -1583,9 +1646,9 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                             </CardDescription>
                           </CardHeader>
                           <CardContent>
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-xs">
-                                <thead className="bg-gray-50">
+                            <div className="overflow-x-auto border rounded-lg max-h-96 overflow-y-auto">
+                              <table className="min-w-full text-xs whitespace-nowrap">
+                                <thead className="bg-gray-50 sticky top-0 z-10">
                                   <tr className="border-b">
                                     {/* Check if this is Blinkit PDF data */}
                                     {parsedData.source === 'pdf' || selectedPlatformData?.id === 'blinkit' ? (
@@ -1635,12 +1698,31 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                       </>
                                     ) : selectedPlatformData?.id === 'flipkart' ? (
                                       <>
-                                        <th className="text-left p-2 font-medium">Title</th>
-                                        <th className="text-left p-2 font-medium">FSN/ISBN</th>
-                                        <th className="text-left p-2 font-medium">Brand</th>
-                                        <th className="text-left p-2 font-medium">Quantity</th>
-                                        <th className="text-left p-2 font-medium">Supplier Price</th>
-                                        <th className="text-left p-2 font-medium">Total</th>
+                                        <th className="text-left p-2 font-medium min-w-[60px]">S.No</th>
+                                        <th className="text-left p-2 font-medium min-w-[100px]">HSN/SA Code</th>
+                                        <th className="text-left p-2 font-medium min-w-[150px]">FSN/ISBN13</th>
+                                        <th className="text-left p-2 font-medium min-w-[80px]">Quantity</th>
+                                        <th className="text-left p-2 font-medium min-w-[120px]">Pending Qty</th>
+                                        <th className="text-left p-2 font-medium min-w-[60px]">UOM</th>
+                                        <th className="text-left p-2 font-medium min-w-[300px]">Title</th>
+                                        <th className="text-left p-2 font-medium min-w-[100px]">Brand</th>
+                                        <th className="text-left p-2 font-medium min-w-[120px]">Type</th>
+                                        <th className="text-left p-2 font-medium min-w-[140px]">EAN</th>
+                                        <th className="text-left p-2 font-medium min-w-[100px]">Vertical</th>
+                                        <th className="text-left p-2 font-medium min-w-[140px]">Required by Date</th>
+                                        <th className="text-left p-2 font-medium min-w-[120px]">Supplier MRP</th>
+                                        <th className="text-left p-2 font-medium min-w-[120px]">Supplier Price</th>
+                                        <th className="text-left p-2 font-medium min-w-[120px]">Taxable Value</th>
+                                        <th className="text-left p-2 font-medium min-w-[100px]">IGST Rate</th>
+                                        <th className="text-left p-2 font-medium min-w-[150px]">IGST Amount(per unit)</th>
+                                        <th className="text-left p-2 font-medium min-w-[140px]">SGST/UTGST Rate</th>
+                                        <th className="text-left p-2 font-medium min-w-[180px]">SGST/UTGST Amount(per unit)</th>
+                                        <th className="text-left p-2 font-medium min-w-[100px]">CGST Rate</th>
+                                        <th className="text-left p-2 font-medium min-w-[150px]">CGST Amount(per unit)</th>
+                                        <th className="text-left p-2 font-medium min-w-[100px]">CESS Rate</th>
+                                        <th className="text-left p-2 font-medium min-w-[150px]">CESS Amount(per unit)</th>
+                                        <th className="text-left p-2 font-medium min-w-[120px]">Tax Amount</th>
+                                        <th className="text-left p-2 font-medium min-w-[120px]">Total Amount</th>
                                       </>
                                     ) : selectedPlatformData?.id === 'swiggy' ? (
                                       <>
@@ -1763,12 +1845,35 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                         </>
                                       ) : selectedPlatformData?.id === 'flipkart' ? (
                                         <>
-                                          <td className="p-2">{line.title || 'Not available'}</td>
-                                          <td className="p-2">{line.fsn_isbn || 'Not available'}</td>
-                                          <td className="p-2">{line.brand || 'Not available'}</td>
-                                          <td className="p-2">{line.quantity || 0}</td>
-                                          <td className="p-2">₹{line.supplier_price || '0.00'}</td>
-                                          <td className="p-2">₹{line.total_amount || '0.00'}</td>
+                                          <td className="p-2 text-center">{line.line_number || '-'}</td>
+                                          <td className="p-2 font-mono text-xs">{line.hsn_code || '-'}</td>
+                                          <td className="p-2 font-mono text-xs">{line.fsn_isbn || '-'}</td>
+                                          <td className="p-2 text-center font-medium">{line.quantity || 0}</td>
+                                          <td className="p-2 text-center">{line.pending_quantity || 0}</td>
+                                          <td className="p-2 text-center text-xs">{line.uom || '-'}</td>
+                                          <td className="p-2">
+                                            <div className="max-w-xs">
+                                              <div className="font-medium text-sm leading-tight">{line.title || '-'}</div>
+                                            </div>
+                                          </td>
+                                          <td className="p-2">{line.brand || '-'}</td>
+                                          <td className="p-2">{line.type || '-'}</td>
+                                          <td className="p-2 font-mono text-xs">{line.ean || '-'}</td>
+                                          <td className="p-2 text-xs">{line.vertical || '-'}</td>
+                                          <td className="p-2 text-xs">{line.required_by_date ? line.required_by_date.toString().split('T')[0] : '-'}</td>
+                                          <td className="p-2 text-right">{line.supplier_mrp && Number(line.supplier_mrp) > 0 ? `₹${Number(line.supplier_mrp).toFixed(2)}` : '-'}</td>
+                                          <td className="p-2 text-right font-medium">{line.supplier_price && Number(line.supplier_price) > 0 ? `₹${Number(line.supplier_price).toFixed(2)}` : '-'}</td>
+                                          <td className="p-2 text-right">{line.taxable_value && Number(line.taxable_value) > 0 ? `₹${Number(line.taxable_value).toFixed(2)}` : '-'}</td>
+                                          <td className="p-2 text-center">{line.igst_rate && Number(line.igst_rate) > 0 ? `${Number(line.igst_rate).toFixed(1)}%` : '0%'}</td>
+                                          <td className="p-2 text-right">{line.igst_amount_per_unit && Number(line.igst_amount_per_unit) > 0 ? `₹${Number(line.igst_amount_per_unit).toFixed(2)}` : '-'}</td>
+                                          <td className="p-2 text-center">{line.sgst_rate && Number(line.sgst_rate) > 0 ? `${Number(line.sgst_rate).toFixed(1)}%` : '0%'}</td>
+                                          <td className="p-2 text-right">{line.sgst_amount_per_unit && Number(line.sgst_amount_per_unit) > 0 ? `₹${Number(line.sgst_amount_per_unit).toFixed(2)}` : '-'}</td>
+                                          <td className="p-2 text-center">{line.cgst_rate && Number(line.cgst_rate) > 0 ? `${Number(line.cgst_rate).toFixed(1)}%` : '0%'}</td>
+                                          <td className="p-2 text-right">{line.cgst_amount_per_unit && Number(line.cgst_amount_per_unit) > 0 ? `₹${Number(line.cgst_amount_per_unit).toFixed(2)}` : '-'}</td>
+                                          <td className="p-2 text-center">{line.cess_rate && Number(line.cess_rate) > 0 ? `${Number(line.cess_rate).toFixed(1)}%` : '0%'}</td>
+                                          <td className="p-2 text-right">{line.cess_amount_per_unit && Number(line.cess_amount_per_unit) > 0 ? `₹${Number(line.cess_amount_per_unit).toFixed(2)}` : '-'}</td>
+                                          <td className="p-2 text-right font-medium">{line.tax_amount && Number(line.tax_amount) > 0 ? `₹${Number(line.tax_amount).toFixed(2)}` : '-'}</td>
+                                          <td className="p-2 text-right font-bold">{line.total_amount && Number(line.total_amount) > 0 ? `₹${Number(line.total_amount).toFixed(2)}` : '-'}</td>
                                         </>
                                       ) : selectedPlatformData?.id === 'swiggy' ? (
                                         <>
@@ -1926,6 +2031,40 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                 <Database className="h-5 w-5 mr-2" />
                 Import Data into Database
               </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Import Data into Database Button - Bottom of page for Flipkart */}
+      {currentStep === 'preview' && selectedPlatformData?.id === 'flipkart' && parsedData && (
+        <Card className="mt-6">
+          <CardContent className="pt-6">
+            <div className="flex justify-center">
+              <Button
+                onClick={() => handleImportData()}
+                disabled={importMutation.isPending}
+                size="lg"
+                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 px-8 py-3"
+              >
+                {importMutation.isPending ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Importing Data...
+                  </>
+                ) : (
+                  <>
+                    <Database className="mr-2 h-5 w-5" />
+                    Import Data into Database
+                  </>
+                )}
+              </Button>
+            </div>
+            <div className="text-center mt-4 text-sm text-gray-600">
+              <p>
+                This will import PO <strong>{parsedData.header?.po_number}</strong>
+                {parsedData.lines && ` with ${parsedData.lines.length} line items`} into the database.
+              </p>
             </div>
           </CardContent>
         </Card>

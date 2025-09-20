@@ -131,8 +131,25 @@ export function parseFlipkartGroceryPO(csvContent: string, uploadedBy: string): 
         if (row[j] === 'CONTRACT VERSION' && row[j + 1]) {
           contractVersion = row[j + 1];
         }
-        if (row[j] === 'CREDIT TERM' && row[j + 2]) {
-          creditTerm = row[j + 2];
+        if (row[j] === 'CREDIT TERM') {
+          // In Flipkart CSV format, credit term value is usually at +2 position due to empty cell
+          let creditTermValue = null;
+
+          // Check +1, +2, and +3 positions to handle different layouts
+          for (let offset = 1; offset <= 3; offset++) {
+            const cellValue = row[j + offset];
+            if (cellValue && cellValue.toString().trim() !== '') {
+              creditTermValue = cellValue;
+              break;
+            }
+          }
+
+          if (creditTermValue) {
+            creditTerm = creditTermValue.toString().trim();
+            console.log(`💳 Found credit term: "${creditTerm}"`);
+          } else {
+            console.log('⚠️ CREDIT TERM field found but no value found in adjacent cells');
+          }
         }
       }
     }
@@ -261,28 +278,60 @@ export function parseFlipkartGroceryPO(csvContent: string, uploadedBy: string): 
 
 function parseDate(dateStr: string | undefined): Date | undefined {
   if (!dateStr) return undefined;
-  
+
   try {
-    // Handle DD-MM-YY format
-    if (dateStr.includes('-')) {
-      const parts = dateStr.split('-');
+    // Clean the date string
+    const cleanDateStr = dateStr.toString().trim();
+
+    // Handle different date formats
+    if (cleanDateStr.includes('-')) {
+      const parts = cleanDateStr.split('-');
       if (parts.length === 3) {
-        const day = parseInt(parts[0]);
-        const month = parseInt(parts[1]) - 1; // JS months are 0-indexed
-        let year = parseInt(parts[2]);
-        
-        // Convert 2-digit year to 4-digit
-        if (year < 100) {
-          year += year < 50 ? 2000 : 1900;
+        let day, month, year;
+
+        // Detect format: YYYY-MM-DD vs DD-MM-YY/YYYY
+        if (parts[0].length === 4) {
+          // YYYY-MM-DD format
+          year = parseInt(parts[0]);
+          month = parseInt(parts[1]) - 1; // JS months are 0-indexed
+          day = parseInt(parts[2]);
+          console.log(`📅 Detected YYYY-MM-DD format: ${cleanDateStr}`);
+        } else {
+          // DD-MM-YY/YYYY format
+          day = parseInt(parts[0]);
+          month = parseInt(parts[1]) - 1; // JS months are 0-indexed
+          year = parseInt(parts[2]);
+
+          // Convert 2-digit year to 4-digit
+          if (year < 100) {
+            year += year < 50 ? 2000 : 1900;
+          }
+          console.log(`📅 Detected DD-MM-YY/YYYY format: ${cleanDateStr}`);
         }
-        
-        return new Date(year, month, day);
+
+        // Validate parsed values
+        if (day >= 1 && day <= 31 && month >= 0 && month <= 11 && year >= 1900) {
+          // Create date in UTC to avoid timezone issues
+          const result = new Date(Date.UTC(year, month, day));
+          console.log(`📅 Parsed date ${cleanDateStr} as:`, result.toISOString().split('T')[0]);
+          return result;
+        } else {
+          console.warn(`⚠️ Invalid date components: day=${day}, month=${month+1}, year=${year}`);
+        }
       }
     }
-    
-    return new Date(dateStr);
+
+    // Try standard JavaScript Date parsing
+    const result = new Date(cleanDateStr);
+    if (!isNaN(result.getTime())) {
+      console.log(`📅 Parsed date ${cleanDateStr} as:`, result.toISOString().split('T')[0]);
+      return result;
+    }
+
+    console.warn('⚠️ Unable to parse date:', cleanDateStr);
+    return undefined;
   } catch (error) {
-    console.warn('Error parsing date:', dateStr, error);
+    console.warn('❌ Error parsing date:', dateStr, error);
     return undefined;
   }
 }

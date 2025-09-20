@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Navigate to Swiggy Upload</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .container {
+            text-align: center;
+            background: white;
+            padding: 50px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 36px;
+        }
+        .button-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        a {
+            display: inline-block;
+            padding: 20px 40px;
+            font-size: 24px;
+            font-weight: bold;
+            text-decoration: none;
+            border-radius: 10px;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        a:hover {
+            transform: scale(1.05);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .swiggy-upload {
+            background: linear-gradient(135deg, #f93b1d 0%, #ff6b6b 100%);
+            color: white;
+        }
+        .swiggy-pos {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+        }
+        .platform-po {
+            background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+            color: white;
+        }
+        .info {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f0f0f0;
+            border-radius: 10px;
+        }
+        .current {
+            color: red;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Navigate to Swiggy Pages</h1>
+
+        <div class="button-container">
+            <a href="http://127.0.0.1:5000/swiggy-upload" class="swiggy-upload">
+                📤 Go to Swiggy Upload Page
+                <br>
+                <small>(Upload & Import Swiggy POs)</small>
+            </a>
+
+            <a href="http://127.0.0.1:5000/swiggy-pos" class="swiggy-pos">
+                📋 Go to Swiggy PO List
+                <br>
+                <small>(View All Swiggy POs)</small>
+            </a>
+
+            <a href="http://127.0.0.1:5000/platform-po" class="platform-po">
+                🏬 Go to Platform PO
+                <br>
+                <small>(Current Page You Were On)</small>
+            </a>
+        </div>
+
+        <div class="info">
+            <p><span class="current">You were on:</span> Platform PO page (/platform-po)</p>
+            <p><strong>You need to go to:</strong> Swiggy Upload page (/swiggy-upload)</p>
+            <p>Click the <strong>RED button</strong> above to go to the Swiggy Upload page where the import buttons are!</p>
+        </div>
+    </div>
+</body>
+</html>

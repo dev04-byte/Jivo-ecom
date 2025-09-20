@@ -1,0 +1,301 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flipkart Grocery PO - Complete Column Preview</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 100%;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        .header p {
+            margin: 5px 0 0 0;
+            opacity: 0.9;
+        }
+        .info-section {
+            padding: 20px;
+            background: #f8f9ff;
+            border-bottom: 1px solid #e0e6ed;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+        }
+        .info-item {
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+        }
+        .info-label {
+            font-weight: 600;
+            color: #333;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .info-value {
+            color: #666;
+            margin-top: 4px;
+        }
+        .table-container {
+            overflow-x: auto;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        th {
+            background: #667eea;
+            color: white;
+            padding: 12px 8px;
+            text-align: left;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            border-right: 1px solid rgba(255,255,255,0.2);
+            font-weight: 600;
+        }
+        td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #e0e6ed;
+            border-right: 1px solid #e0e6ed;
+            vertical-align: top;
+        }
+        tr:hover {
+            background-color: #f8f9ff;
+        }
+        .col-desc {
+            font-size: 11px;
+            color: #888;
+            font-style: italic;
+            display: block;
+            margin-top: 2px;
+        }
+        .sample-data {
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .money {
+            text-align: right;
+            font-family: monospace;
+            color: #2d5016;
+            font-weight: 500;
+        }
+        .number {
+            text-align: right;
+            font-family: monospace;
+            color: #1565c0;
+        }
+        .date {
+            color: #7b1fa2;
+        }
+        .code {
+            font-family: monospace;
+            background: #f5f5f5;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        .empty-col {
+            background: #fff3e0;
+            color: #ef6c00;
+            font-style: italic;
+        }
+        .stats {
+            padding: 15px 20px;
+            background: #f8f9ff;
+            border-top: 1px solid #e0e6ed;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .stat-item {
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 18px;
+            font-weight: 600;
+            color: #667eea;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛒 Flipkart Grocery Purchase Order</h1>
+            <p>Complete Column Structure Preview - All 26 Columns</p>
+        </div>
+
+        <div class="info-section">
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">PO Number</div>
+                    <div class="info-value">FLFWG06905883</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Supplier</div>
+                    <div class="info-value">Evara Enterprises (grocery_jivo_evara_ludh)</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Total Items</div>
+                    <div class="info-value">3 Line Items</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Total Quantity</div>
+                    <div class="info-value">1,084 pieces</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Total Amount</div>
+                    <div class="info-value">₹201,428.00</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Contract Ref</div>
+                    <div class="info-value">FKI-OR-01135247 (v10.0)</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr><th style="min-width: 60px">
+                            S. no.
+                            <span class="col-desc">Serial number of the line item</span>
+                        </th><th style="min-width: 100px">
+                            HSN/SA Code
+                            <span class="col-desc">HSN (Harmonized System of Nomenclature) code for tax classification</span>
+                        </th><th style="min-width: 150px">
+                            FSN/ISBN13
+                            <span class="col-desc">Flipkart Serial Number or ISBN for product identification</span>
+                        </th><th style="min-width: 80px">
+                            Quantity
+                            <span class="col-desc">Total quantity ordered</span>
+                        </th><th style="min-width: 120px">
+                            Pending Quantity
+                            <span class="col-desc">Quantity yet to be delivered</span>
+                        </th><th style="min-width: 60px">
+                            UOM
+                            <span class="col-desc">Unit of Measurement (pcs, kg, etc.)</span>
+                        </th><th style="min-width: 300px">
+                            Title
+                            <span class="col-desc">Complete product title/name</span>
+                        </th><th style="min-width: 80px">
+                            [Empty Col 8]
+                            <span class="col-desc">Empty column between Title and Brand</span>
+                        </th><th style="min-width: 100px">
+                            Brand
+                            <span class="col-desc">Product brand name</span>
+                        </th><th style="min-width: 120px">
+                            Type
+                            <span class="col-desc">Product type/category</span>
+                        </th><th style="min-width: 140px">
+                            EAN
+                            <span class="col-desc">European Article Number (barcode)</span>
+                        </th><th style="min-width: 100px">
+                            Vertical
+                            <span class="col-desc">Product vertical (edible_oil, etc.)</span>
+                        </th><th style="min-width: 140px">
+                            Required by Date
+                            <span class="col-desc">Date by which product is required</span>
+                        </th><th style="min-width: 120px">
+                            Supplier MRP
+                            <span class="col-desc">Maximum Retail Price set by supplier</span>
+                        </th><th style="min-width: 120px">
+                            Supplier Price
+                            <span class="col-desc">Price charged by supplier to Flipkart</span>
+                        </th><th style="min-width: 120px">
+                            Taxable Value
+                            <span class="col-desc">Total value on which tax is calculated</span>
+                        </th><th style="min-width: 100px">
+                            IGST Rate
+                            <span class="col-desc">Integrated Goods and Services Tax rate</span>
+                        </th><th style="min-width: 150px">
+                            IGST Amount(per unit)
+                            <span class="col-desc">IGST amount charged per unit</span>
+                        </th><th style="min-width: 140px">
+                            SGST/UTGST Rate
+                            <span class="col-desc">State/Union Territory GST rate</span>
+                        </th><th style="min-width: 180px">
+                            SGST/UTGST Amount(per unit)
+                            <span class="col-desc">SGST/UTGST amount charged per unit</span>
+                        </th><th style="min-width: 100px">
+                            CGST Rate
+                            <span class="col-desc">Central Goods and Services Tax rate</span>
+                        </th><th style="min-width: 150px">
+                            CGST Amount(per unit)
+                            <span class="col-desc">CGST amount charged per unit</span>
+                        </th><th style="min-width: 100px">
+                            CESS Rate
+                            <span class="col-desc">Cess tax rate (additional tax)</span>
+                        </th><th style="min-width: 150px">
+                            CESS Amount(per unit)
+                            <span class="col-desc">Cess amount charged per unit</span>
+                        </th><th style="min-width: 120px">
+                            Tax Amount
+                            <span class="col-desc">Total tax amount for the line item</span>
+                        </th><th style="min-width: 120px">
+                            Total Amount
+                            <span class="col-desc">Total amount including taxes</span>
+                        </th></tr>
+                </thead>
+                <tbody><tr><td class="sample-data">1</td><td class="sample-data code">15149120</td><td class="sample-data code">EDOGDVWYGJNDYRQP</td><td class="sample-data number">1020</td><td class="sample-data number">1020</td><td class="sample-data">pcs</td><td class="sample-data">JIVO Cold Pressed Pure Cooking (Pack of 1) Mustard Oil 1 L Plastic Bottle</td><td class="sample-data empty-col">[Empty]</td><td class="sample-data">JIVO</td><td class="sample-data">Mustard Oil</td><td class="sample-data code">8908000258198</td><td class="sample-data">edible_oil</td><td class="sample-data date">2025-09-21</td><td class="sample-data money">255.0 INR</td><td class="sample-data money">167.0 INR</td><td class="sample-data money">162220.8 INR</td><td class="sample-data number">0.0%</td><td class="sample-data money">0.0 INR</td><td class="sample-data number">2.5%</td><td class="sample-data money">3.98 INR</td><td class="sample-data number">2.5%</td><td class="sample-data money">3.98 INR</td><td class="sample-data number">0.0%</td><td class="sample-data money">0.0 INR</td><td class="sample-data money">8119.2 INR</td><td class="sample-data money">170340.00</td></tr><tr><td class="sample-data">2</td><td class="sample-data code">15099090</td><td class="sample-data code">EDOFTHNH4YZ7GDHS</td><td class="sample-data number">48</td><td class="sample-data number">48</td><td class="sample-data">pcs</td><td class="sample-data">JIVO Pomace Olive Oil 1 L Plastic Bottle</td><td class="sample-data empty-col">[Empty]</td><td class="sample-data">JIVO</td><td class="sample-data">Olive Oil</td><td class="sample-data code">8908000258549</td><td class="sample-data">edible_oil</td><td class="sample-data date">2025-09-21</td><td class="sample-data money">1049.0 INR</td><td class="sample-data money">425.0 INR</td><td class="sample-data money">19428.48 INR</td><td class="sample-data number">0.0%</td><td class="sample-data money">0.0 INR</td><td class="sample-data number">2.5%</td><td class="sample-data money">10.12 INR</td><td class="sample-data number">2.5%</td><td class="sample-data money">10.12 INR</td><td class="sample-data number">0.0%</td><td class="sample-data money">0.0 INR</td><td class="sample-data money">971.52 INR</td><td class="sample-data money">20400.00</td></tr><tr><td class="sample-data">3</td><td class="sample-data code">15092000</td><td class="sample-data code">EDOHAUNQSDFDYPFC</td><td class="sample-data number">16</td><td class="sample-data number">16</td><td class="sample-data">pcs</td><td class="sample-data">JIVO Cold Pressed Pure Cooking Mustard Oil Mustard Oil 4 L Can</td><td class="sample-data empty-col">[Empty]</td><td class="sample-data">JIVO</td><td class="sample-data">Mustard Oil</td><td class="sample-data code">8905604003070</td><td class="sample-data">edible_oil</td><td class="sample-data date">2025-09-21</td><td class="sample-data money">1000.0 INR</td><td class="sample-data money">668.0 INR</td><td class="sample-data money">10179.2 INR</td><td class="sample-data number">0.0%</td><td class="sample-data money">0.0 INR</td><td class="sample-data number">2.5%</td><td class="sample-data money">15.9 INR</td><td class="sample-data number">2.5%</td><td class="sample-data money">15.9 INR</td><td class="sample-data number">0.0%</td><td class="sample-data money">0.0 INR</td><td class="sample-data money">508.8 INR</td><td class="sample-data money">10688.00</td></tr></tbody>
+            </table>
+        </div>
+
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-value">26</div>
+                <div class="stat-label">Total Columns</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">3</div>
+                <div class="stat-label">Sample Rows</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">1,084</div>
+                <div class="stat-label">Total Quantity</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">₹201,428</div>
+                <div class="stat-label">Total Amount</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

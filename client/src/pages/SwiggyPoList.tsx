@@ -5,24 +5,32 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Search, Package, Calendar, MapPin, Truck, Eye, Database, RefreshCw } from "lucide-react";
+import { Search, Package, Calendar, MapPin, Truck, Eye, Database, RefreshCw, Hash } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { SwiggyPoDetails } from "@/components/SwiggyPoDetails";
 
 interface SwiggyPo {
   id: number;
   po_number: string;
+  entity?: string | null;
+  facility_id?: string | null;
+  facility_name?: string | null;
+  city?: string | null;
   po_date: string | null;
   po_release_date: string | null;
+  po_modified_at?: string | null;
   expected_delivery_date: string | null;
   po_expiry_date: string | null;
+  supplier_code?: string | null;
   vendor_name: string | null;
+  po_amount?: string | null;
   payment_terms: string | null;
   total_items: number;
   total_quantity: number;
-  total_taxable_value: string | null;
-  total_tax_amount: string | null;
-  grand_total: string | null;
+  total_taxable_value: string | number | null;
+  total_tax_amount: string | number | null;
+  grand_total: string | number | null;
   unique_hsn_codes: string[] | null;
   status: string | null;
   created_by: string | null;
@@ -36,20 +44,20 @@ interface SwiggyPo {
     item_description: string;
     hsn_code: string | null;
     quantity: number;
-    mrp: string | null;
-    unit_base_cost: string | null;
-    taxable_value: string | null;
-    cgst_rate: string | null;
-    cgst_amount: string | null;
-    sgst_rate: string | null;
-    sgst_amount: string | null;
-    igst_rate: string | null;
-    igst_amount: string | null;
-    cess_rate: string | null;
-    cess_amount: string | null;
-    additional_cess: string | null;
-    total_tax_amount: string | null;
-    line_total: string | null;
+    mrp: string | number | null;
+    unit_base_cost: string | number | null;
+    taxable_value: string | number | null;
+    cgst_rate: string | number | null;
+    cgst_amount: string | number | null;
+    sgst_rate: string | number | null;
+    sgst_amount: string | number | null;
+    igst_rate: string | number | null;
+    igst_amount: string | number | null;
+    cess_rate: string | number | null;
+    cess_amount: string | number | null;
+    additional_cess: string | number | null;
+    total_tax_amount: string | number | null;
+    line_total: string | number | null;
     created_at: string;
   }>;
 }
@@ -58,6 +66,8 @@ export default function SwiggyPoList() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedPo, setSelectedPo] = useState<SwiggyPo | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const { data: swiggyPos = [], isLoading, refetch } = useQuery<SwiggyPo[]>({
     queryKey: ["/api/swiggy-pos"],
@@ -149,8 +159,9 @@ export default function SwiggyPoList() {
                     <TableHead>PO Number</TableHead>
                     <TableHead>Vendor</TableHead>
                     <TableHead>PO Date</TableHead>
-                    <TableHead>Payment Terms</TableHead>
+                    <TableHead>Delivery Date</TableHead>
                     <TableHead>Items</TableHead>
+                    <TableHead>HSN Codes</TableHead>
                     <TableHead>Total Amount</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Actions</TableHead>
@@ -159,14 +170,17 @@ export default function SwiggyPoList() {
                 <TableBody>
                   {filteredPos.map((po) => (
                     <TableRow key={po.id}>
-                      <TableCell className="font-medium text-blue-600">
-                        {po.po_number}
+                      <TableCell className="font-medium text-blue-600 font-mono max-w-xs">
+                        <span className="break-all">{po.po_number}</span>
                       </TableCell>
                       <TableCell>
                         <div>
                           <div className="font-medium">{po.vendor_name || 'N/A'}</div>
-                          {po.created_by && (
-                            <div className="text-sm text-gray-500">Created by: {po.created_by}</div>
+                          {po.facility_name && (
+                            <div className="text-sm text-gray-600">{po.facility_name} • {po.city || ''}</div>
+                          )}
+                          {po.supplier_code && (
+                            <div className="text-xs text-gray-500">Code: {po.supplier_code}</div>
                           )}
                         </div>
                       </TableCell>
@@ -178,8 +192,8 @@ export default function SwiggyPoList() {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
-                          <MapPin className="h-4 w-4 text-gray-400" />
-                          {po.payment_terms || 'N/A'}
+                          <Truck className="h-4 w-4 text-gray-400" />
+                          {po.expected_delivery_date ? format(new Date(po.expected_delivery_date), 'MMM dd, yyyy') : 'N/A'}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -188,9 +202,29 @@ export default function SwiggyPoList() {
                         </Badge>
                       </TableCell>
                       <TableCell>
+                        {po.unique_hsn_codes && po.unique_hsn_codes.length > 0 && po.unique_hsn_codes.some(hsn => hsn && hsn.trim()) ? (
+                          <div className="flex items-center gap-1">
+                            <Hash className="h-3 w-3 text-gray-400" />
+                            <span className="text-sm">
+                              {po.unique_hsn_codes.filter(hsn => hsn && hsn.trim()).length} HSN{po.unique_hsn_codes.filter(hsn => hsn && hsn.trim()).length > 1 ? 's' : ''}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-gray-400">Via Platform</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
                         <div className="font-medium">
-                          ₹{po.grand_total ? parseFloat(po.grand_total).toLocaleString() : '0'}
+                          ₹{po.po_amount || po.grand_total ?
+                            (typeof (po.po_amount || po.grand_total) === 'string' ?
+                              parseFloat(po.po_amount || po.grand_total as string) :
+                              (po.po_amount || po.grand_total)
+                            ).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) :
+                            '0'}
                         </div>
+                        {po.total_quantity && (
+                          <div className="text-xs text-gray-500">Qty: {po.total_quantity}</div>
+                        )}
                       </TableCell>
                       <TableCell>
                         {getStatusBadge(po.status)}
@@ -201,11 +235,8 @@ export default function SwiggyPoList() {
                             size="sm"
                             variant="outline"
                             onClick={() => {
-                              // You can implement a detail view here
-                              toast({
-                                title: "PO Details",
-                                description: `Viewing details for PO ${po.po_number}`,
-                              });
+                              setSelectedPo(po);
+                              setDetailsOpen(true);
                             }}
                           >
                             <Eye className="h-4 w-4 mr-1" />
@@ -221,6 +252,12 @@ export default function SwiggyPoList() {
           )}
         </CardContent>
       </Card>
+
+      <SwiggyPoDetails
+        po={selectedPo}
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
+      />
     </div>
   );
 }
