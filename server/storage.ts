@@ -662,7 +662,7 @@ export class DatabaseStorage implements IStorage {
   async getAllPos(): Promise<(Omit<PfPo, 'platform'> & { platform: PfMst; orderItems: PfOrderItems[] })[]> {
     const result = [];
 
-    console.log(`📊 getAllPos: Starting with platform-specific data first (showing original data)`);
+    console.log(`📊 getAllPos: Starting with platform-specific data first (showing original data - including BigBasket)`);
 
     // PRIORITY 1: Fetch platform-specific POs first (original data)
     // This ensures we show exact data from each platform's tables
@@ -863,6 +863,59 @@ export class DatabaseStorage implements IStorage {
       console.error('Error fetching Flipkart Grocery POs from flipkart_grocery_po_header:', error);
     }
 
+    // Fetch BigBasket POs from bigbasket_po_header (original BigBasket data)
+    try {
+      const bigbasketPos = await this.getAllBigbasketPos();
+      console.log(`📊 getAllPos: Found ${bigbasketPos.length} BigBasket POs from bigbasket_po_header (original data)`);
+
+      for (const bigbasketPo of bigbasketPos) {
+        // Use original BigBasket data exactly as uploaded
+        const originalBigBasketPo = {
+          id: 12000000 + bigbasketPo.id, // BigBasket IDs start from 12000000 to avoid conflicts
+          po_number: bigbasketPo.po_number,
+          po_date: bigbasketPo.po_date,
+          platform: { id: 12, pf_name: "BigBasket" },
+          vendor_name: bigbasketPo.supplier_name || '',
+          status: bigbasketPo.status || 'pending',
+          created_at: bigbasketPo.created_at,
+          updated_at: bigbasketPo.updated_at,
+          order_date: bigbasketPo.po_date,
+          expiry_date: bigbasketPo.po_expiry_date,
+          city: '',
+          state: '',
+          serving_distributor: bigbasketPo.supplier_name || '',
+          vendor_po_number: bigbasketPo.po_number,
+          bill_amount: bigbasketPo.grand_total || '0',
+          total_amount: bigbasketPo.grand_total || '0',
+          orderItems: bigbasketPo.poLines ? bigbasketPo.poLines.map((line: any, index: number) => ({
+            id: line.id || (2000000 + bigbasketPo.id * 100 + index), // Generate unique ID
+            po_id: bigbasketPo.id,
+            platform_id: 12,
+            product_id: null,
+            item_code: line.sku_code || '',
+            item_name: line.description || '',
+            item_description: line.description || '',
+            sap_code: line.sku_code || '',
+            quantity: parseInt(line.quantity || '0'),
+            basic_rate: line.basic_cost || '0',
+            gst_rate: line.gst_percent || '0',
+            landing_rate: line.landing_cost || line.basic_cost || '0',
+            rate: parseFloat(line.basic_cost || '0'),
+            amount: parseFloat(line.total_value || '0'),
+            create_on: bigbasketPo.created_at,
+            create_by: bigbasketPo.created_by || 'system',
+            modify_on: bigbasketPo.updated_at || bigbasketPo.created_at,
+            modify_by: bigbasketPo.created_by || 'system',
+            uom: 'pcs'
+          })) : []
+        };
+
+        result.push(originalBigBasketPo as any);
+      }
+    } catch (error) {
+      console.error('❌ getAllPos: Error fetching BigBasket POs:', error);
+    }
+
     // PRIORITY 2: Fetch POs from po_master table (but exclude Blinkit, Zepto, and Flipkart to avoid duplicates)
     const posWithPlatforms = await db
       .select({
@@ -1055,7 +1108,7 @@ export class DatabaseStorage implements IStorage {
     // Sort results by created_at descending (most recent uploads first)
     result.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
-    console.log(`📊 getAllPos: Returning ${result.length} POs total (po_master + Zepto + Blinkit + Swiggy + Flipkart)`);
+    console.log(`📊 getAllPos: Returning ${result.length} POs total (po_master + Zepto + Blinkit + Swiggy + Flipkart + BigBasket)`);
 
     return result;
   }
@@ -1255,7 +1308,62 @@ export class DatabaseStorage implements IStorage {
       console.error(`❌ getPoById: Error checking Flipkart tables for PO ${id}:`, error);
     }
 
-    // PRIORITY 5: Check po_master table (unified POs)
+    // PRIORITY 5: Check BigBasket-specific tables (original data)
+    console.log(`🔍 getPoById: Checking BigBasket tables for PO ${id}...`);
+    try {
+      // Check if this is a BigBasket ID (starts with 12000000)
+      let bigbasketId = id;
+      if (id >= 12000000 && id < 13000000) {
+        bigbasketId = id - 12000000; // Convert back to original BigBasket ID
+        console.log(`🔍 getPoById: Detected BigBasket ID mapping ${id} -> ${bigbasketId}`);
+      }
+
+      const bigbasketPo = await this.getBigbasketPoById(bigbasketId);
+      if (bigbasketPo) {
+        console.log(`✅ getPoById: Found BigBasket PO ${id} in bigbasket_po_header (using original data)`);
+
+        // Return RAW BigBasket table data PLUS frontend compatibility fields
+        const rawBigBasketPo = {
+          // Add platform info for frontend identification
+          platform: { id: 12, pf_name: "BigBasket" },
+          // All original bigbasket_po_header columns exactly as they are
+          ...bigbasketPo,
+          // Frontend compatibility fields (mapped from raw data)
+          po_date: bigbasketPo.po_date,
+          order_date: bigbasketPo.po_date,
+          expiry_date: bigbasketPo.po_expiry_date,
+          city: '',
+          state: '',
+          serving_distributor: bigbasketPo.supplier_name || '',
+          vendor_name: bigbasketPo.supplier_name || '',
+          total_amount: bigbasketPo.grand_total?.toString() || '0',
+          // Convert poLines to exact bigbasket_po_lines column names + frontend compatibility
+          orderItems: bigbasketPo.poLines.map(line => ({
+            // All original bigbasket_po_lines columns exactly as they are
+            ...line,
+            // Frontend compatibility fields (mapped from raw data)
+            item_name: line.product_name || 'BigBasket Product',
+            product_description: line.product_name,
+            quantity: line.order_quantity || 0,
+            basic_rate: line.purchase_rate?.toString() || '0',
+            landing_rate: line.purchase_rate?.toString() || '0',
+            total_amount: line.total_amount?.toString() || '0',
+            mrp: line.mrp?.toString() || '0',
+            hsn_code: line.hsn_code,
+            platform_code: line.sku_code,
+            sap_code: line.sku_code,
+            uom: 'PCS'
+          }))
+        };
+
+        console.log(`✅ getPoById: Returning RAW BigBasket PO ${id} with ${rawBigBasketPo.orderItems.length} items`);
+        return rawBigBasketPo as any;
+      }
+    } catch (error) {
+      console.error(`❌ getPoById: Error checking BigBasket tables for PO ${id}:`, error);
+    }
+
+    // PRIORITY 6: Check po_master table (unified POs)
     const masterPoResult = await db
       .select({
         master: poMaster,
@@ -2605,7 +2713,7 @@ export class DatabaseStorage implements IStorage {
   async deleteBlinkitPo(id: number): Promise<void> {
     await db.transaction(async (tx) => {
       // First delete all related po lines
-      await tx.delete(blinkitPoLines).where(eq(blinkitPoLines.po_header_id, id));
+      await tx.delete(blinkitPoLines).where(eq(blinkitPoLines.header_id, id));
       
       // Then delete the PO header
       await tx.delete(blinkitPoHeader).where(eq(blinkitPoHeader.id, id));
@@ -3696,23 +3804,76 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createBigbasketPo(po: InsertBigbasketPoHeader, lines: InsertBigbasketPoLines[]): Promise<BigbasketPoHeader> {
-    return await db.transaction(async (tx) => {
-      // Insert into platform-specific tables
-      const [createdPo] = await tx.insert(bigbasketPoHeader).values(po).returning();
-      
+    console.log('🔄 Starting BigBasket PO creation with direct SQL...');
+    console.log('📋 Header data:', JSON.stringify(po, null, 2));
+    console.log('📦 Lines data:', JSON.stringify(lines, null, 2));
+
+    // Use direct SQL as Drizzle ORM has transaction issues
+    const { Client } = await import('pg');
+    const client = new Client({ connectionString: process.env.DATABASE_URL });
+
+    try {
+      await client.connect();
+      await client.query('BEGIN');
+
+      console.log('💾 Inserting header with direct SQL...');
+
+      // Insert header
+      const headerResult = await client.query(`
+        INSERT INTO bigbasket_po_header (
+          po_number, po_date, po_expiry_date, warehouse_address, delivery_address,
+          supplier_name, supplier_address, supplier_gstin, dc_address, dc_gstin,
+          total_items, total_quantity, total_basic_cost, total_gst_amount,
+          total_cess_amount, grand_total, status, created_by, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())
+        RETURNING *;
+      `, [
+        po.po_number, po.po_date, po.po_expiry_date, po.warehouse_address, po.delivery_address,
+        po.supplier_name, po.supplier_address, po.supplier_gstin, po.dc_address, po.dc_gstin,
+        po.total_items || 0, po.total_quantity || 0, po.total_basic_cost, po.total_gst_amount,
+        po.total_cess_amount, po.grand_total, po.status || 'pending', po.created_by
+      ]);
+
+      const createdPo = headerResult.rows[0];
+      console.log('✅ Header inserted successfully:', createdPo);
+
       if (lines.length > 0) {
-        const linesWithPoId = lines.map(line => ({ ...line, po_id: createdPo.id }));
-        await tx.insert(bigbasketPoLines).values(linesWithPoId);
-        
-        // Also insert into consolidated po_master and po_lines tables
-        await this.insertIntoPoMasterAndLines(tx, 'BigBasket', createdPo, linesWithPoId);
-      } else {
-        // Insert header only into po_master
-        await this.insertIntoPoMasterAndLines(tx, 'BigBasket', createdPo, []);
+        console.log(`💾 Inserting ${lines.length} line items with direct SQL...`);
+
+        for (const line of lines) {
+          await client.query(`
+            INSERT INTO bigbasket_po_lines (
+              po_id, s_no, hsn_code, sku_code, description, ean_upc_code,
+              case_quantity, quantity, basic_cost, sgst_percent, sgst_amount,
+              cgst_percent, cgst_amount, igst_percent, igst_amount, gst_percent,
+              gst_amount, cess_percent, cess_value, state_cess_percent,
+              state_cess, landing_cost, mrp, total_value, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, NOW());
+          `, [
+            createdPo.id, line.s_no, line.hsn_code, line.sku_code, line.description, line.ean_upc_code,
+            line.case_quantity, line.quantity, line.basic_cost, line.sgst_percent, line.sgst_amount,
+            line.cgst_percent, line.cgst_amount, line.igst_percent, line.igst_amount, line.gst_percent,
+            line.gst_amount, line.cess_percent, line.cess_value, line.state_cess_percent,
+            line.state_cess, line.landing_cost, line.mrp, line.total_value
+          ]);
+        }
+        console.log('✅ Lines inserted successfully');
       }
-      
+
+      await client.query('COMMIT');
+      console.log('🎉 Transaction committed successfully!');
+
       return createdPo;
-    });
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('❌ BigBasket PO creation failed:', error);
+      throw error;
+    } finally {
+      await client.end();
+    }
   }
 
   async updateBigbasketPo(id: number, header: Partial<InsertBigbasketPoHeader>, lines?: InsertBigbasketPoLines[]): Promise<BigbasketPoHeader> {

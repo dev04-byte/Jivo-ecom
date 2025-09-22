@@ -45,6 +45,12 @@ export interface FlipkartGroceryPoHeader {
   total_tax_amount?: string | null;
   total_amount?: string | null;
   status: string;
+  distributor?: string | null;
+  area?: string | null;
+  city?: string | null;
+  region?: string | null;
+  state?: string | null;
+  dispatch_from?: string | null;
   created_by?: string | null;
   uploaded_by?: string | null;
   created_at?: Date | null;

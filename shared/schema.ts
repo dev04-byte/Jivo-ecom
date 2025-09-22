@@ -753,8 +753,7 @@ export const insertBlinkitPoHeaderSchema = createInsertSchema(blinkitPoHeader).o
 
 export const insertBlinkitPoLinesSchema = createInsertSchema(blinkitPoLines).omit({
   id: true,
-  po_header_id: true,
-  created_at: true
+  header_id: true
 });
 
 // Types for Blinkit PO tables
@@ -1250,6 +1249,11 @@ export const bigbasketComments = pgTable("bigbasket_comments", {
   createdBy: integer("created_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow()
+});
+
+// Minimal BigBasket log table (required by database constraints)
+export const bigbasketPoHeaderLog = pgTable("bigbasket_po_header_log", {
+  id: serial("id").primaryKey()
 });
 
 // Zomato Attachments

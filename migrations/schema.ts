@@ -873,41 +873,6 @@ export const districts = pgTable("districts", {
 	stateId: integer("state_id").notNull(),
 });
 
-export const bigbasketPoHeaderLog = pgTable("bigbasket_po_header_log", {
-	logId: serial("log_id").primaryKey().notNull(),
-	operationType: varchar("operation_type", { length: 20 }).notNull(),
-	operationTimestamp: timestamp("operation_timestamp", { mode: 'string' }).defaultNow(),
-	userName: varchar("user_name", { length: 100 }),
-	userId: integer("user_id"),
-	ipAddress: varchar("ip_address", { length: 45 }),
-	sessionInfo: text("session_info"),
-	originalId: integer("original_id"),
-	originalPoNumber: varchar("original_po_number", { length: 100 }),
-	originalPoDate: timestamp("original_po_date", { mode: 'string' }),
-	originalPoExpiryDate: timestamp("original_po_expiry_date", { mode: 'string' }),
-	originalWarehouseAddress: text("original_warehouse_address"),
-	originalDeliveryAddress: text("original_delivery_address"),
-	originalSupplierName: varchar("original_supplier_name", { length: 255 }),
-	originalSupplierAddress: text("original_supplier_address"),
-	originalSupplierGstin: varchar("original_supplier_gstin", { length: 50 }),
-	originalDcAddress: text("original_dc_address"),
-	originalDcGstin: varchar("original_dc_gstin", { length: 50 }),
-	originalTotalItems: integer("original_total_items").default(0),
-	originalTotalQuantity: integer("original_total_quantity").default(0),
-	originalTotalBasicCost: numeric("original_total_basic_cost"),
-	originalTotalGstAmount: numeric("original_total_gst_amount"),
-	originalTotalCessAmount: numeric("original_total_cess_amount"),
-	originalGrandTotal: numeric("original_grand_total"),
-	originalStatus: varchar("original_status", { length: 50 }).default('pending'),
-	originalCreatedBy: varchar("original_created_by", { length: 100 }),
-	originalCreatedAt: timestamp("original_created_at", { mode: 'string' }).defaultNow(),
-	originalUpdatedAt: timestamp("original_updated_at", { mode: 'string' }).defaultNow(),
-}, (table) => [
-	index("idx_bigbasket_po_header_log_operation").using("btree", table.operationType.asc().nullsLast().op("text_ops")),
-	index("idx_bigbasket_po_header_log_original_id").using("btree", table.originalId.asc().nullsLast().op("int4_ops")),
-	index("idx_bigbasket_po_header_log_timestamp").using("btree", table.operationTimestamp.asc().nullsLast().op("timestamp_ops")),
-	index("idx_bigbasket_po_header_log_user").using("btree", table.userName.asc().nullsLast().op("text_ops")),
-]);
 
 export const poMaster = pgTable("po_master", {
 	id: serial().primaryKey().notNull(),

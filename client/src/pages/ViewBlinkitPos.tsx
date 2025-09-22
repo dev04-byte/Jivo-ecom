@@ -80,7 +80,7 @@ export default function ViewBlinkitPos() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <p className="text-sm font-medium text-muted-foreground">Status</p>
-                <Badge className={getStatusColor(selectedPo.status || 'unknown')}>{selectedPo.status || 'Unknown'}</Badge>
+                <Badge className={getStatusColor('open')}>{selectedPo.po_type || 'Open'}</Badge>
               </div>
               
               <div className="space-y-2">
@@ -103,7 +103,7 @@ export default function ViewBlinkitPos() {
                 <p className="text-sm font-medium text-muted-foreground">Total Basic Cost</p>
                 <div className="flex items-center gap-2">
                   <DollarSign className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-semibold">{formatCurrency(selectedPo.total_basic_cost)}</span>
+                  <span className="font-semibold">{formatCurrency(selectedPo.net_amount)}</span>
                 </div>
               </div>
               
@@ -111,7 +111,7 @@ export default function ViewBlinkitPos() {
                 <p className="text-sm font-medium text-muted-foreground">Total Tax Amount</p>
                 <div className="flex items-center gap-2">
                   <DollarSign className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-semibold">{formatCurrency(selectedPo.total_tax_amount)}</span>
+                  <span className="font-semibold">{formatCurrency(selectedPo.total_amount)}</span>
                 </div>
               </div>
               
@@ -132,26 +132,22 @@ export default function ViewBlinkitPos() {
                 <p className="text-sm font-medium text-muted-foreground">Created Date</p>
                 <div className="flex items-center gap-2">
                   <Calendar className="h-4 w-4 text-muted-foreground" />
-                  <span>{formatDate(selectedPo.created_at)}</span>
+                  <span>{formatDate(selectedPo.po_date)}</span>
                 </div>
               </div>
               
               <div className="space-y-2">
                 <p className="text-sm font-medium text-muted-foreground">Created By</p>
-                <span>{selectedPo.created_by || 'N/A'}</span>
+                <span>{selectedPo.spoc_name || 'N/A'}</span>
               </div>
             </div>
             
-            {selectedPo.unique_hsn_codes && selectedPo.unique_hsn_codes.length > 0 && (
-              <div className="mt-4">
-                <p className="text-sm font-medium text-muted-foreground mb-2">HSN Codes</p>
-                <div className="flex flex-wrap gap-2">
-                  {selectedPo.unique_hsn_codes.map((hsn, index) => (
-                    <Badge key={index} variant="outline">{hsn || 'N/A'}</Badge>
-                  ))}
-                </div>
+            <div className="mt-4">
+              <p className="text-sm font-medium text-muted-foreground mb-2">Payment Terms</p>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline">{selectedPo.payment_terms || 'N/A'}</Badge>
               </div>
-            )}
+            </div>
           </CardContent>
         </Card>
 
@@ -185,18 +181,18 @@ export default function ViewBlinkitPos() {
                 <TableBody>
                   {selectedPo.poLines.map((line) => (
                     <TableRow key={line.id}>
-                      <TableCell className="font-medium">{line.line_number}</TableCell>
+                      <TableCell className="font-medium">{line.id}</TableCell>
                       <TableCell className="font-mono text-sm">{line.item_code}</TableCell>
                       <TableCell className="max-w-xs truncate" title={line.product_description || ''}>
                         {line.product_description || 'N/A'}
                       </TableCell>
                       <TableCell>{line.hsn_code || 'N/A'}</TableCell>
                       <TableCell className="font-mono text-sm">{line.product_upc || 'N/A'}</TableCell>
-                      <TableCell>{line.grammage || 'N/A'}</TableCell>
+                      <TableCell>{line.margin_percent || 'N/A'}</TableCell>
                       <TableCell className="text-right">{line.quantity}</TableCell>
                       <TableCell className="text-right">{formatCurrency(line.basic_cost_price)}</TableCell>
-                      <TableCell className="text-right">{line.cgst_percent || '0'}%</TableCell>
-                      <TableCell className="text-right">{line.sgst_percent || '0'}%</TableCell>
+                      <TableCell className="text-right">{line.igst_percent || '0'}%</TableCell>
+                      <TableCell className="text-right">{line.cess_percent || '0'}%</TableCell>
                       <TableCell className="text-right">{line.igst_percent || '0'}%</TableCell>
                       <TableCell className="text-right">{formatCurrency(line.tax_amount)}</TableCell>
                       <TableCell className="text-right">{formatCurrency(line.landing_rate)}</TableCell>
@@ -241,7 +237,7 @@ export default function ViewBlinkitPos() {
                   <div className="space-y-2">
                     <div className="flex items-center gap-3">
                       <h3 className="text-lg font-semibold">{po.po_number}</h3>
-                      <Badge className={getStatusColor(po.status || 'unknown')}>{po.status || 'Unknown'}</Badge>
+                      <Badge className={getStatusColor(po.po_type || 'unknown')}>{po.po_type || 'Unknown'}</Badge>
                     </div>
                     
                     <div className="flex items-center gap-6 text-sm text-muted-foreground">
@@ -259,7 +255,7 @@ export default function ViewBlinkitPos() {
                       </div>
                       <div className="flex items-center gap-1">
                         <Calendar className="h-4 w-4" />
-                        <span>{formatDate(po.created_at)}</span>
+                        <span>{formatDate(po.po_date)}</span>
                       </div>
                     </div>
                   </div>

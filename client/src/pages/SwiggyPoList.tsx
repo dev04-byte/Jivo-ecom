@@ -217,7 +217,7 @@ export default function SwiggyPoList() {
                         <div className="font-medium">
                           ₹{po.po_amount || po.grand_total ?
                             (typeof (po.po_amount || po.grand_total) === 'string' ?
-                              parseFloat(po.po_amount || po.grand_total as string) :
+                              parseFloat((po.po_amount || po.grand_total) as string) :
                               (po.po_amount || po.grand_total)
                             ).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) :
                             '0'}

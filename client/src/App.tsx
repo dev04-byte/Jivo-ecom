@@ -18,21 +18,17 @@ import Dashboard from "@/pages/dashboard";
 import PlatformPO from "@/pages/platform-po";
 import PODetails from "@/pages/po-details";
 import POEdit from "@/pages/po-edit";
-import FlipkartGroceryPOUpload from "@/pages/flipkart-grocery-po-upload";
 import FlipkartGroceryPOs from "@/pages/flipkart-grocery-pos";
 import FlipkartGroceryPODetails from "@/pages/flipkart-grocery-po-details";
 import FlipkartGroceryPOEdit from "@/pages/flipkart-grocery-po-edit";
-import ZeptoPoUpload from "@/pages/zepto-po-upload";
 import ZeptoPOs from "@/pages/zepto-pos";
 import ZeptoPoDetails from "@/pages/zepto-po-details";
 import ZeptoPoEdit from "@/pages/zepto-po-edit";
 import CityMallPOs from "@/pages/city-mall-pos";
 import CityMallPoDetails from "@/pages/city-mall-po-details";
-import UploadBlinkitPo from "./pages/upload/UploadBlinkitPo";
 import ViewBlinkitPos from "./pages/ViewBlinkitPos";
-import SwiggyUpload from "./pages/SwiggyUpload";
 import SwiggyPoList from "./pages/SwiggyPoList";
-import UnifiedPoUpload from "@/pages/unified-po-upload";
+import UnifiedUpload from "@/pages/unified-upload";
 import SapSync from "@/pages/sap-sync";
 import SqlQuery from "@/pages/SqlQuery";
 import DistributorPO from "@/pages/distributor-po";
@@ -75,11 +71,13 @@ function AppRouter() {
         </ResponsiveLayout>
       )} />
       
-      <ProtectedRoute path="/flipkart-grocery-upload" component={() => (
-        <ResponsiveLayout>
-          <FlipkartGroceryPOUpload />
-        </ResponsiveLayout>
-      )} />
+      <Route path="/flipkart-grocery-upload">
+        {() => {
+          // Redirect to unified upload
+          window.location.href = "/unified-upload";
+          return null;
+        }}
+      </Route>
       
       <ProtectedRoute path="/flipkart-grocery-pos" component={() => (
         <ResponsiveLayout>
@@ -99,11 +97,13 @@ function AppRouter() {
         </ResponsiveLayout>
       )} />
       
-      <ProtectedRoute path="/zepto-upload" component={() => (
-        <ResponsiveLayout>
-          <ZeptoPoUpload />
-        </ResponsiveLayout>
-      )} />
+      <Route path="/zepto-upload">
+        {() => {
+          // Redirect to unified upload
+          window.location.href = "/unified-upload";
+          return null;
+        }}
+      </Route>
       
       <ProtectedRoute path="/zepto-pos" component={() => (
         <ResponsiveLayout>
@@ -127,8 +127,8 @@ function AppRouter() {
       
       <Route path="/city-mall-upload">
         {() => {
-          // Redirect legacy city-mall-upload to unified upload
-          window.location.href = "/unified-po-upload";
+          // Redirect to unified upload
+          window.location.href = "/unified-upload";
           return null;
         }}
       </Route>
@@ -145,11 +145,13 @@ function AppRouter() {
         </ResponsiveLayout>
       )} />
       
-      <ProtectedRoute path="/blinkit-upload" component={() => (
-        <ResponsiveLayout>
-          <UploadBlinkitPo />
-        </ResponsiveLayout>
-      )} />
+      <Route path="/blinkit-upload">
+        {() => {
+          // Redirect to unified upload
+          window.location.href = "/unified-upload";
+          return null;
+        }}
+      </Route>
       
       <ProtectedRoute path="/blinkit-pos" component={() => (
         <ResponsiveLayout>
@@ -157,11 +159,13 @@ function AppRouter() {
         </ResponsiveLayout>
       )} />
       
-      <ProtectedRoute path="/swiggy-upload" component={() => (
-        <ResponsiveLayout>
-          <SwiggyUpload />
-        </ResponsiveLayout>
-      )} />
+      <Route path="/swiggy-upload">
+        {() => {
+          // Redirect to unified upload
+          window.location.href = "/unified-upload";
+          return null;
+        }}
+      </Route>
 
       <ProtectedRoute path="/swiggy-pos" component={() => (
         <ResponsiveLayout>
@@ -169,11 +173,19 @@ function AppRouter() {
         </ResponsiveLayout>
       )} />
 
-      <ProtectedRoute path="/unified-po-upload" component={() => (
+      <ProtectedRoute path="/unified-upload" component={() => (
         <ResponsiveLayout>
-          <UnifiedPoUpload />
+          <UnifiedUpload />
         </ResponsiveLayout>
       )} />
+
+      <Route path="/unified-po-upload">
+        {() => {
+          // Redirect legacy route to new unified upload
+          window.location.href = "/unified-upload";
+          return null;
+        }}
+      </Route>
       
       <ProtectedRoute path="/sap-sync" component={() => (
         <ResponsiveLayout>

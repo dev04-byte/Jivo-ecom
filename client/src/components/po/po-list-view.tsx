@@ -71,7 +71,7 @@ export function POListView() {
       console.log("🔍 DEBUG: Recent POs (top 3):", pos.slice(0, 3).map(p => ({
         po_number: p.po_number,
         platform: p.platform?.pf_name,
-        created: p.order_date || p.po_date,
+        created: p.order_date,
         status: p.status
       })));
       
@@ -247,9 +247,9 @@ export function POListView() {
         'PO Number': po.po_number,
         'Platform': po.platform.pf_name,
         'Status': po.status,
-        'Order Date': (po.order_date || po.po_date) ? (() => {
+        'Order Date': po.order_date ? (() => {
           try {
-            const date = new Date(po.order_date || po.po_date);
+            const date = new Date(po.order_date);
             return isNaN(date.getTime()) ? 'Invalid Date' : format(date, 'yyyy-MM-dd');
           } catch {
             return 'Invalid Date';
@@ -388,8 +388,8 @@ export function POListView() {
     let matchesOrderDateFrom = true;
     let matchesOrderDateTo = true;
     
-    if (po.order_date || po.po_date) {
-      const poOrderDate = new Date(po.order_date || po.po_date);
+    if (po.order_date) {
+      const poOrderDate = new Date(po.order_date);
       if (!isNaN(poOrderDate.getTime())) {
         matchesOrderDateFrom = orderDateFrom === "" || isAfter(poOrderDate, new Date(orderDateFrom)) || isEqual(poOrderDate, new Date(orderDateFrom));
         matchesOrderDateTo = orderDateTo === "" || isBefore(poOrderDate, new Date(orderDateTo)) || isEqual(poOrderDate, new Date(orderDateTo));
@@ -801,9 +801,9 @@ export function POListView() {
                     <div className="space-y-1">
                       <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Order Date</p>
                       <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                        {(po.order_date || po.po_date) ? (() => {
+                        {po.order_date ? (() => {
                           try {
-                            const date = new Date(po.order_date || po.po_date);
+                            const date = new Date(po.order_date);
                             return isNaN(date.getTime()) ? 'Invalid Date' : format(date, 'MMM dd, yyyy');
                           } catch (error) {
                             return 'Invalid Date';

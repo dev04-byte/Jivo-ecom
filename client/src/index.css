@@ -2,6 +2,60 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Custom Scrollbar Styles for BigBasket Tables */
+.bigbasket-table-scroll::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+.bigbasket-table-scroll::-webkit-scrollbar-track {
+  background: linear-gradient(90deg, #e5e7eb 0%, #f3f4f6 100%);
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+}
+
+.bigbasket-table-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #6366f1 0%, #4f46e5 100%);
+  border-radius: 8px;
+  border: 2px solid #f3f4f6;
+  box-shadow: inset 0 0 3px rgba(0, 0, 0, 0.1);
+}
+
+.bigbasket-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #4f46e5 0%, #4338ca 100%);
+  box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.2);
+}
+
+.bigbasket-table-scroll::-webkit-scrollbar-corner {
+  background: #f3f4f6;
+  border-radius: 8px;
+}
+
+/* Dark mode scrollbar */
+.dark .bigbasket-table-scroll::-webkit-scrollbar-track {
+  background: linear-gradient(90deg, #374151 0%, #1f2937 100%);
+  border: 1px solid #4b5563;
+}
+
+.dark .bigbasket-table-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #6366f1 0%, #4f46e5 100%);
+  border: 2px solid #1f2937;
+}
+
+.dark .bigbasket-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #4f46e5 0%, #4338ca 100%);
+}
+
+.dark .bigbasket-table-scroll::-webkit-scrollbar-corner {
+  background: #1f2937;
+}
+
+/* Smooth scrolling for tables */
+.smooth-scroll {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
 :root {
   --background: hsl(0, 0%, 100%);
   --foreground: hsl(20, 14.3%, 4.1%);

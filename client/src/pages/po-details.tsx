@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { BigBasketPODetailView } from "@/components/po/bigbasket-po-detail-view";
 import type { PfPo, PfMst, PfOrderItems } from "@shared/schema";
 
 interface POWithDetails extends Omit<PfPo, 'platform'> {
@@ -147,7 +148,7 @@ export default function PODetails() {
                 {po.po_number}
               </h1>
               <p className="text-gray-600 dark:text-gray-300 mt-1">
-                {po.platform.pf_name} • Created {format(new Date(po.order_date || po.po_date), 'MMM dd, yyyy')}
+                {po.platform.pf_name} • Created {po.order_date ? format(new Date(po.order_date), 'MMM dd, yyyy') : 'Date not available'}
               </p>
             </div>
             <Badge 
@@ -236,43 +237,48 @@ export default function PODetails() {
             </Card>
           </div>
 
-          {/* Order Items */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Order Items ({po.orderItems.length})</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {po.orderItems.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-500">No items in this purchase order</p>
-                  </div>
-                ) : (
-                  <>
-                    {/* Show all columns dynamically */}
-                    {po.orderItems.map((item, index) => (
-                      <div key={item.id || index} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3">
-                        <h4 className="font-medium text-lg">Item {index + 1}</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {Object.entries(item).filter(([key, value]) =>
-                            value !== null &&
-                            value !== undefined &&
-                            value !== ''
-                          ).map(([key, value]) => (
-                            <div key={key} className="space-y-1">
-                              <p className="text-sm font-medium text-gray-500 capitalize">{key.replace(/_/g, ' ')}</p>
-                              <p className="font-semibold text-sm break-words">{String(value)}</p>
-                            </div>
-                          ))}
+          {/* Order Items - Use BigBasket view for BigBasket POs */}
+          {po.platform?.pf_name?.toLowerCase().includes('bigbasket') ||
+           po.platform?.pf_name?.toLowerCase() === 'bigbasket' ? (
+            <BigBasketPODetailView po={po as any} orderItems={po.orderItems as any} />
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle>Order Items ({po.orderItems.length})</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {po.orderItems.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <p className="text-gray-500">No items in this purchase order</p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Show all columns dynamically */}
+                      {po.orderItems.map((item, index) => (
+                        <div key={item.id || index} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3">
+                          <h4 className="font-medium text-lg">Item {index + 1}</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {Object.entries(item).filter(([key, value]) =>
+                              value !== null &&
+                              value !== undefined &&
+                              value !== ''
+                            ).map(([key, value]) => (
+                              <div key={key} className="space-y-1">
+                                <p className="text-sm font-medium text-gray-500 capitalize">{key.replace(/_/g, ' ')}</p>
+                                <p className="font-semibold text-sm break-words">{String(value)}</p>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </main>
     </div>

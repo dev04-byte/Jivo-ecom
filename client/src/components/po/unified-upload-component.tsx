@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { AutoPopulateWidget } from "@/components/ui/auto-populate-widget";
 import { BlinkitPDFParser, type BlinkitPDFData } from "./blinkit-pdf-parser";
+import { BigBasketPODetailView } from "./bigbasket-po-detail-view";
 
 type Step = "platform" | "upload" | "preview";
 
@@ -144,6 +145,7 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
   const [dragActive, setDragActive] = useState(false);
   const [isPDFFile, setIsPDFFile] = useState(false);
   const [importedPOs, setImportedPOs] = useState<Array<{id: number, po_number: string, platform: string}>>([]);
+  const [isImporting, setIsImporting] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
@@ -434,7 +436,12 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
         };
       } else {
         // Single PO response structure (fallback)
-        transformedData = data;
+        transformedData = {
+          ...data,
+          // Ensure platform info is preserved
+          platform: data.platform,
+          detectedVendor: data.detectedVendor
+        };
       }
 
       console.log('🔍 Transformed data for frontend:', JSON.stringify(transformedData, null, 2));
@@ -1530,10 +1537,103 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                   ) : (
                     /* Handle Single PO Display */
                     <div className="space-y-4">
-                      <h3 className="text-lg font-semibold">PO Details</h3>
-                      
-                      {/* Complete Header Information */}
-                      {parsedData.header && (
+                      {/* Check if this is a BigBasket PO and use the specialized component */}
+                      {(parsedData.platform?.pf_name?.toLowerCase().includes('bigbasket') ||
+                        parsedData.platform?.pf_name?.toLowerCase() === 'bigbasket' ||
+                        parsedData.detectedVendor === 'bigbasket') ? (
+                        <div className="space-y-4">
+                          <h3 className="text-lg font-semibold text-orange-600">BigBasket PO Preview</h3>
+                          <BigBasketPODetailView
+                            po={{
+                              ...parsedData.header,
+                              platform: { pf_name: 'BigBasket' },
+                              orderItems: parsedData.lines || []
+                            }}
+                            orderItems={parsedData.lines || []}
+                            showImportButton={true}
+                            onImportData={async (data) => {
+                              try {
+                                setIsImporting(true);
+
+                                // Fix data structure - ensure clean header without extra fields
+                                const cleanData = {
+                                  header: parsedData.header, // Use original parsed header
+                                  lines: parsedData.lines || [] // Use original parsed lines
+                                };
+
+                                console.log('📤 Importing BigBasket PO:', cleanData.header?.po_number, 'with', cleanData.lines?.length, 'items');
+
+                                const response = await fetch('/api/bigbasket-pos/import', {
+                                  method: 'POST',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                  },
+                                  body: JSON.stringify(cleanData)
+                                });
+
+                                const result = await response.json();
+
+                                if (!response.ok) {
+                                  console.error('❌ Server error:', result);
+                                  if (response.status === 409) {
+                                    // Duplicate PO
+                                    toast({
+                                      title: "Duplicate PO",
+                                      description: result.error || "This PO already exists in the database",
+                                      variant: "destructive",
+                                    });
+                                  } else {
+                                    // Other errors
+                                    toast({
+                                      title: "Import Failed",
+                                      description: result.error || "Failed to import data",
+                                      variant: "destructive",
+                                    });
+                                  }
+                                  return;
+                                }
+
+                                // Success - data inserted into bigbasket_po_header and bigbasket_po_lines
+                                toast({
+                                  title: "Import Successful",
+                                  description: `PO ${data.header.po_number} with ${data.lines.length} items imported successfully`,
+                                });
+
+                                // Navigate back to platform-po page after short delay
+                                setTimeout(() => {
+                                  setLocation('/platform-po');
+                                  setParsedData(null);
+                                  setFile(null);
+                                  setCurrentStep('platform');
+                                  setSelectedPlatform('');
+                                }, 1500);
+
+                              } catch (error) {
+                                console.error('❌ Import error:', error);
+                                console.error('Error details:', {
+                                  message: error instanceof Error ? error.message : 'Unknown error',
+                                  stack: error instanceof Error ? error.stack : undefined
+                                });
+
+                                toast({
+                                  title: "Import Error",
+                                  description: error instanceof Error
+                                    ? `Network error: ${error.message}`
+                                    : "Network error or server unavailable",
+                                  variant: "destructive",
+                                });
+                              } finally {
+                                setIsImporting(false);
+                              }
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <h3 className="text-lg font-semibold">PO Details</h3>
+
+                          {/* Complete Header Information */}
+                          {parsedData.header && (
                         <Card>
                           <CardHeader>
                             <CardTitle className="text-base">Complete Purchase Order Information</CardTitle>
@@ -1933,15 +2033,15 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                           </CardContent>
                         </Card>
                       )}
-
-                    </div>
-                  )}
-
+                      </div>
+                    )}
+                  </div>
+                )}
                 </div>
               )}
-            </CardContent>
-          </Card>
-        );
+              </CardContent>
+            </Card>
+          );
 
       default:
         return null;
