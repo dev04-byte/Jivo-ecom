@@ -62,9 +62,10 @@ app.use((req, res, next) => {
     serveStatic(app);
   }
 
-  // Server listen setup (fixed for macOS and Windows)
+  // Server listen setup (fixed for production and local development)
   const port = parseInt(process.env.PORT || "5000", 10);
-  const host = process.platform === "darwin" || process.platform === "win32" ? "127.0.0.1" : "0.0.0.0";
+  // Use 0.0.0.0 for production (Render), 127.0.0.1 for local development
+  const host = process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1";
 
   server.listen(port, host, () => {
     log(`Server running at http://${host}:${port}`);
