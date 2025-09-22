@@ -614,7 +614,7 @@ export default function UnifiedPOUpload() {
                       PO Number
                     </p>
                     <p className="text-lg font-bold text-blue-900">
-                      {parsedData.header?.po_number || "N/A"}
+                      {parsedData.header?.PoNumber || "N/A"}
                     </p>
                   </div>
                   <div className="p-3 bg-green-50 rounded-lg">
@@ -638,7 +638,7 @@ export default function UnifiedPOUpload() {
                       Total Amount
                     </p>
                     <p className="text-lg font-bold text-yellow-900">
-                      ₹{parsedData.header?.grand_total ? parseFloat(parsedData.header.grand_total).toFixed(2) : (parsedData.totalAmount || "0")}
+                      ₹{parsedData.header?.total_amount || parsedData.header?.PoAmount || "0"}
                     </p>
                   </div>
                   <div className="p-3 bg-orange-50 rounded-lg">
@@ -646,11 +646,7 @@ export default function UnifiedPOUpload() {
                       PO Date
                     </p>
                     <p className="text-lg font-bold text-orange-900">
-                      {parsedData.header?.po_date
-                        ? new Date(
-                            parsedData.header.po_date,
-                          ).toLocaleDateString()
-                        : "Not Available"}
+                      {parsedData.header?.PoCreatedAt || "Not Available"}
                     </p>
                   </div>
                 </div>
@@ -722,26 +718,24 @@ export default function UnifiedPOUpload() {
                     <div className="grid grid-cols-2 gap-2 text-sm">
                       <div>
                         <strong>PO Number:</strong>{" "}
-                        {parsedData.header?.po_number || "N/A"}
+                        {parsedData.header?.PoNumber || "N/A"}
                       </div>
                       <div>
                         <strong>PO Date:</strong>{" "}
-                        {parsedData.header?.po_date
-                          ? new Date(parsedData.header.po_date).toLocaleDateString()
-                          : "Not Available"}
+                        {parsedData.header?.PoCreatedAt || "Not Available"}
                       </div>
                       <div>
                         <strong>Vendor Name:</strong>{" "}
-                        {parsedData.header?.vendor_name || "N/A"}
+                        {parsedData.header?.VendorName || "N/A"}
                       </div>
                       <div>
-                        <strong>Payment Terms:</strong>{" "}
-                        {parsedData.header?.payment_terms || "N/A"}
+                        <strong>Facility:</strong>{" "}
+                        {parsedData.header?.FacilityName || "N/A"}
                       </div>
                       <div>
                         <strong>Status:</strong>{" "}
                         <Badge variant="outline">
-                          {parsedData.header?.status || "Open"}
+                          {parsedData.header?.Status || "Open"}
                         </Badge>
                       </div>
                       <div>
@@ -803,13 +797,16 @@ export default function UnifiedPOUpload() {
                           </>
                         ) : selectedPlatform === "swiggy" ? (
                           <>
-                            <TableHead>Item Description</TableHead>
-                            <TableHead>Item Code</TableHead>
-                            <TableHead>HSN Code</TableHead>
-                            <TableHead>Quantity</TableHead>
+                            <TableHead>PO Number</TableHead>
+                            <TableHead>SKU Code</TableHead>
+                            <TableHead>SKU Description</TableHead>
+                            <TableHead>Brand Name</TableHead>
+                            <TableHead>Ordered Qty</TableHead>
+                            <TableHead>Received Qty</TableHead>
                             <TableHead>MRP</TableHead>
                             <TableHead>Unit Cost</TableHead>
-                            <TableHead>Taxable Value</TableHead>
+                            <TableHead>Tax</TableHead>
+                            <TableHead>Line Total</TableHead>
                           </>
                         ) : selectedPlatform === "zepto" ? (
                           <>
@@ -864,14 +861,17 @@ export default function UnifiedPOUpload() {
                           ) : selectedPlatform === "swiggy" ? (
                             <>
                               <TableCell className="font-medium">
-                                {line.item_description || line.item_name || "N/A"}
+                                {line.PoNumber || "N/A"}
                               </TableCell>
-                              <TableCell>{line.item_code || "N/A"}</TableCell>
-                              <TableCell>{line.hsn_code || "Not Available"}</TableCell>
-                              <TableCell>{line.quantity || "N/A"}</TableCell>
-                              <TableCell>₹{line.mrp || "N/A"}</TableCell>
-                              <TableCell>{line.unit_base_cost ? `₹${parseFloat(line.unit_base_cost).toFixed(2)}` : "Not Available"}</TableCell>
-                              <TableCell>₹{line.taxable_value ? parseFloat(line.taxable_value).toFixed(2) : "N/A"}</TableCell>
+                              <TableCell>{line.SkuCode || "N/A"}</TableCell>
+                              <TableCell>{line.SkuDescription || "N/A"}</TableCell>
+                              <TableCell>{line.BrandName || "N/A"}</TableCell>
+                              <TableCell>{line.OrderedQty || "N/A"}</TableCell>
+                              <TableCell>{line.ReceivedQty || "N/A"}</TableCell>
+                              <TableCell>₹{line.Mrp || "N/A"}</TableCell>
+                              <TableCell>₹{line.UnitBasedCost || "N/A"}</TableCell>
+                              <TableCell>₹{line.Tax || "N/A"}</TableCell>
+                              <TableCell>₹{line.PoLineValueWithTax || "N/A"}</TableCell>
                             </>
                           ) : selectedPlatform === "zepto" ? (
                             <>

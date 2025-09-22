@@ -25,7 +25,7 @@ export function parseSwiggyCSVPO(csvContent: string, uploadedBy: string): Parsed
   }
 
   // Extract header information from first row (all rows have same header data)
-  const firstRow = records[0];
+  const firstRow = records[0] as any;
   const poNumber = firstRow.PoNumber || '';
   const entity = firstRow.Entity || '';
   const facilityId = firstRow.FacilityId || '';
@@ -56,7 +56,7 @@ export function parseSwiggyCSVPO(csvContent: string, uploadedBy: string): Parsed
   let calculatedTotalAmount = 0;
 
   for (let i = 0; i < records.length; i++) {
-    const row = records[i];
+    const row = records[i] as any;
 
     try {
       // Parse values exactly as they appear in CSV
@@ -70,37 +70,39 @@ export function parseSwiggyCSVPO(csvContent: string, uploadedBy: string): Parsed
       const poLineValueWithTax = parseFloat(row.PoLineValueWithTax || '0');
       const poAgeing = parseInt(row.PoAgeing || '0');
 
-      const line: InsertSwiggyPoLine = {
+      // Keep all original CSV columns for preview display
+      const line: any = {
         line_number: i + 1,
-        item_code: row.SkuCode || '',
-        item_description: row.SkuDescription || '',
-        hsn_code: null, // Not provided in Swiggy CSV format
-        quantity: orderedQty,
-        received_qty: receivedQty,
-        balanced_qty: balancedQty,
-        mrp: mrp > 0 ? mrp.toFixed(2) : null,
-        unit_base_cost: unitBaseCost > 0 ? unitBaseCost.toFixed(2) : null,
-        taxable_value: poLineValueWithoutTax > 0 ? poLineValueWithoutTax.toFixed(2) : null,
-        tax_amount: tax > 0 ? tax.toFixed(2) : null,
-        total_tax_amount: tax > 0 ? tax.toFixed(2) : null,
-        line_total: poLineValueWithTax > 0 ? poLineValueWithTax.toFixed(2) : null,
-        category_id: row.CategoryId || null,
-        brand_name: row.BrandName || null,
-        expected_delivery_date: parseSwiggyDate(row.ExpectedDeliveryDate),
-        po_expiry_date: parseSwiggyDate(row.PoExpiryDate),
-        otb_reference_number: row.OtbReferenceNumber || null,
-        internal_external_po: row.InternalExternalPo || null,
-        po_ageing: poAgeing,
-        reference_po_number: row.ReferencePoNumber || null,
-        cgst_rate: null, // Not provided in Swiggy CSV
-        cgst_amount: null,
-        sgst_rate: null,
-        sgst_amount: null,
-        igst_rate: null,
-        igst_amount: null,
-        cess_rate: null,
-        cess_amount: null,
-        additional_cess: null
+        // Original CSV columns preserved exactly as they are
+        PoNumber: row.PoNumber || '',
+        Entity: row.Entity || '',
+        FacilityId: row.FacilityId || '',
+        FacilityName: row.FacilityName || '',
+        City: row.City || '',
+        PoCreatedAt: row.PoCreatedAt || '',
+        PoModifiedAt: row.PoModifiedAt || '',
+        Status: row.Status || '',
+        SupplierCode: row.SupplierCode || '',
+        VendorName: row.VendorName || '',
+        PoAmount: row.PoAmount || '',
+        SkuCode: row.SkuCode || '',
+        SkuDescription: row.SkuDescription || '',
+        CategoryId: row.CategoryId || '',
+        OrderedQty: orderedQty,
+        ReceivedQty: row.ReceivedQty || '',
+        BalancedQty: row.BalancedQty || '',
+        Tax: tax,
+        PoLineValueWithoutTax: poLineValueWithoutTax,
+        PoLineValueWithTax: poLineValueWithTax,
+        Mrp: mrp,
+        UnitBasedCost: unitBaseCost,
+        ExpectedDeliveryDate: row.ExpectedDeliveryDate || '',
+        PoExpiryDate: row.PoExpiryDate || '',
+        OtbReferenceNumber: row.OtbReferenceNumber || '',
+        InternalExternalPo: row.InternalExternalPo || '',
+        PoAgeing: poAgeing,
+        BrandName: row.BrandName || '',
+        ReferencePoNumber: row.ReferencePoNumber || ''
       };
 
       lines.push(line);
@@ -122,30 +124,26 @@ export function parseSwiggyCSVPO(csvContent: string, uploadedBy: string): Parsed
 
   console.log(`📊 Totals - Items: ${lines.length}, Qty: ${totalQuantity}, Amount: ${calculatedTotalAmount}`);
 
-  // Create header object with exact data from CSV
-  const header: InsertSwiggyPo = {
-    po_number: poNumber,
-    entity: entity,
-    facility_id: facilityId,
-    facility_name: facilityName,
-    city: city,
-    po_date: poCreatedAt,
-    po_release_date: poCreatedAt, // Using created date as release date
-    po_modified_at: poModifiedAt,
-    expected_delivery_date: expectedDeliveryDate,
-    po_expiry_date: poExpiryDate,
-    status: status,
-    supplier_code: supplierCode,
-    vendor_name: vendorName,
-    payment_terms: null, // Not provided in Swiggy CSV format
+  // Create header object with original CSV column names for preview
+  const header: any = {
+    // Original CSV header fields
+    PoNumber: poNumber,
+    Entity: entity,
+    FacilityId: facilityId,
+    FacilityName: facilityName,
+    City: city,
+    PoCreatedAt: firstRow.PoCreatedAt || '',
+    PoModifiedAt: firstRow.PoModifiedAt || '',
+    Status: status,
+    SupplierCode: supplierCode,
+    VendorName: vendorName,
+    PoAmount: poAmount,
+    ExpectedDeliveryDate: firstRow.ExpectedDeliveryDate || '',
+    PoExpiryDate: firstRow.PoExpiryDate || '',
+    // Summary fields for display
     total_items: lines.length,
     total_quantity: totalQuantity,
-    total_taxable_value: totalTaxableValue > 0 ? totalTaxableValue.toFixed(2) : null,
-    total_tax_amount: totalTaxAmount > 0 ? totalTaxAmount.toFixed(2) : null,
-    grand_total: calculatedTotalAmount > 0 ? calculatedTotalAmount.toFixed(2) : poAmount.toFixed(2),
-    po_amount: poAmount.toFixed(2),
-    unique_hsn_codes: [], // HSN codes not provided in Swiggy CSV
-    created_by: uploadedBy
+    total_amount: calculatedTotalAmount > 0 ? calculatedTotalAmount.toFixed(2) : poAmount.toFixed(2)
   };
 
   console.log(`✅ Successfully parsed Swiggy CSV PO: ${poNumber} with ${lines.length} line items`);

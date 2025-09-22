@@ -37,7 +37,7 @@ import {
 //   executeRawProcedure
 // } from "./hana-test-routes";
 
-import { insertPfPoSchema, insertPfOrderItemsSchema, insertFlipkartGroceryPoHeaderSchema, insertFlipkartGroceryPoLinesSchema, insertDistributorMstSchema, insertDistributorPoSchema, insertDistributorOrderItemsSchema, insertPoMasterSchema, insertPoLinesSchema, distributors } from "@shared/schema";
+import { insertPfPoSchema, insertPfOrderItemsSchema, insertFlipkartGroceryPoHeaderSchema, insertFlipkartGroceryPoLinesSchema, insertDistributorMstSchema, insertDistributorPoSchema, insertDistributorOrderItemsSchema, insertPoMasterSchema, insertPoLinesSchema, distributors, bigbasketPoHeader, bigbasketPoLines } from "@shared/schema";
 import { z } from "zod";
 import { seedTestData } from "./seed-data";
 import { parseFlipkartGroceryPO, parseZeptoPO, parseCityMallPO, parseBlinkitPO } from "./csv-parser";
@@ -2074,17 +2074,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const fileExtension = req.file.originalname.toLowerCase().split('.').pop();
 
       if (fileExtension === 'csv') {
-        // Handle CSV file preview
+        // Handle CSV file preview using the new parser
         const csvContent = req.file.buffer.toString('utf-8');
-        const { parseSwiggyCSV } = await import('./swiggy-csv-parser');
+        const { parseSwiggyCSVPO } = await import('./swiggy-csv-parser-new');
 
-        const parsedData = parseSwiggyCSV(csvContent, uploadedBy);
-        console.log(`📊 Previewed ${parsedData.totalPOs} POs from CSV`);
+        const parsedData = parseSwiggyCSVPO(csvContent, uploadedBy);
+        console.log(`📊 Previewed Swiggy CSV PO: ${parsedData.header.po_number} with ${parsedData.lines.length} line items`);
+
+        // Calculate totals for preview
+        const totalQuantity = parsedData.lines.reduce((sum, line) => sum + (line.quantity || 0), 0);
+        const totalAmount = parsedData.lines.reduce((sum, line) => {
+          const lineTotal = parseFloat(line.line_total || '0');
+          return sum + (isNaN(lineTotal) ? 0 : lineTotal);
+        }, 0);
 
         res.status(200).json({
-          message: `Preview completed. Found ${parsedData.totalPOs} POs`,
-          totalPOs: parsedData.totalPOs,
-          poList: parsedData.poList
+          message: `Preview completed. Found 1 PO with ${parsedData.lines.length} items`,
+          totalPOs: 1,
+          totalItems: parsedData.lines.length,
+          totalQuantity: totalQuantity,
+          totalAmount: totalAmount.toFixed(2),
+          header: parsedData.header,
+          lines: parsedData.lines
         });
       } else {
         // Handle Excel file preview (existing logic)
@@ -2610,21 +2621,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
                        req.file.buffer.toString('utf-8', 0, 100).includes('PoNumber,Entity');
 
           if (isCSV) {
-            console.log('🔄 Detected Swiggy CSV format, using CSV parser...');
+            console.log('🔄 Detected Swiggy CSV format, using NEW CSV parser...');
             console.log('📄 File buffer length:', req.file.buffer.length);
             console.log('📄 First 100 chars:', req.file.buffer.toString('utf-8', 0, 100));
 
             try {
-              const csvResult = parseSwiggyCSV(req.file.buffer.toString('utf-8'), uploadedBy);
-              console.log('✅ Swiggy CSV parsing successful:', {
-                totalPOs: csvResult.totalPOs,
-                poListLength: csvResult.poList.length
+              const { parseSwiggyCSVPO } = await import('./swiggy-csv-parser-new');
+              const csvResult = parseSwiggyCSVPO(req.file.buffer.toString('utf-8'), uploadedBy);
+              console.log('✅ Swiggy CSV parsing successful with NEW parser:', {
+                poNumber: csvResult.header.PoNumber,
+                lineItems: csvResult.lines.length
               });
 
-              // Convert to unified format for preview
+              // Convert to unified format for preview - single PO with lines
               parsedData = {
-                poList: csvResult.poList,
-                totalPOs: csvResult.totalPOs,
+                header: csvResult.header,
+                lines: csvResult.lines,
+                totalPOs: 1,
+                totalItems: csvResult.lines.length,
                 detectedVendor: 'swiggy'
               };
             } catch (csvError) {
@@ -2794,6 +2808,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
+        // Map vendor to platform information for frontend compatibility
+        const platformMap: { [key: string]: { pf_name: string, id: number } } = {
+          'blinkit': { pf_name: 'Blinkit', id: 1 },
+          'zepto': { pf_name: 'Zepto', id: 2 },
+          'swiggy': { pf_name: 'Swiggy', id: 3 },
+          'flipkart': { pf_name: 'Flipkart Grocery', id: 4 },
+          'zomato': { pf_name: 'Zomato', id: 15 },
+          'amazon': { pf_name: 'Amazon', id: 6 },
+          'citymall': { pf_name: 'Citymall', id: 7 },
+          'dealshare': { pf_name: 'Dealshare', id: 8 },
+          'bigbasket': { pf_name: 'BigBasket', id: 12 }
+        };
+
+        const platformInfo = platformMap[detectedVendor] || { pf_name: detectedVendor, id: 1 };
+
         // Handle different response formats (single PO vs multiple POs)
         if (parsedData.poList && parsedData.totalPOs) {
           // Multiple POs (like Swiggy CSV)
@@ -2802,13 +2831,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             poList: parsedData.poList,
             totalPOs: parsedData.totalPOs,
             detectedVendor: detectedVendor,
+            platform: platformInfo, // Add platform info for frontend compatibility
             multiPO: true
           });
         } else {
           // Single PO format
-          const totalQuantity = parsedData.lines.reduce((sum: number, line: any) => sum + (line.quantity || 0), 0);
+          const totalQuantity = parsedData.lines.reduce((sum: number, line: any) => sum + (line.quantity || line.OrderedQty || 0), 0);
           const totalAmount = parsedData.lines.reduce((sum: number, line: any) => {
-            const amount = parseFloat(line.total_amount || line.line_total || line.total_value || '0');
+            const amount = parseFloat(line.total_amount || line.line_total || line.total_value || line.PoLineValueWithTax || '0');
             return sum + amount;
           }, 0);
 
@@ -2825,6 +2855,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             header: displayHeader,
             lines: parsedData.lines,
             detectedVendor: detectedVendor,
+            platform: platformInfo, // Add platform info for frontend compatibility
             totalItems: parsedData.lines.length,
             totalQuantity: totalQuantity,
             totalAmount: totalAmount.toFixed(2),
@@ -3632,6 +3663,205 @@ export async function registerRoutes(app: Express): Promise<Server> {
           poNumber: req.body.header?.po_number,
           errorType: error instanceof Error ? error.name : 'Unknown'
         } : undefined
+      });
+    }
+  });
+
+  // BigBasket PO GET endpoint - fetch from bigbasket_po_header and bigbasket_po_lines
+  app.get("/api/bigbasket-pos/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      console.log(`📥 BigBasket PO fetch request for ID: ${id}`);
+
+      // Fetch header data
+      const [headerResult] = await db
+        .select()
+        .from(bigbasketPoHeader)
+        .where(eq(bigbasketPoHeader.id, parseInt(id)));
+
+      if (!headerResult) {
+        return res.status(404).json({ error: "BigBasket PO not found" });
+      }
+
+      // Fetch line items
+      const lineItems = await db
+        .select()
+        .from(bigbasketPoLines)
+        .where(eq(bigbasketPoLines.po_id, parseInt(id)))
+        .orderBy(bigbasketPoLines.s_no);
+
+      console.log(`✅ Found BigBasket PO ${headerResult.po_number} with ${lineItems.length} line items`);
+
+      res.json({
+        header: headerResult,
+        lines: lineItems
+      });
+
+    } catch (error) {
+      console.error("❌ Error fetching BigBasket PO:", error);
+      res.status(500).json({
+        error: "Failed to fetch BigBasket PO data",
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // BigBasket PO Import endpoint - import parsed data directly
+  app.post("/api/bigbasket-pos/import", async (req, res) => {
+    try {
+      console.log('📥 BigBasket import request received');
+      console.log('Request body structure:', {
+        hasHeader: !!req.body.header,
+        hasLines: !!req.body.lines,
+        linesLength: req.body.lines?.length,
+        headerKeys: req.body.header ? Object.keys(req.body.header) : [],
+        bodyKeys: Object.keys(req.body)
+      });
+
+      const { header, lines } = req.body;
+
+      if (!header || !lines || !Array.isArray(lines)) {
+        console.error('❌ Invalid request structure:', {
+          header: !!header,
+          lines: !!lines,
+          isLinesArray: Array.isArray(lines)
+        });
+        return res.status(400).json({ error: "Invalid request body. Expected header and lines." });
+      }
+
+      if (lines.length === 0) {
+        console.error('❌ No line items provided');
+        return res.status(400).json({ error: "No line items provided for import." });
+      }
+
+      console.log(`Starting BigBasket PO import: ${header.po_number} with ${lines.length} items`);
+      console.log(`Target tables: bigbasket_po_header and bigbasket_po_lines`);
+
+      // Validate required header fields
+      if (!header.po_number) {
+        return res.status(400).json({ error: "PO number is required in header." });
+      }
+
+      // Prepare header data for database insertion
+      const cleanHeader = {
+        po_number: String(header.po_number).trim(),
+        po_date: header.po_date ? new Date(header.po_date) : null,
+        po_expiry_date: header.po_expiry_date ? new Date(header.po_expiry_date) : null,
+        warehouse_address: header.warehouse_address || '',
+        delivery_address: header.delivery_address || '',
+        supplier_name: header.supplier_name || '',
+        supplier_address: header.supplier_address || '',
+        supplier_gstin: header.supplier_gstin || '',
+        dc_address: header.dc_address || '',
+        dc_gstin: header.dc_gstin || '',
+        total_items: lines.length,
+        total_quantity: lines.reduce((sum, line) => sum + (parseInt(String(line.quantity || 0)) || 0), 0),
+        total_basic_cost: lines.reduce((sum, line) => {
+          const quantity = parseInt(String(line.quantity || 0)) || 0;
+          const basicCost = parseFloat(String(line.basic_cost || '0')) || 0;
+          return sum + (quantity * basicCost);
+        }, 0).toFixed(2),
+        total_gst_amount: lines.reduce((sum, line) => sum + (parseFloat(String(line.gst_amount || '0')) || 0), 0).toFixed(2),
+        total_cess_amount: lines.reduce((sum, line) => {
+          const cessValue = parseFloat(String(line.cess_value || '0')) || 0;
+          const stateCess = parseFloat(String(line.state_cess || '0')) || 0;
+          return sum + cessValue + stateCess;
+        }, 0).toFixed(2),
+        grand_total: lines.reduce((sum, line) => sum + (parseFloat(String(line.total_value || '0')) || 0), 0).toFixed(2),
+        status: header.status || 'pending',
+        created_by: header.created_by || 'system'
+      };
+
+      // Prepare lines data for database insertion
+      const cleanLines = lines.map((line, index) => ({
+        s_no: parseInt(String(line.s_no || index + 1)) || (index + 1),
+        hsn_code: String(line.hsn_code || '').trim(),
+        sku_code: String(line.sku_code || '').trim(),
+        description: String(line.description || '').trim() || `Item ${index + 1}`,
+        ean_upc_code: String(line.ean_upc_code || '').trim(),
+        case_quantity: parseInt(String(line.case_quantity || 0)) || 0,
+        quantity: parseInt(String(line.quantity || 0)) || 0,
+        basic_cost: (parseFloat(String(line.basic_cost || '0')) || 0).toFixed(2),
+        sgst_percent: (parseFloat(String(line.sgst_percent || '0')) || 0).toFixed(2),
+        sgst_amount: (parseFloat(String(line.sgst_amount || '0')) || 0).toFixed(2),
+        cgst_percent: (parseFloat(String(line.cgst_percent || '0')) || 0).toFixed(2),
+        cgst_amount: (parseFloat(String(line.cgst_amount || '0')) || 0).toFixed(2),
+        igst_percent: (parseFloat(String(line.igst_percent || '0')) || 0).toFixed(2),
+        igst_amount: (parseFloat(String(line.igst_amount || '0')) || 0).toFixed(2),
+        gst_percent: (parseFloat(String(line.gst_percent || '0')) || 0).toFixed(2),
+        gst_amount: (parseFloat(String(line.gst_amount || '0')) || 0).toFixed(2),
+        cess_percent: (parseFloat(String(line.cess_percent || '0')) || 0).toFixed(2),
+        cess_value: (parseFloat(String(line.cess_value || '0')) || 0).toFixed(2),
+        state_cess_percent: (parseFloat(String(line.state_cess_percent || '0')) || 0).toFixed(2),
+        state_cess: (parseFloat(String(line.state_cess || '0')) || 0).toFixed(2),
+        landing_cost: (parseFloat(String(line.landing_cost || '0')) || 0).toFixed(2),
+        mrp: (parseFloat(String(line.mrp || '0')) || 0).toFixed(2),
+        total_value: (parseFloat(String(line.total_value || '0')) || 0).toFixed(2)
+      }));
+
+      // Validate that essential fields are present
+      const invalidLines = cleanLines.filter(line =>
+        !line.sku_code || !line.description || line.quantity <= 0
+      );
+
+      if (invalidLines.length > 0) {
+        console.warn(`Found ${invalidLines.length} lines with missing data:`,
+          invalidLines.map(line => ({ s_no: line.s_no, sku_code: line.sku_code, description: line.description }))
+        );
+      }
+
+      // Import to database tables: bigbasket_po_header and bigbasket_po_lines
+      try {
+        console.log(`Inserting into bigbasket_po_header: PO ${cleanHeader.po_number}`);
+        console.log(`Inserting into bigbasket_po_lines: ${cleanLines.length} line items`);
+        console.log('Storage function available:', typeof storage.createBigbasketPo);
+
+        if (typeof storage.createBigbasketPo !== 'function') {
+          throw new Error('createBigbasketPo function not available in storage');
+        }
+
+        const createdPo = await storage.createBigbasketPo(cleanHeader, cleanLines);
+
+        console.log(`✅ SUCCESS: Data inserted into database`);
+        console.log(`   - bigbasket_po_header: PO ${createdPo.po_number} (ID: ${createdPo.id})`);
+        console.log(`   - bigbasket_po_lines: ${cleanLines.length} items inserted`);
+
+        res.status(201).json({
+          success: true,
+          message: `Data inserted successfully`,
+          data: {
+            po_id: createdPo.id,
+            po_number: createdPo.po_number,
+            total_items: cleanLines.length,
+            total_quantity: cleanHeader.total_quantity,
+            grand_total: cleanHeader.grand_total,
+            created_at: createdPo.created_at,
+            tables_affected: ['bigbasket_po_header', 'bigbasket_po_lines']
+          }
+        });
+
+      } catch (dbError: any) {
+        if (dbError.code === '23505') {
+          console.log(`❌ DUPLICATE: PO ${cleanHeader.po_number} already exists`);
+          return res.status(409).json({
+            error: `PO ${cleanHeader.po_number} already exists in the database`
+          });
+        }
+        console.error(`❌ DATABASE ERROR:`, dbError);
+        throw dbError;
+      }
+
+    } catch (error) {
+      console.error("❌ CRITICAL ERROR importing BigBasket PO:", error);
+      console.error("Error details:", {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        name: error instanceof Error ? error.name : undefined
+      });
+      res.status(500).json({
+        error: "Failed to import BigBasket PO data",
+        details: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString()
       });
     }
   });
