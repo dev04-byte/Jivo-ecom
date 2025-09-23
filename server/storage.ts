@@ -3804,75 +3804,82 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createBigbasketPo(po: InsertBigbasketPoHeader, lines: InsertBigbasketPoLines[]): Promise<BigbasketPoHeader> {
-    console.log('🔄 Starting BigBasket PO creation with direct SQL...');
+    console.log('🔄 Starting BigBasket PO creation...');
     console.log('📋 Header data:', JSON.stringify(po, null, 2));
     console.log('📦 Lines data:', JSON.stringify(lines, null, 2));
 
-    // Use direct SQL as Drizzle ORM has transaction issues
-    const { Client } = await import('pg');
-    const client = new Client({ connectionString: process.env.DATABASE_URL });
-
     try {
-      await client.connect();
-      await client.query('BEGIN');
+      return await db.transaction(async (tx) => {
+        console.log('💾 Inserting header...');
 
-      console.log('💾 Inserting header with direct SQL...');
+        // Insert header using Drizzle ORM
+        const [createdPo] = await tx.insert(bigbasketPoHeader).values({
+          po_number: po.po_number,
+          po_date: po.po_date,
+          po_expiry_date: po.po_expiry_date,
+          warehouse_address: po.warehouse_address,
+          delivery_address: po.delivery_address,
+          supplier_name: po.supplier_name,
+          supplier_address: po.supplier_address,
+          supplier_gstin: po.supplier_gstin,
+          dc_address: po.dc_address,
+          dc_gstin: po.dc_gstin,
+          total_items: po.total_items || 0,
+          total_quantity: po.total_quantity || 0,
+          total_basic_cost: po.total_basic_cost,
+          total_gst_amount: po.total_gst_amount,
+          total_cess_amount: po.total_cess_amount,
+          grand_total: po.grand_total,
+          status: po.status || 'pending',
+          created_by: po.created_by,
+          created_at: new Date(),
+          updated_at: new Date()
+        }).returning();
 
-      // Insert header
-      const headerResult = await client.query(`
-        INSERT INTO bigbasket_po_header (
-          po_number, po_date, po_expiry_date, warehouse_address, delivery_address,
-          supplier_name, supplier_address, supplier_gstin, dc_address, dc_gstin,
-          total_items, total_quantity, total_basic_cost, total_gst_amount,
-          total_cess_amount, grand_total, status, created_by, created_at, updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())
-        RETURNING *;
-      `, [
-        po.po_number, po.po_date, po.po_expiry_date, po.warehouse_address, po.delivery_address,
-        po.supplier_name, po.supplier_address, po.supplier_gstin, po.dc_address, po.dc_gstin,
-        po.total_items || 0, po.total_quantity || 0, po.total_basic_cost, po.total_gst_amount,
-        po.total_cess_amount, po.grand_total, po.status || 'pending', po.created_by
-      ]);
+        console.log('✅ Header inserted successfully:', createdPo);
 
-      const createdPo = headerResult.rows[0];
-      console.log('✅ Header inserted successfully:', createdPo);
+        // Insert lines if provided
+        if (lines && lines.length > 0) {
+          console.log(`💾 Inserting ${lines.length} line items...`);
 
-      if (lines.length > 0) {
-        console.log(`💾 Inserting ${lines.length} line items with direct SQL...`);
+          const linesWithPoId = lines.map(line => ({
+            po_id: createdPo.id,
+            s_no: line.s_no,
+            hsn_code: line.hsn_code,
+            sku_code: line.sku_code,
+            description: line.description,
+            ean_upc_code: line.ean_upc_code,
+            case_quantity: line.case_quantity,
+            quantity: line.quantity,
+            basic_cost: line.basic_cost,
+            sgst_percent: line.sgst_percent,
+            sgst_amount: line.sgst_amount,
+            cgst_percent: line.cgst_percent,
+            cgst_amount: line.cgst_amount,
+            igst_percent: line.igst_percent,
+            igst_amount: line.igst_amount,
+            gst_percent: line.gst_percent,
+            gst_amount: line.gst_amount,
+            cess_percent: line.cess_percent,
+            cess_value: line.cess_value,
+            state_cess_percent: line.state_cess_percent,
+            state_cess: line.state_cess,
+            landing_cost: line.landing_cost,
+            mrp: line.mrp,
+            total_value: line.total_value,
+            created_at: new Date()
+          }));
 
-        for (const line of lines) {
-          await client.query(`
-            INSERT INTO bigbasket_po_lines (
-              po_id, s_no, hsn_code, sku_code, description, ean_upc_code,
-              case_quantity, quantity, basic_cost, sgst_percent, sgst_amount,
-              cgst_percent, cgst_amount, igst_percent, igst_amount, gst_percent,
-              gst_amount, cess_percent, cess_value, state_cess_percent,
-              state_cess, landing_cost, mrp, total_value, created_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, NOW());
-          `, [
-            createdPo.id, line.s_no, line.hsn_code, line.sku_code, line.description, line.ean_upc_code,
-            line.case_quantity, line.quantity, line.basic_cost, line.sgst_percent, line.sgst_amount,
-            line.cgst_percent, line.cgst_amount, line.igst_percent, line.igst_amount, line.gst_percent,
-            line.gst_amount, line.cess_percent, line.cess_value, line.state_cess_percent,
-            line.state_cess, line.landing_cost, line.mrp, line.total_value
-          ]);
+          await tx.insert(bigbasketPoLines).values(linesWithPoId);
+          console.log('✅ Lines inserted successfully');
         }
-        console.log('✅ Lines inserted successfully');
-      }
 
-      await client.query('COMMIT');
-      console.log('🎉 Transaction committed successfully!');
-
-      return createdPo;
-
+        console.log('🎉 Transaction completed successfully!');
+        return createdPo;
+      });
     } catch (error) {
-      await client.query('ROLLBACK');
       console.error('❌ BigBasket PO creation failed:', error);
       throw error;
-    } finally {
-      await client.end();
     }
   }
 

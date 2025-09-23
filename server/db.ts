@@ -12,12 +12,17 @@ const connectionString =
   `postgresql://${process.env.PGUSER}:${process.env.PGPASSWORD}` +
   `@${process.env.PGHOST ?? "127.0.0.1"}:${process.env.PGPORT ?? "5432"}/${process.env.PGDATABASE}`;
 
-// Optional flag to enable SSL only if your server actually supports it
-const sslEnabled = (process.env.DATABASE_SSL || "").toLowerCase() === "true";
+// Enable SSL for Render PostgreSQL (required for external connections)
+const sslEnabled = process.env.NODE_ENV === 'production' ||
+                   (process.env.DATABASE_SSL || "").toLowerCase() === "true" ||
+                   connectionString.includes('render.com');
 
 export const pool = new Pool({
   connectionString,
   ssl: sslEnabled ? { rejectUnauthorized: false } : undefined,
+  max: 20, // Maximum number of clients in the pool
+  idleTimeoutMillis: 30000, // How long a client is allowed to remain idle
+  connectionTimeoutMillis: 10000, // How long to wait for a connection
 });
 
 // One Drizzle client for the whole app
