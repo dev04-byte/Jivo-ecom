@@ -268,67 +268,94 @@ export default function CityMallPoDetails() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>#</TableHead>
-                  <TableHead>Article ID</TableHead>
-                  <TableHead>Article Name</TableHead>
-                  <TableHead>HSN Code</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">MRP</TableHead>
-                  <TableHead className="text-right">Cost Price</TableHead>
-                  <TableHead className="text-right">Base Amount</TableHead>
-                  <TableHead className="text-right">IGST %</TableHead>
-                  <TableHead className="text-right">IGST ₹</TableHead>
-                  <TableHead className="text-right">Total Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {po.poLines?.map((line) => (
-                  <TableRow key={line.id}>
-                    <TableCell className="font-medium">{line.line_number}</TableCell>
-                    <TableCell className="font-mono text-sm">{line.article_id}</TableCell>
-                    <TableCell className="max-w-xs truncate" title={line.article_name || ''}>
-                      {line.article_name}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {line.hsn_code}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-semibold">
-                      {(line.quantity || 0).toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {formatCurrency(line.mrp || 0)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {formatCurrency(line.base_cost_price || 0)}
-                    </TableCell>
-                    <TableCell className="text-right font-semibold">
-                      {formatCurrency(line.base_amount || 0)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {Number(line.igst_percent || 0).toFixed(1)}%
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {formatCurrency(line.igst_amount || 0)}
-                    </TableCell>
-                    <TableCell className="text-right font-bold text-green-600">
-                      {formatCurrency(line.total_amount || 0)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {line.status}
-                      </Badge>
-                    </TableCell>
+          {/* Header showing total items count */}
+          <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-blue-800">
+                Showing all {po.poLines?.length || 0} line items
+              </span>
+              <span className="text-xs text-blue-600">
+                Scroll horizontally and vertically to view all data
+              </span>
+            </div>
+          </div>
+
+          {/* Enhanced scrollable table container */}
+          <div className="border border-slate-200 rounded-lg bg-white">
+            <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
+              <Table>
+                <TableHeader className="sticky top-0 bg-white border-b border-slate-200 z-10">
+                  <TableRow>
+                    <TableHead className="min-w-[60px]">#</TableHead>
+                    <TableHead className="min-w-[120px]">Article ID</TableHead>
+                    <TableHead className="min-w-[250px]">Article Name</TableHead>
+                    <TableHead className="min-w-[100px]">HSN Code</TableHead>
+                    <TableHead className="text-right min-w-[80px]">Qty</TableHead>
+                    <TableHead className="text-right min-w-[100px]">MRP</TableHead>
+                    <TableHead className="text-right min-w-[120px]">Cost Price</TableHead>
+                    <TableHead className="text-right min-w-[120px]">Base Amount</TableHead>
+                    <TableHead className="text-right min-w-[80px]">IGST %</TableHead>
+                    <TableHead className="text-right min-w-[100px]">IGST ₹</TableHead>
+                    <TableHead className="text-right min-w-[80px]">CESS %</TableHead>
+                    <TableHead className="text-right min-w-[100px]">CESS ₹</TableHead>
+                    <TableHead className="text-right min-w-[120px]">Total Amount</TableHead>
+                    <TableHead className="min-w-[100px]">Status</TableHead>
+                    <TableHead className="min-w-[120px]">Created By</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {po.poLines?.map((line) => (
+                    <TableRow key={line.id} className="hover:bg-slate-50">
+                      <TableCell className="font-medium">{line.line_number}</TableCell>
+                      <TableCell className="font-mono text-sm">{line.article_id}</TableCell>
+                      <TableCell title={line.article_name || ''} className="max-w-[250px]">
+                        <div className="truncate">{line.article_name}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">
+                          {line.hsn_code}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-semibold">
+                        {(line.quantity || 0).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {formatCurrency(line.mrp || 0)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {formatCurrency(line.base_cost_price || 0)}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold">
+                        {formatCurrency(line.base_amount || 0)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {Number(line.igst_percent || 0).toFixed(1)}%
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {formatCurrency(line.igst_amount || 0)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {Number(line.cess_percent || 0).toFixed(1)}%
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {formatCurrency(line.cess_amount || 0)}
+                      </TableCell>
+                      <TableCell className="text-right font-bold text-green-600">
+                        {formatCurrency(line.total_amount || 0)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">
+                          {line.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-slate-600">
+                        {line.created_by || 'System'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </div>
         </CardContent>
       </Card>

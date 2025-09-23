@@ -605,6 +605,11 @@ export type InsertZeptoPoLines = z.infer<typeof insertZeptoPoLinesSchema>;
 export const cityMallPoHeader = pgTable("city_mall_po_header", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   po_number: varchar("po_number", { length: 50 }).notNull(),
+  po_date: timestamp("po_date"),
+  po_expiry_date: timestamp("po_expiry_date"),
+  vendor_name: text("vendor_name"),
+  vendor_gstin: text("vendor_gstin"),
+  vendor_code: text("vendor_code"),
   status: varchar("status", { length: 20 }).default("Open"),
   total_quantity: integer("total_quantity").default(0),
   total_base_amount: decimal("total_base_amount", { precision: 15, scale: 2 }).default("0"),

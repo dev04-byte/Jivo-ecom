@@ -513,6 +513,13 @@ export class DatabaseStorage implements IStorage {
     this.sessionStore = new PostgresSessionStore({
       pool: pool as any,
       createTableIfMissing: true,
+      // Session store configuration for better timeout handling
+      pruneSessionInterval: 60 * 15, // Prune sessions every 15 minutes
+      tableName: 'session', // Explicit table name
+      errorLog: (err) => {
+        // Log session store errors but don't crash the app
+        console.warn('Session store warning:', err.message);
+      },
     });
   }
   // Enhanced user methods with session store
@@ -916,7 +923,57 @@ export class DatabaseStorage implements IStorage {
       console.error('❌ getAllPos: Error fetching BigBasket POs:', error);
     }
 
-    // PRIORITY 2: Fetch POs from po_master table (but exclude Blinkit, Zepto, and Flipkart to avoid duplicates)
+    // Fetch CityMall POs from city_mall_po_header (original CityMall data)
+    try {
+      const cityMallPos = await this.getAllCityMallPos();
+      console.log(`📊 getAllPos: Found ${cityMallPos.length} CityMall POs from city_mall_po_header (original data)`);
+
+      for (const cityMallPo of cityMallPos) {
+        // Use original CityMall data exactly as uploaded
+        const originalCityMallPo = {
+          id: 7000000 + cityMallPo.id, // CityMall IDs start from 7000000 to avoid conflicts
+          po_number: cityMallPo.po_number,
+          po_date: cityMallPo.po_date,
+          platform: { id: 7, pf_name: "CityMall" },
+          vendor_name: cityMallPo.vendor_name || '',
+          status: cityMallPo.status || 'pending',
+          created_at: cityMallPo.created_at,
+          updated_at: cityMallPo.updated_at,
+          order_date: cityMallPo.po_date,
+          expiry_date: cityMallPo.po_expiry_date,
+          city: '',
+          state: '',
+          region: '',
+          area: '',
+          buyer_name: 'CityMall',
+          total_amount: cityMallPo.total_amount ? parseFloat(cityMallPo.total_amount.toString()) : 0,
+          total_quantity: cityMallPo.total_quantity || 0,
+          total_items: cityMallPo.poLines?.length || 0,
+          orderItems: cityMallPo.poLines?.map((line, index) => ({
+            id: line.id || index,
+            po_id: cityMallPo.id,
+            pf_itemcode: line.article_id || '',
+            quantity: line.quantity || 0,
+            cost_price: line.base_cost_price ? parseFloat(line.base_cost_price.toString()) : 0,
+            mrp: line.mrp ? parseFloat(line.mrp.toString()) : 0,
+            po_line_number: line.line_number || index + 1,
+            product_description: line.article_name || '',
+            hsn_code: line.hsn_code || '',
+            total_cost: line.total_amount ? parseFloat(line.total_amount.toString()) : 0,
+            igst_percent: line.igst_percent ? parseFloat(line.igst_percent.toString()) : 0,
+            cess_percent: line.cess_percent ? parseFloat(line.cess_percent.toString()) : 0,
+            igst_amount: line.igst_amount ? parseFloat(line.igst_amount.toString()) : 0,
+            cess_amount: line.cess_amount ? parseFloat(line.cess_amount.toString()) : 0
+          })) || []
+        };
+
+        result.push(originalCityMallPo as any);
+      }
+    } catch (error) {
+      console.error('❌ getAllPos: Error fetching CityMall POs:', error);
+    }
+
+    // PRIORITY 2: Fetch POs from po_master table (but exclude platform-specific tables to avoid duplicates)
     const posWithPlatforms = await db
       .select({
         po: poMaster,
@@ -927,11 +984,12 @@ export class DatabaseStorage implements IStorage {
       .where(and(
         ne(poMaster.series, 'Blinkit'), // Exclude Blinkit POs since we're showing original data
         ne(poMaster.series, 'Zepto'),   // Exclude Zepto POs since we're showing original data
-        ne(poMaster.series, 'Flipkart') // Exclude Flipkart POs since we're showing original data
+        ne(poMaster.series, 'Flipkart'), // Exclude Flipkart POs since we're showing original data
+        ne(poMaster.series, 'CityMall') // Exclude CityMall POs since we're showing original data
       ))
       .orderBy(desc(poMaster.create_on));
 
-    console.log(`📊 getAllPos: Found ${posWithPlatforms.length} non-Blinkit/Zepto/Flipkart POs from po_master table`);
+    console.log(`📊 getAllPos: Found ${posWithPlatforms.length} non-platform-specific POs from po_master table`);
 
     // Process POs from po_master table
     for (const poWithPlatform of posWithPlatforms) {
@@ -1108,7 +1166,7 @@ export class DatabaseStorage implements IStorage {
     // Sort results by created_at descending (most recent uploads first)
     result.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
-    console.log(`📊 getAllPos: Returning ${result.length} POs total (po_master + Zepto + Blinkit + Swiggy + Flipkart + BigBasket)`);
+    console.log(`📊 getAllPos: Returning ${result.length} POs total (po_master + Zepto + Blinkit + Swiggy + Flipkart + BigBasket + CityMall)`);
 
     return result;
   }
@@ -1363,7 +1421,63 @@ export class DatabaseStorage implements IStorage {
       console.error(`❌ getPoById: Error checking BigBasket tables for PO ${id}:`, error);
     }
 
-    // PRIORITY 6: Check po_master table (unified POs)
+    // PRIORITY 6: Check CityMall-specific tables (original data)
+    console.log(`🔍 getPoById: Checking CityMall tables for PO ${id}...`);
+    try {
+      // Check if this is a CityMall ID (starts with 7000000)
+      let cityMallId = id;
+      if (id >= 7000000 && id < 8000000) {
+        cityMallId = id - 7000000; // Convert back to original CityMall ID
+        console.log(`🔍 getPoById: Detected CityMall ID mapping ${id} -> ${cityMallId}`);
+      }
+
+      const cityMallPo = await this.getCityMallPoById(cityMallId);
+      if (cityMallPo) {
+        console.log(`✅ getPoById: Found CityMall PO ${id} in city_mall_po_header (using original data)`);
+
+        // Return RAW CityMall table data PLUS frontend compatibility fields
+        const rawCityMallPo = {
+          // Add platform info for frontend identification
+          platform: { id: 7, pf_name: "CityMall" },
+          // All original city_mall_po_header columns exactly as they are
+          ...cityMallPo,
+          // Frontend compatibility fields (mapped from raw data)
+          order_date: cityMallPo.po_date,
+          expiry_date: cityMallPo.po_expiry_date,
+          city: '',
+          state: '',
+          serving_distributor: cityMallPo.vendor_name || '',
+          // Convert poLines to exact city_mall_po_lines column names + frontend compatibility
+          orderItems: cityMallPo.poLines.map(line => ({
+            // All original city_mall_po_lines columns exactly as they are
+            ...line,
+            // Frontend compatibility fields (mapped from raw data)
+            item_name: line.article_name || 'CityMall Product',
+            product_description: line.article_name,
+            quantity: line.quantity || 0,
+            basic_rate: line.base_cost_price?.toString() || '0',
+            landing_rate: line.base_cost_price?.toString() || '0',
+            total_amount: line.total_amount?.toString() || '0',
+            mrp: line.mrp?.toString() || '0',
+            hsn_code: line.hsn_code,
+            platform_code: line.article_id,
+            sap_code: line.article_id,
+            uom: 'PCS',
+            igst_percent: line.igst_percent,
+            cess_percent: line.cess_percent,
+            igst_amount: line.igst_amount?.toString() || '0',
+            cess_amount: line.cess_amount?.toString() || '0'
+          }))
+        };
+
+        console.log(`✅ getPoById: Returning RAW CityMall PO ${id} with ${rawCityMallPo.orderItems.length} items`);
+        return rawCityMallPo as any;
+      }
+    } catch (error) {
+      console.error(`❌ getPoById: Error checking CityMall tables for PO ${id}:`, error);
+    }
+
+    // PRIORITY 7: Check po_master table (unified POs)
     const masterPoResult = await db
       .select({
         master: poMaster,
@@ -2498,26 +2612,136 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createCityMallPo(header: InsertCityMallPoHeader, lines: InsertCityMallPoLines[]): Promise<CityMallPoHeader> {
-    return await db.transaction(async (tx) => {
-      // Insert into platform-specific tables
-      const [createdHeader] = await tx.insert(cityMallPoHeader).values(header).returning();
-      
+    console.log('💾 CityMall Storage: Using DIRECT SQL approach (bypassing Drizzle transactions)');
+    console.log('📋 CityMall Header to insert:', JSON.stringify(header, null, 2));
+    console.log('📝 CityMall Lines to insert:', lines.length, 'items');
+
+    // Get raw connection pool for direct SQL
+    const pool = (db as any)._.session.client;
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+      console.log('💾 Direct SQL transaction started');
+
+      // Insert header using direct SQL
+      console.log('💾 Inserting CityMall header with direct SQL...');
+      const headerInsertQuery = `
+        INSERT INTO city_mall_po_header (
+          po_number, po_date, po_expiry_date, vendor_name, vendor_gstin, vendor_code,
+          status, total_quantity, total_base_amount, total_igst_amount, total_cess_amount,
+          total_amount, unique_hsn_codes, created_by, uploaded_by, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        RETURNING *
+      `;
+
+      const headerValues = [
+        header.po_number,
+        header.po_date || null,
+        header.po_expiry_date || null,
+        header.vendor_name || null,
+        header.vendor_gstin || null,
+        header.vendor_code || null,
+        header.status || 'Open',
+        header.total_quantity || 0,
+        header.total_base_amount || '0.00',
+        header.total_igst_amount || '0.00',
+        header.total_cess_amount || '0.00',
+        header.total_amount || '0.00',
+        header.unique_hsn_codes || null,
+        header.created_by || 'system',
+        header.uploaded_by || null,
+        new Date(),
+        new Date()
+      ];
+
+      const headerResult = await client.query(headerInsertQuery, headerValues);
+      const createdHeader = headerResult.rows[0];
+      console.log('✅ CityMall Header inserted with ID:', createdHeader.id);
+
+      // Insert lines if any
       if (lines.length > 0) {
-        const linesWithHeaderId = lines.map(line => ({
-          ...line,
-          po_header_id: createdHeader.id
-        }));
-        await tx.insert(cityMallPoLines).values(linesWithHeaderId);
-        
-        // Also insert into consolidated po_master and po_lines tables
-        await this.insertIntoPoMasterAndLines(tx, 'CityMall', createdHeader, linesWithHeaderId);
-      } else {
-        // Insert header only into po_master
-        await this.insertIntoPoMasterAndLines(tx, 'CityMall', createdHeader, []);
+        console.log('💾 Inserting CityMall lines with direct SQL...');
+
+        for (const line of lines) {
+          const lineInsertQuery = `
+            INSERT INTO city_mall_po_lines (
+              po_header_id, line_number, article_id, article_name, hsn_code,
+              mrp, base_cost_price, quantity, base_amount, igst_percent,
+              cess_percent, igst_amount, cess_amount, total_amount,
+              status, created_by, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+          `;
+
+          const lineValues = [
+            createdHeader.id,
+            line.line_number || 1,
+            line.article_id || null,
+            line.article_name || null,
+            line.hsn_code || null,
+            line.mrp || null,
+            line.base_cost_price || null,
+            line.quantity || 0,
+            line.base_amount || null,
+            line.igst_percent || null,
+            line.cess_percent || null,
+            line.igst_amount || null,
+            line.cess_amount || null,
+            line.total_amount || null,
+            line.status || 'Pending',
+            line.created_by || 'system',
+            new Date()
+          ];
+
+          await client.query(lineInsertQuery, lineValues);
+        }
+
+        console.log('✅ CityMall Lines inserted:', lines.length, 'items');
       }
-      
-      return createdHeader;
-    });
+
+      // Verify insertion within transaction
+      console.log('🔍 Verifying CityMall insertion within direct SQL transaction...');
+      const verificationResult = await client.query(
+        'SELECT id, po_number, vendor_name FROM city_mall_po_header WHERE id = $1',
+        [createdHeader.id]
+      );
+
+      if (verificationResult.rows.length > 0) {
+        console.log('✅ Verification successful - CityMall header exists in transaction');
+        console.log('📋 Verified data:', verificationResult.rows[0]);
+      } else {
+        throw new Error('CityMall header verification failed within transaction');
+      }
+
+      await client.query('COMMIT');
+      console.log('🎉 Direct SQL transaction committed successfully');
+
+      // Final verification after commit
+      console.log('🔍 Final verification after commit...');
+      const finalVerificationResult = await client.query(
+        'SELECT * FROM city_mall_po_header WHERE id = $1',
+        [createdHeader.id]
+      );
+
+      if (finalVerificationResult.rows.length > 0) {
+        console.log('✅ Final verification successful - data persisted after commit');
+        return finalVerificationResult.rows[0] as CityMallPoHeader;
+      } else {
+        throw new Error('CityMall data not found after commit - rollback occurred');
+      }
+
+    } catch (error) {
+      console.error('❌ Direct SQL CityMall Storage Error:', error);
+      try {
+        await client.query('ROLLBACK');
+        console.log('🔄 Direct SQL transaction rolled back');
+      } catch (rollbackError) {
+        console.error('⚠️ Rollback failed:', rollbackError);
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async updateCityMallPo(id: number, header: Partial<InsertCityMallPoHeader>, lines?: InsertCityMallPoLines[]): Promise<CityMallPoHeader> {

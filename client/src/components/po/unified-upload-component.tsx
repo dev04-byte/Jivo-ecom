@@ -1386,7 +1386,6 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                       <div><span className="font-medium">Company:</span> {po.header?.vendor_name || 'Vendor details via platform'}</div>
                                       <div><span className="font-medium">Contact:</span> {po.header?.vendor_contact_name || 'Contact via platform'}</div>
                                       <div><span className="font-medium">Phone:</span> {po.header?.vendor_contact_phone || 'Contact via platform'}</div>
-                                      <div><span className="font-medium">Email:</span> {po.header?.vendor_contact_email || 'Contact via platform'}</div>
                                       <div><span className="font-medium">GST:</span> {po.header?.vendor_gst_no || 'GST info via platform'}</div>
                                       <div><span className="font-medium">PAN:</span> {po.header?.vendor_pan || 'PAN info via platform'}</div>
                                     </div>
@@ -1655,7 +1654,6 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                       ? parsedData.header.po_expiry_date.toString().split('T')[0]
                                       : 'Not available'
                                   }</span></div>
-                                  <div><span className="font-medium text-gray-600">Mode of Payment:</span> <span className="ml-2">{parsedData.header.mode_of_payment || 'Not available'}</span></div>
                                   {parsedData.header.credit_term && (
                                     <div><span className="font-medium text-gray-600">Credit Term:</span> <span className="ml-2">{parsedData.header.credit_term}</span></div>
                                   )}
@@ -1682,7 +1680,6 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                   <h6 className="font-semibold text-gray-800 pb-2 border-b">Vendor Information</h6>
                                   <div><span className="font-medium text-gray-600">Company:</span> <span className="ml-2">{parsedData.header.vendor_name || parsedData.header.supplier_name || 'Not available'}</span></div>
                                   <div><span className="font-medium text-gray-600">Contact:</span> <span className="ml-2">{parsedData.header.vendor_contact_name || parsedData.header.supplier_contact || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Email:</span> <span className="ml-2">{parsedData.header.vendor_contact_email || parsedData.header.supplier_email || 'Not available'}</span></div>
                                   <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.vendor_gst_no || parsedData.header.supplier_gstin || 'Not available'}</span></div>
                                   <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2">{parsedData.header.vendor_registered_address || parsedData.header.supplier_address || 'Not available'}</span></div>
                                 </div>
@@ -1746,9 +1743,20 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                             </CardDescription>
                           </CardHeader>
                           <CardContent>
-                            <div className="overflow-x-auto border rounded-lg max-h-96 overflow-y-auto">
+                            {/* Enhanced scrollable table container */}
+                            <div className="mb-3 p-2 bg-blue-50 rounded-lg border border-blue-200">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-medium text-blue-800">
+                                  Complete data preview with all fields
+                                </span>
+                                <span className="text-blue-600">
+                                  Scroll horizontally & vertically to view all data
+                                </span>
+                              </div>
+                            </div>
+                            <div className="overflow-x-auto border rounded-lg max-h-[70vh] overflow-y-auto bg-white">
                               <table className="min-w-full text-xs whitespace-nowrap">
-                                <thead className="bg-gray-50 sticky top-0 z-10">
+                                <thead className="bg-gray-50 sticky top-0 z-10 border-b border-gray-200">
                                   <tr className="border-b">
                                     {/* Check if this is Blinkit PDF data */}
                                     {parsedData.source === 'pdf' || selectedPlatformData?.id === 'blinkit' ? (
@@ -1790,11 +1798,20 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                       </>
                                     ) : selectedPlatformData?.id === 'citymall' ? (
                                       <>
-                                        <th className="text-left p-2 font-medium">Item</th>
-                                        <th className="text-left p-2 font-medium">Code</th>
-                                        <th className="text-left p-2 font-medium">Quantity</th>
-                                        <th className="text-left p-2 font-medium">Price</th>
-                                        <th className="text-left p-2 font-medium">Total</th>
+                                        <th className="text-left p-2 font-medium min-w-[60px]">Line #</th>
+                                        <th className="text-left p-2 font-medium min-w-[120px]">Article ID</th>
+                                        <th className="text-left p-2 font-medium min-w-[250px]">Article Name</th>
+                                        <th className="text-left p-2 font-medium min-w-[100px]">HSN Code</th>
+                                        <th className="text-left p-2 font-medium min-w-[80px]">Quantity</th>
+                                        <th className="text-left p-2 font-medium min-w-[100px]">MRP</th>
+                                        <th className="text-left p-2 font-medium min-w-[120px]">Base Cost Price</th>
+                                        <th className="text-left p-2 font-medium min-w-[120px]">Base Amount</th>
+                                        <th className="text-left p-2 font-medium min-w-[80px]">IGST %</th>
+                                        <th className="text-left p-2 font-medium min-w-[100px]">IGST Amount</th>
+                                        <th className="text-left p-2 font-medium min-w-[80px]">CESS %</th>
+                                        <th className="text-left p-2 font-medium min-w-[100px]">CESS Amount</th>
+                                        <th className="text-left p-2 font-medium min-w-[120px]">Total Amount</th>
+                                        <th className="text-left p-2 font-medium min-w-[100px]">Status</th>
                                       </>
                                     ) : selectedPlatformData?.id === 'flipkart' ? (
                                       <>
@@ -1937,11 +1954,30 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                         </>
                                       ) : selectedPlatformData?.id === 'citymall' ? (
                                         <>
-                                          <td className="p-2">{line.article_name || 'Not available'}</td>
-                                          <td className="p-2">{line.article_id || 'Not available'}</td>
-                                          <td className="p-2">{line.quantity || 0}</td>
-                                          <td className="p-2">₹{line.base_cost_price || '0.00'}</td>
-                                          <td className="p-2">₹{line.total_amount || '0.00'}</td>
+                                          <td className="p-2 font-medium">{line.line_number || index + 1}</td>
+                                          <td className="p-2 font-mono text-xs">{line.article_id || 'Not available'}</td>
+                                          <td className="p-2 max-w-[250px] truncate" title={line.article_name}>
+                                            {line.article_name || 'Not available'}
+                                          </td>
+                                          <td className="p-2">
+                                            <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
+                                              {line.hsn_code || 'N/A'}
+                                            </span>
+                                          </td>
+                                          <td className="p-2 text-center font-medium">{line.quantity || 0}</td>
+                                          <td className="p-2 text-right">{line.mrp ? `₹${Number(line.mrp).toFixed(2)}` : '₹0.00'}</td>
+                                          <td className="p-2 text-right">{line.base_cost_price ? `₹${Number(line.base_cost_price).toFixed(2)}` : '₹0.00'}</td>
+                                          <td className="p-2 text-right font-medium">{line.base_amount ? `₹${Number(line.base_amount).toFixed(2)}` : '₹0.00'}</td>
+                                          <td className="p-2 text-center">{line.igst_percent ? `${Number(line.igst_percent).toFixed(1)}%` : '0%'}</td>
+                                          <td className="p-2 text-right">{line.igst_amount ? `₹${Number(line.igst_amount).toFixed(2)}` : '₹0.00'}</td>
+                                          <td className="p-2 text-center">{line.cess_percent ? `${Number(line.cess_percent).toFixed(1)}%` : '0%'}</td>
+                                          <td className="p-2 text-right">{line.cess_amount ? `₹${Number(line.cess_amount).toFixed(2)}` : '₹0.00'}</td>
+                                          <td className="p-2 text-right font-bold text-green-600">{line.total_amount ? `₹${Number(line.total_amount).toFixed(2)}` : '₹0.00'}</td>
+                                          <td className="p-2">
+                                            <span className="px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded">
+                                              {line.status || 'Pending'}
+                                            </span>
+                                          </td>
                                         </>
                                       ) : selectedPlatformData?.id === 'flipkart' ? (
                                         <>
@@ -2220,6 +2256,60 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                   </>
                 ) : (
                   "Ready to import Swiggy PO data"
+                )}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Import Data into Database Button - Bottom of page for CityMall POs */}
+      {currentStep === 'preview' && selectedPlatformData?.id === 'citymall' && parsedData && (
+        <Card className="mt-6">
+          <CardContent className="pt-6">
+            <div className="flex justify-center">
+              <Button
+                onClick={() => {
+                  console.log('🟢 CityMall Import Button Clicked');
+                  console.log('📋 Parsed Data:', parsedData);
+                  console.log('🏢 Selected Platform:', selectedPlatform);
+                  console.log('📊 Data Structure:', {
+                    hasHeader: !!parsedData?.header,
+                    hasLines: !!parsedData?.lines,
+                    linesCount: parsedData?.lines?.length || 0,
+                    headerKeys: parsedData?.header ? Object.keys(parsedData.header) : [],
+                    firstLineKeys: parsedData?.lines?.[0] ? Object.keys(parsedData.lines[0]) : []
+                  });
+                  handleImportData();
+                }}
+                disabled={importMutation.isPending}
+                size="lg"
+                className="bg-green-600 hover:bg-green-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 px-8 py-3"
+              >
+                {importMutation.isPending ? (
+                  <>
+                    <Database className="mr-2 h-5 w-5 animate-spin" />
+                    Importing CityMall Data...
+                  </>
+                ) : (
+                  <>
+                    <Database className="mr-2 h-5 w-5" />
+                    Import Data into Database
+                  </>
+                )}
+              </Button>
+            </div>
+            <div className="mt-4 text-center">
+              <p className="text-sm text-gray-600">
+                {parsedData.lines?.length ? (
+                  <>
+                    Ready to import <strong>{parsedData.lines.length}</strong> CityMall line items
+                    {parsedData.header?.total_amount && (
+                      <> | Total Amount: <strong>₹{Number(parsedData.header.total_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></>
+                    )}
+                  </>
+                ) : (
+                  "Ready to import CityMall PO data"
                 )}
               </p>
             </div>

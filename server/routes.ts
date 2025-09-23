@@ -41,6 +41,7 @@ import { insertPfPoSchema, insertPfOrderItemsSchema, insertFlipkartGroceryPoHead
 import { z } from "zod";
 import { seedTestData } from "./seed-data";
 import { parseFlipkartGroceryPO, parseZeptoPO, parseCityMallPO, parseBlinkitPO } from "./csv-parser";
+import { parseCityMallPO as parseCityMallExcelPO } from "./citymall-parser";
 import { parseFlipkartGroceryExcelPO } from "./flipkart-excel-parser";
 import { parseBlinkitPDF, validateBlinkitPDFData } from "./blinkit-pdf-parser";
 import { extractBlinkitDataFromPDF } from "./blinkit-pdf-extractor";
@@ -1589,13 +1590,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
-      
-      const csvContent = req.file.buffer.toString("utf-8");
-      const parsedData = parseCityMallPO(csvContent, "system");
+
+      const filename = req.file.originalname || '';
+      const isExcelFile = filename.toLowerCase().includes('.xlsx') || filename.toLowerCase().includes('.xls');
+
+      let parsedData;
+
+      if (isExcelFile) {
+        // Use Excel parser for .xlsx/.xls files
+        parsedData = parseCityMallExcelPO(req.file.buffer, "system");
+      } else {
+        // Use CSV parser for .csv files
+        const csvContent = req.file.buffer.toString("utf-8");
+        parsedData = parseCityMallPO(csvContent, "system", filename);
+      }
+
       res.json(parsedData);
     } catch (error) {
-      console.error("Error parsing City Mall CSV:", error);
-      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to parse CSV" });
+      console.error("Error parsing City Mall file:", error);
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to parse file" });
     }
   });
 
@@ -2611,7 +2624,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         } else if (platformParam === "citymall") {
           detectedVendor = "citymall";
-          parsedData = await parseCityMallPO(req.file.buffer.toString('utf-8'), uploadedBy, filename);
+
+          // Check if it's an Excel file
+          if (filename.endsWith('.xls') || filename.endsWith('.xlsx')) {
+            console.log("Processing CityMall Excel file...");
+            parsedData = parseCityMallExcelPO(req.file.buffer, uploadedBy);
+          } else {
+            console.log("Processing CityMall CSV file...");
+            parsedData = await parseCityMallPO(req.file.buffer.toString('utf-8'), uploadedBy, filename);
+          }
         } else if (platformParam === "swiggy") {
           detectedVendor = "swiggy";
 
@@ -2706,7 +2727,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         } else if (filename.includes('city') || filename.includes('mall')) {
           detectedVendor = "citymall";
-          parsedData = await parseCityMallPO(req.file.buffer.toString('utf-8'), uploadedBy, filename);
+
+          // Check if it's an Excel file
+          if (filename.endsWith('.xls') || filename.endsWith('.xlsx')) {
+            console.log("Processing CityMall Excel file (filename detection)...");
+            parsedData = parseCityMallExcelPO(req.file.buffer, uploadedBy);
+          } else {
+            console.log("Processing CityMall CSV file (filename detection)...");
+            parsedData = await parseCityMallPO(req.file.buffer.toString('utf-8'), uploadedBy, filename);
+          }
         } else if (filename.includes('blinkit')) {
           detectedVendor = "blinkit";
           console.log("Processing Blinkit file with multiple POs (filename detection)...");
@@ -2784,7 +2813,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               // Convert multiple PO structure to single PO for fallback detection
               return zeptoResult.poList.length > 0 ? zeptoResult.poList[0] : { header: {}, lines: [] };
             } },
-            { name: "citymall", parser: (buffer: Buffer, user: string) => parseCityMallPO(buffer.toString('utf-8'), user, filename) },
+            { name: "citymall", parser: (buffer: Buffer, user: string) => {
+              // Try Excel first, then fall back to CSV
+              if (filename.endsWith('.xls') || filename.endsWith('.xlsx')) {
+                return parseCityMallExcelPO(buffer, user);
+              } else {
+                return parseCityMallPO(buffer.toString('utf-8'), user, filename);
+              }
+            } },
             { name: "blinkit", parser: (buffer: Buffer, user: string) => {
               const result = parseBlinkitPO(buffer, user);
               // Convert multiple PO structure to single PO for fallback detection
@@ -3517,7 +3553,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log('📋 Creating Zepto PO:', cleanHeader.po_number);
           createdPo = await storage.createZeptoPo(cleanHeader, cleanLines);
         } else if (vendor === 'citymall') {
+          console.log('🏢 Creating CityMall PO:', cleanHeader.po_number);
+          console.log('📊 CityMall Header Data:', JSON.stringify(cleanHeader, null, 2));
+          console.log('📝 CityMall Lines Count:', cleanLines.length);
+          console.log('📝 CityMall First Line:', JSON.stringify(cleanLines[0], null, 2));
+
+          // Validate required fields for CityMall
+          if (!cleanHeader.po_number) {
+            throw new Error('PO number is required for CityMall');
+          }
+
           createdPo = await storage.createCityMallPo(cleanHeader, cleanLines);
+          console.log('✅ CityMall PO Created Successfully:', createdPo.id);
         } else if (vendor === 'blinkit') {
           // Filter and clean header data to match ACTUAL database schema
           const actualDbHeaderFields = [

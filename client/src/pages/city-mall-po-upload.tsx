@@ -113,19 +113,19 @@ export default function CityMallPoUpload() {
           <CardHeader>
             <CardTitle className="flex items-center space-x-2">
               <Upload size={20} />
-              <span>Upload CSV File</span>
+              <span>Upload File</span>
             </CardTitle>
             <CardDescription>
-              Select a City Mall CSV file to import purchase order data
+              Select a City Mall CSV or Excel file to import purchase order data
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <Label htmlFor="csvFile">CSV File</Label>
+              <Label htmlFor="csvFile">Upload File (CSV or Excel)</Label>
               <Input
                 id="csvFile"
                 type="file"
-                accept=".csv"
+                accept=".csv,.xlsx,.xls"
                 onChange={handleFileChange}
                 className="mt-1"
               />
@@ -150,7 +150,7 @@ export default function CityMallPoUpload() {
               ) : (
                 <>
                   <Upload className="mr-2 h-4 w-4" />
-                  Parse CSV File
+                  Parse File
                 </>
               )}
             </Button>
