@@ -7,8 +7,10 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // FORCE SERVER RESTART - DEALSHARE FUNCTIONALITY ACTIVE
-console.log('🚀 SERVER RESTART - DEALSHARE PO VIEW FUNCTIONALITY ACTIVE - ' + new Date().toISOString());
-console.log('📦 Dealshare features: Upload, View, Manage POs - Build timestamp:', new Date().toISOString());
+console.log('🚀 SERVER RESTART - DEALSHARE PO FUNCTIONALITY LIVE - ' + new Date().toISOString());
+console.log('📦 Dealshare features: Upload, Preview (Fixed), View, Manage POs');
+console.log('✅ LOCAL CONFIRMED WORKING - Vendor: Jivo Mart, Buyer: MERABO LABS');
+console.log('🎯 RENDER DEPLOYMENT VERSION: 2025-09-24-21:32 - Build:', new Date().toISOString());
 
 const app = express();
 // Increase body parser limits for large CSV imports (bulk Swiggy POs)
