@@ -1015,9 +1015,9 @@ export type InsertZomatoPoItems = z.infer<typeof insertZomatoPoItemsSchema>;
 export const dealsharePoHeader = pgTable("dealshare_po_header", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   po_number: varchar("po_number", { length: 100 }).notNull().unique(),
-  po_created_date: timestamp("po_created_date"),
-  po_delivery_date: timestamp("po_delivery_date"),
-  po_expiry_date: timestamp("po_expiry_date"),
+  po_created_date: timestamp("po_created_date", { mode: 'string' }),
+  po_delivery_date: timestamp("po_delivery_date", { mode: 'string' }),
+  po_expiry_date: timestamp("po_expiry_date", { mode: 'string' }),
   shipped_by: text("shipped_by"),
   shipped_by_address: text("shipped_by_address"),
   shipped_by_gstin: varchar("shipped_by_gstin", { length: 20 }),
@@ -1034,12 +1034,12 @@ export const dealsharePoHeader = pgTable("dealshare_po_header", {
   total_quantity: decimal("total_quantity", { precision: 15, scale: 2 }).default("0"),
   total_gross_amount: decimal("total_gross_amount", { precision: 15, scale: 2 }).default("0"),
   uploaded_by: varchar("uploaded_by", { length: 100 }).default("admin"),
-  created_at: timestamp("created_at").defaultNow(),
-  updated_at: timestamp("updated_at").defaultNow()
+  created_at: timestamp("created_at", { mode: 'string' }).defaultNow(),
+  updated_at: timestamp("updated_at", { mode: 'string' }).defaultNow()
 });
 
-// Dealshare PO Items Table
-export const dealsharePoItems = pgTable("dealshare_po_items", {
+// Dealshare PO Lines Table
+export const dealsharePoLines = pgTable("dealshare_po_lines", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   po_header_id: integer("po_header_id").notNull().references(() => dealsharePoHeader.id, { onDelete: "cascade" }),
   line_number: integer("line_number").notNull(),
@@ -1052,20 +1052,20 @@ export const dealsharePoItems = pgTable("dealshare_po_items", {
   gst_percent: decimal("gst_percent", { precision: 5, scale: 2 }),
   cess_percent: decimal("cess_percent", { precision: 5, scale: 2 }),
   gross_amount: decimal("gross_amount", { precision: 12, scale: 2 }),
-  created_at: timestamp("created_at").defaultNow(),
-  updated_at: timestamp("updated_at").defaultNow()
+  created_at: timestamp("created_at", { mode: 'string' }).defaultNow(),
+  updated_at: timestamp("updated_at", { mode: 'string' }).defaultNow()
 });
 
 // Dealshare Relations
 export const dealsharePoHeaderRelations = relations(dealsharePoHeader, ({ many }) => ({
-  poItems: many(dealsharePoItems),
+  poLines: many(dealsharePoLines),
   attachments: many(dealshareAttachments),
   comments: many(dealshareComments)
 }));
 
-export const dealsharePoItemsRelations = relations(dealsharePoItems, ({ one }) => ({
+export const dealsharePoLinesRelations = relations(dealsharePoLines, ({ one }) => ({
   po: one(dealsharePoHeader, {
-    fields: [dealsharePoItems.po_header_id],
+    fields: [dealsharePoLines.po_header_id],
     references: [dealsharePoHeader.id],
   }),
 }));
@@ -1077,7 +1077,7 @@ export const insertDealsharePoHeaderSchema = createInsertSchema(dealsharePoHeade
   updated_at: true
 });
 
-export const insertDealsharePoItemsSchema = createInsertSchema(dealsharePoItems).omit({
+export const insertDealsharePoLinesSchema = createInsertSchema(dealsharePoLines).omit({
   id: true,
   po_header_id: true,
   created_at: true,
@@ -1086,8 +1086,8 @@ export const insertDealsharePoItemsSchema = createInsertSchema(dealsharePoItems)
 
 export type DealsharePoHeader = typeof dealsharePoHeader.$inferSelect;
 export type InsertDealsharePoHeader = z.infer<typeof insertDealsharePoHeaderSchema>;
-export type DealsharePoItems = typeof dealsharePoItems.$inferSelect;
-export type InsertDealsharePoItems = z.infer<typeof insertDealsharePoItemsSchema>;
+export type DealsharePoLines = typeof dealsharePoLines.$inferSelect;
+export type InsertDealsharePoLines = z.infer<typeof insertDealsharePoLinesSchema>;
 
 // Secondary Sales Header Table
 export const secondarySalesHeader = pgTable("secondary_sales_header", {

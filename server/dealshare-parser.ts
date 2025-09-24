@@ -53,42 +53,86 @@ export async function parseDealsharePO(buffer: Buffer, uploadedBy: string) {
       uploaded_by: uploadedBy
     };
 
-    // Extract PO Number from row 3 (index 2)
-    const poNumberRow = jsonData[2] as any[];
+    // Extract PO Number from row 2 (index 1)
+    const poNumberRow = jsonData[1] as any[];
     if (poNumberRow && poNumberRow[0]) {
       header.po_number = String(poNumberRow[0]);
     }
 
-    // Extract PO dates from rows 5, 7, 9 (indices 4, 6, 8) - but only if they are valid numbers
-    const dateRows = [
-      { row: jsonData[4], field: 'po_created_date' },
-      { row: jsonData[6], field: 'po_delivery_date' },
-      { row: jsonData[8], field: 'po_expiry_date' }
-    ];
+    // Debug: Log first 10 rows to understand structure
+    console.log('🔍 DealShare Excel Debug: First 10 rows structure:');
+    for (let i = 0; i < Math.min(10, jsonData.length); i++) {
+      console.log(`Row ${i + 1}:`, jsonData[i]);
+    }
 
-    for (const { row, field } of dateRows) {
+    // Extract PO dates - Look for date patterns in the first column of multiple rows
+    console.log('🔍 DealShare: Searching for dates in Excel data...');
+
+    const dateFields = ['po_created_date', 'po_delivery_date', 'po_expiry_date'];
+    let dateFieldIndex = 0;
+
+    // Search through rows for date patterns
+    for (let i = 0; i < jsonData.length && dateFieldIndex < dateFields.length; i++) {
+      const row = jsonData[i];
       if (row && Array.isArray(row) && row[0]) {
-        const dateValue = String(row[0]);
-        const excelDate = parseFloat(dateValue);
-        if (!isNaN(excelDate) && excelDate > 0 && excelDate < 100000) {
-          try {
-            (header as any)[field] = excelDateToJSDate(excelDate);
-          } catch (error) {
-            console.warn(`Failed to convert date for field ${field}:`, dateValue);
-            (header as any)[field] = null;
+        const cellValue = String(row[0]).toLowerCase();
+
+        // Check if this row contains a date label
+        if (cellValue.includes('created') || cellValue.includes('date') ||
+            (i >= 3 && i <= 7)) { // Also check traditional positions
+
+          const dateValue = String(row[0]);
+          console.log(`🔍 Found potential date in row ${i + 1}: "${dateValue}"`);
+
+          // First try parsing as text date (DD-MM-YYYY format) - this should be checked first!
+          if (dateValue.match(/^\d{2}-\d{2}-\d{4}$/)) {
+            try {
+              const parts = dateValue.split('-');
+              const day = parseInt(parts[0]);
+              const month = parseInt(parts[1]) - 1; // Month is 0-indexed in JavaScript
+              const year = parseInt(parts[2]);
+              // Create date in UTC to avoid timezone conversion issues
+              const jsDate = new Date(Date.UTC(year, month, day));
+
+              console.log(`🔍 Parsing text date: ${dateValue} → Day: ${day}, Month: ${month + 1}, Year: ${year}`);
+              console.log(`🔍 Result date: ${jsDate}`);
+
+              const field = dateFields[dateFieldIndex];
+              (header as any)[field] = jsDate;
+              console.log(`✅ Converted ${field} from text: ${dateValue} → ${jsDate.toISOString()}`);
+              dateFieldIndex++;
+            } catch (error) {
+              console.warn(`Failed to parse text date: ${dateValue}`, error);
+            }
+          }
+          // If it's not a text date, try to parse as Excel serial date
+          else {
+            const excelDate = parseFloat(dateValue);
+            if (!isNaN(excelDate) && excelDate > 0 && excelDate < 100000) {
+              try {
+                const field = dateFields[dateFieldIndex];
+                (header as any)[field] = excelDateToJSDate(excelDate);
+                console.log(`✅ Converted ${field}: ${dateValue} → ${(header as any)[field]}`);
+                dateFieldIndex++;
+              } catch (error) {
+                console.warn(`Failed to convert date for field ${dateFields[dateFieldIndex]}:`, dateValue);
+              }
+            }
           }
         }
       }
     }
 
-    // Extract Shipped By info from rows 3-10
+    console.log(`🔍 DealShare: Extracted ${dateFieldIndex} dates from Excel`);
+
+    // Extract Shipped By info from rows 2-9
     if (poNumberRow && poNumberRow[1]) {
       header.shipped_by = String(poNumberRow[1]);
     }
-    
+
     // Combine address from multiple rows
     const addressParts = [];
-    const addressRows = [jsonData[3], jsonData[4], jsonData[5], jsonData[6]];
+    const addressRows = [jsonData[2], jsonData[3], jsonData[4], jsonData[5]];
     for (const row of addressRows) {
       if (row && Array.isArray(row) && row[1]) {
         addressParts.push(String(row[1]).trim());
@@ -97,7 +141,7 @@ export async function parseDealsharePO(buffer: Buffer, uploadedBy: string) {
     header.shipped_by_address = addressParts.filter(part => part).join(', ');
 
     // Extract GSTIN and phone from specific rows
-    const gstinRow = jsonData[8] as any[];
+    const gstinRow = jsonData[7] as any[];
     if (gstinRow && gstinRow[1]) {
       const gstinMatch = String(gstinRow[1]).match(/GSTIN:\s*([^\s]+)/);
       if (gstinMatch) {
@@ -105,7 +149,7 @@ export async function parseDealsharePO(buffer: Buffer, uploadedBy: string) {
       }
     }
 
-    const phoneRow = jsonData[7] as any[];
+    const phoneRow = jsonData[6] as any[];
     if (phoneRow && phoneRow[1]) {
       const phoneMatch = String(phoneRow[1]).match(/Contact No\.:\s*([^\s]+)/);
       if (phoneMatch) {
@@ -113,8 +157,8 @@ export async function parseDealsharePO(buffer: Buffer, uploadedBy: string) {
       }
     }
 
-    // Extract Vendor Code from row 10
-    const vendorRow = jsonData[9] as any[];
+    // Extract Vendor Code from row 9
+    const vendorRow = jsonData[8] as any[];
     if (vendorRow && vendorRow[1]) {
       const vendorMatch = String(vendorRow[1]).match(/Vendor Code:\s*([^\s]+)/);
       if (vendorMatch) {
@@ -122,8 +166,8 @@ export async function parseDealsharePO(buffer: Buffer, uploadedBy: string) {
       }
     }
 
-    // Extract Shipped To info from row 3 and following
-    const shippedToRow = jsonData[2] as any[];
+    // Extract Shipped To info from row 2 and following
+    const shippedToRow = jsonData[1] as any[];
     if (shippedToRow && shippedToRow[3]) {
       header.shipped_to = String(shippedToRow[3]);
     }
@@ -138,7 +182,7 @@ export async function parseDealsharePO(buffer: Buffer, uploadedBy: string) {
     header.shipped_to_address = shippedToAddressParts.filter(part => part).join(', ');
 
     // Extract Shipped To GSTIN
-    const shippedToGstinRow = jsonData[5] as any[];
+    const shippedToGstinRow = jsonData[4] as any[];
     if (shippedToGstinRow && shippedToGstinRow[3]) {
       const gstinMatch = String(shippedToGstinRow[3]).match(/GSTIN:\s*([^\s]+)/);
       if (gstinMatch) {
@@ -146,8 +190,8 @@ export async function parseDealsharePO(buffer: Buffer, uploadedBy: string) {
       }
     }
 
-    // Extract Bill To info from row 3 and following
-    const billToRow = jsonData[2] as any[];
+    // Extract Bill To info from row 2 and following
+    const billToRow = jsonData[1] as any[];
     if (billToRow && billToRow[7]) {
       header.bill_to = String(billToRow[7]);
     }
@@ -162,7 +206,7 @@ export async function parseDealsharePO(buffer: Buffer, uploadedBy: string) {
     header.bill_to_address = billToAddressParts.filter(part => part).join(', ');
 
     // Extract Bill To GSTIN
-    const billToGstinRow = jsonData[6] as any[];
+    const billToGstinRow = jsonData[5] as any[];
     if (billToGstinRow && billToGstinRow[7]) {
       const gstinMatch = String(billToGstinRow[7]).match(/GSTIN:\s*([^\s]+)/);
       if (gstinMatch) {
@@ -170,8 +214,8 @@ export async function parseDealsharePO(buffer: Buffer, uploadedBy: string) {
       }
     }
 
-    // Extract Comments from row 11
-    const commentsRow = jsonData[10] as any[];
+    // Extract Comments from row 10
+    const commentsRow = jsonData[9] as any[];
     if (commentsRow && commentsRow[0]) {
       const commentMatch = String(commentsRow[0]).match(/Comments:\s*(.+)/);
       if (commentMatch) {
@@ -179,13 +223,13 @@ export async function parseDealsharePO(buffer: Buffer, uploadedBy: string) {
       }
     }
 
-    // Parse line items starting from row 13 (index 12)
-    // Row 12 contains headers: SKU, Product Name, GST%, CESS%, HSN Code (Units), Quantity, MRP (Tax Inclusive), '', Buying Price, Gross Amount
+    // Parse line items starting from row 12 (index 11)
+    // Row 11 contains headers: SKU, Product Name, GST%, CESS%, HSN Code (Units), Quantity, MRP (Tax Inclusive), '', Buying Price, Gross Amount
     const lines: DealsharePoItem[] = [];
     let totalQuantity = 0;
     let totalGrossAmount = 0;
 
-    for (let i = 12; i < jsonData.length; i++) {
+    for (let i = 11; i < jsonData.length; i++) {
       const row = jsonData[i] as any[];
       if (!row || row.length < 6) continue;
 
@@ -209,16 +253,16 @@ export async function parseDealsharePO(buffer: Buffer, uploadedBy: string) {
           productStr === '' || productStr === '...') continue;
 
       const line: DealsharePoItem = {
-        line_number: i - 11, // Adjust for header rows
+        line_number: i - 10, // Adjust for header rows (line items start from row 12, so subtract 10 to get line number starting from 1)
         sku: String(sku).trim(),
         product_name: String(productName || '').trim(),
         hsn_code: String(hsnCode || '').trim(),
         quantity: parseInt(String(quantity || '0')) || 0,
-        mrp_tax_inclusive: String(parseFloat(String(mrpTaxInclusive || '0')).toFixed(2)),
-        buying_price: String(parseFloat(String(buyingPrice || '0')).toFixed(2)),
-        gst_percent: String(parseFloat(String(gstPercent || '0')).toFixed(2)),
-        cess_percent: String(parseFloat(String(cessPercent || '0')).toFixed(2)),
-        gross_amount: String(parseFloat(String(grossAmount || '0')).toFixed(2))
+        mrp_tax_inclusive: String(parseFloat(String(mrpTaxInclusive || '0').replace(/,/g, '')).toFixed(2)),
+        buying_price: String(parseFloat(String(buyingPrice || '0').replace(/,/g, '')).toFixed(2)),
+        gst_percent: String(parseFloat(String(gstPercent || '0').replace(/,/g, '')).toFixed(2)),
+        cess_percent: String(parseFloat(String(cessPercent || '0').replace(/,/g, '')).toFixed(2)),
+        gross_amount: String(parseFloat(String(grossAmount || '0').replace(/,/g, '')).toFixed(2))
       };
 
       // Additional filter check after line creation
@@ -231,7 +275,7 @@ export async function parseDealsharePO(buffer: Buffer, uploadedBy: string) {
 
       // Calculate totals
       totalQuantity += line.quantity || 0;
-      totalGrossAmount += parseFloat(line.gross_amount || '0');
+      totalGrossAmount += parseFloat(String(grossAmount || '0').replace(/,/g, ''));
 
       console.log(`Parsed Dealshare line item ${line.line_number}:`, {
         sku: line.sku,

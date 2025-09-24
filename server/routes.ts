@@ -2887,6 +2887,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
             displayHeader = { ...displayHeader, vendor_name: null };
           }
 
+          // Fix date display for DealShare - ensure Date objects are formatted properly for preview
+          if (detectedVendor === "dealshare") {
+            const formatDateForDisplay = (date: any) => {
+              if (!date) return null;
+              if (date instanceof Date) {
+                // Format date to YYYY-MM-DD for display
+                return date.toISOString().split('T')[0];
+              }
+              if (typeof date === 'string') {
+                try {
+                  return new Date(date).toISOString().split('T')[0];
+                } catch {
+                  return date; // Return as-is if can't parse
+                }
+              }
+              return date;
+            };
+
+            console.log('🔍 DealShare Preview: Converting dates for display');
+            console.log('Original dates:', {
+              po_created_date: displayHeader.po_created_date,
+              po_delivery_date: displayHeader.po_delivery_date,
+              po_expiry_date: displayHeader.po_expiry_date
+            });
+
+            displayHeader = {
+              ...displayHeader,
+              po_created_date: formatDateForDisplay(displayHeader.po_created_date),
+              po_delivery_date: formatDateForDisplay(displayHeader.po_delivery_date),
+              po_expiry_date: formatDateForDisplay(displayHeader.po_expiry_date)
+            };
+
+            console.log('Formatted dates:', {
+              po_created_date: displayHeader.po_created_date,
+              po_delivery_date: displayHeader.po_delivery_date,
+              po_expiry_date: displayHeader.po_expiry_date
+            });
+          }
+
           res.json({
             header: displayHeader,
             lines: parsedData.lines,
@@ -3098,16 +3137,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const parsed = Date.parse(dateValue);
           return isNaN(parsed) ? null : new Date(parsed);
         }
+        // Handle number (Unix timestamp, Excel date number)
+        if (typeof dateValue === 'number') {
+          // Check if it's likely an Excel date serial number (common range: 40000-50000 for 2009-2037)
+          if (dateValue > 25000 && dateValue < 100000) {
+            const epochDiff = 25568; // Excel to Unix epoch difference
+            const millisecondsPerDay = 86400000;
+            return new Date((dateValue - epochDiff) * millisecondsPerDay);
+          }
+          // Otherwise treat as Unix timestamp
+          return new Date(dateValue);
+        }
         return null;
       };
 
-      console.log("Import request data:", { 
-        vendor, 
-        hasPoList: !!poList, 
-        hasHeader: !!header, 
+      // Comprehensive function to clean ALL date fields in an object
+      const cleanDateFieldsInObject = (obj: any): any => {
+        if (!obj || typeof obj !== 'object') return obj;
+
+        const cleanedObj = { ...obj };
+
+        // List of ALL possible date field patterns - EXPANDED
+        const dateFieldPatterns = [
+          '_date', '_at', 'date_', 'Date', '_time', 'time_',
+          'created_at', 'updated_at', 'deleted_at', 'timestamp',
+          'po_created_date', 'po_delivery_date', 'po_expiry_date',
+          'order_date', 'appointment_date', 'expiry_date',
+          'po_date', 'po_release_date', 'expected_delivery_date',
+          'required_by_date', 'delivery_date', 'uploaded_at',
+          // Add more specific patterns for all possible timestamp variations
+          'invoice_date', 'shipped_date', 'received_date', 'cancelled_date',
+          'start_date', 'end_date', 'due_date', 'modified_at'
+        ];
+
+        // Check each field in the object
+        Object.keys(cleanedObj).forEach(key => {
+          const shouldConvertField = dateFieldPatterns.some(pattern =>
+            key.includes(pattern) || key.endsWith('_date') || key.endsWith('_at') || key.startsWith('date_') || key.endsWith('_time') || key.startsWith('time_')
+          );
+
+          // AGGRESSIVE: Also convert any field that contains a value that looks like an ISO date string
+          let forceConvert = false;
+          if (!shouldConvertField && typeof cleanedObj[key] === 'string' && cleanedObj[key].length > 10) {
+            const isoDatePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?$/;
+            if (isoDatePattern.test(cleanedObj[key])) {
+              forceConvert = true;
+              console.log(`🔧 FORCE converting field '${key}' - detected ISO date string: ${cleanedObj[key]}`);
+            }
+          }
+
+          if ((shouldConvertField || forceConvert) && cleanedObj[key] !== undefined) {
+            if (cleanedObj[key] === null || cleanedObj[key] === "") {
+              cleanedObj[key] = null;
+            } else {
+              const originalValue = cleanedObj[key];
+              const originalType = typeof originalValue;
+              const convertedValue = safeConvertDate(originalValue);
+              const convertedType = typeof convertedValue;
+              console.log(`🔄 Auto-converting date field '${key}': ${originalValue} (${originalType}) -> ${convertedValue} (${convertedType})`);
+              cleanedObj[key] = convertedValue;
+            }
+          }
+        });
+
+        return cleanedObj;
+      };
+
+      console.log("Import request data:", {
+        vendor,
+        hasPoList: !!poList,
+        hasHeader: !!header,
         hasLines: !!lines,
         bodyKeys: Object.keys(req.body)
       });
+
+      // CRITICAL DEBUG: Check what fields are in our data before any processing
+      try {
+        console.log('🔍 CRITICAL DEBUG: Raw header data received:');
+        console.log('Header keys:', Object.keys(header || {}));
+        console.log('Header values sample:', header ? Object.keys(header).slice(0, 5).map(k => `${k}: ${header[k]} (${typeof header[k]})`).join(', ') : 'none');
+        console.log('🔍 CRITICAL DEBUG: Raw lines data received (first 2):');
+        console.log('Lines count:', lines?.length || 0);
+        if (lines && lines.length > 0) {
+          console.log('First line keys:', Object.keys(lines[0] || {}));
+          console.log('First line values sample:', Object.keys(lines[0] || {}).slice(0, 3).map(k => `${k}: ${lines[0][k]} (${typeof lines[0][k]})`).join(', '));
+        }
+      } catch (debugError) {
+        console.error('🚨 CRITICAL DEBUG failed:', debugError.message);
+      }
       
       // Handle Zepto multi-PO structure
       if (vendor === "zepto" && poList && Array.isArray(poList)) {
@@ -3450,36 +3567,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // If the method doesn't exist, continue - it means no duplicate check is implemented yet
       }
 
-      // Clean and convert dates to proper Date objects
+      // NO DATE CONVERSION - Schema now accepts string values directly
+      console.log('🔍 STEP 1: Using direct string values for dates (no conversion needed)');
+
       const cleanHeader = { ...header };
+      const cleanLines = lines.map((line: any) => ({ ...line }));
 
-      // Convert all possible date fields with proper null handling
-      const dateFields = ['order_date', 'po_expiry_date', 'po_date', 'po_release_date', 'expected_delivery_date', 'appointment_date', 'expiry_date'];
-      dateFields.forEach(field => {
-        if (cleanHeader[field] !== undefined) {
-          if (cleanHeader[field] === null || cleanHeader[field] === "") {
-            cleanHeader[field] = null; // Explicitly set to null for nullable fields
-          } else {
-            cleanHeader[field] = safeConvertDate(cleanHeader[field]);
-          }
-        }
-      });
-
-      // Clean lines data with proper null handling
-      const cleanLines = lines.map((line: any) => {
-        const cleanLine = { ...line };
-        const lineDateFields = ['required_by_date', 'po_expiry_date', 'delivery_date'];
-        lineDateFields.forEach(field => {
-          if (cleanLine[field] !== undefined) {
-            if (cleanLine[field] === null || cleanLine[field] === "") {
-              cleanLine[field] = null; // Explicitly set to null for nullable fields
-            } else {
-              cleanLine[field] = safeConvertDate(cleanLine[field]);
-            }
-          }
-        });
-        return cleanLine;
-      });
+      console.log('🔍 STEP 2: Data ready for insertion without date conversion');
 
       // Convert all platform data to unified format and use po_master table
       const platformMap: Record<string, number> = {
@@ -3649,7 +3743,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else if (vendor === 'zomato') {
           createdPo = await storage.createZomatoPo(cleanHeader, cleanLines);
         } else if (vendor === 'dealshare') {
-          createdPo = await storage.createDealsharePo(cleanHeader, cleanLines);
+          console.log('🔍 DealShare: Before createDealsharePo call');
+
+          // Prepare DealShare header with proper date fields
+          // Preserve Excel-extracted dates (Date objects) and only set defaults if truly missing
+          const now = new Date();
+          const safeHeader = {
+            ...cleanHeader,
+            // Preserve Excel-extracted dates or use defaults
+            po_created_date: cleanHeader.po_created_date || now.toISOString(),
+            po_delivery_date: cleanHeader.po_delivery_date || cleanHeader.delivery_date || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+            po_expiry_date: cleanHeader.po_expiry_date || cleanHeader.expiry_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+          };
+
+          console.log('🔍 DealShare: Enhanced header with proper dates:', {
+            po_number: safeHeader.po_number,
+            po_created_date: safeHeader.po_created_date,
+            po_delivery_date: safeHeader.po_delivery_date,
+            po_expiry_date: safeHeader.po_expiry_date
+          });
+
+          // Convert Date objects from Excel parsing to ISO strings for database (schema uses mode: 'string')
+          Object.keys(safeHeader).forEach(key => {
+            if (safeHeader[key] instanceof Date) {
+              console.log(`🔧 DealShare: Converting header field ${key} from Date object to ISO string`);
+              safeHeader[key] = safeHeader[key].toISOString();
+            }
+          });
+
+          const safeLines = cleanLines?.map(line => {
+            const safeLine = { ...line };
+            Object.keys(safeLine).forEach(key => {
+              if (safeLine[key] instanceof Date) {
+                console.log(`🔧 DealShare: Converting line field ${key} from Date object to ISO string`);
+                safeLine[key] = safeLine[key].toISOString();
+              }
+            });
+            return safeLine;
+          }) || [];
+
+          console.log('🔍 DealShare: Calling createDealsharePo with enhanced header');
+          createdPo = await storage.createDealsharePo(safeHeader, safeLines);
         } else {
           // Fallback to unified po_master table for platforms without specific methods
           createdPo = await storage.createPoInExistingTables(masterData, linesData);
