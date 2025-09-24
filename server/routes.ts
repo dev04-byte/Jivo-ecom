@@ -2906,23 +2906,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
             };
 
             console.log('🔍 DealShare Preview: Converting dates for display');
-            console.log('Original dates:', {
-              po_created_date: displayHeader.po_created_date,
-              po_delivery_date: displayHeader.po_delivery_date,
-              po_expiry_date: displayHeader.po_expiry_date
-            });
+            console.log('Original Dealshare header:', displayHeader);
 
+            // Map Dealshare fields correctly for preview
             displayHeader = {
               ...displayHeader,
+              // Map dates
               po_created_date: formatDateForDisplay(displayHeader.po_created_date),
               po_delivery_date: formatDateForDisplay(displayHeader.po_delivery_date),
-              po_expiry_date: formatDateForDisplay(displayHeader.po_expiry_date)
+              po_expiry_date: formatDateForDisplay(displayHeader.po_expiry_date),
+              order_date: formatDateForDisplay(displayHeader.po_created_date),
+              expiry_date: formatDateForDisplay(displayHeader.po_expiry_date),
+
+              // Map vendor/buyer information correctly
+              vendor_name: displayHeader.shipped_by || displayHeader.vendor_name || 'Dealshare Vendor',
+              vendor_address: displayHeader.shipped_by_address || displayHeader.vendor_address || '',
+              vendor_gstin: displayHeader.shipped_by_gstin || displayHeader.vendor_gstin || '',
+              vendor_phone: displayHeader.shipped_by_phone || displayHeader.vendor_phone || '',
+
+              // Buyer should be the entity receiving goods (shipped_to)
+              buyer_name: displayHeader.shipped_to || displayHeader.buyer_name || 'Dealshare',
+              buyer_address: displayHeader.shipped_to_address || displayHeader.buyer_address || '',
+              buyer_gstin: displayHeader.shipped_to_gstin || displayHeader.buyer_gstin || '',
+
+              // Bill To is separate - this is who gets billed
+              bill_to_name: displayHeader.bill_to || 'Dealshare',
+              bill_to_address: displayHeader.bill_to_address || '',
+              bill_to_gstin: displayHeader.bill_to_gstin || '',
+
+              // Ensure PO details are present
+              po_number: displayHeader.po_number,
+              status: displayHeader.status || 'Open',
+              total_items: displayHeader.total_items,
+              total_quantity: displayHeader.total_quantity,
+              total_amount: displayHeader.total_gross_amount || displayHeader.total_amount
             };
 
-            console.log('Formatted dates:', {
-              po_created_date: displayHeader.po_created_date,
-              po_delivery_date: displayHeader.po_delivery_date,
-              po_expiry_date: displayHeader.po_expiry_date
+            console.log('Mapped Dealshare preview data:', {
+              po_number: displayHeader.po_number,
+              vendor: displayHeader.vendor_name,
+              buyer: displayHeader.buyer_name,
+              bill_to: displayHeader.bill_to_name,
+              dates: {
+                created: displayHeader.po_created_date,
+                delivery: displayHeader.po_delivery_date,
+                expiry: displayHeader.po_expiry_date
+              }
             });
           }
 
