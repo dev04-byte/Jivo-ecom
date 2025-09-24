@@ -139,7 +139,7 @@ import {
   zomatoPoHeader,
   zomatoPoItems,
   dealsharePoHeader,
-  dealsharePoItems,
+  dealsharePoLines,
   secondarySalesHeader,
   secondarySalesItems,
   zeptoAttachments,
@@ -973,6 +973,62 @@ export class DatabaseStorage implements IStorage {
       console.error('❌ getAllPos: Error fetching CityMall POs:', error);
     }
 
+    // Fetch Dealshare POs from dealshare_po_header (original Dealshare data)
+    try {
+      const dealsharePos = await this.getAllDealsharePos();
+      console.log(`📊 getAllPos: Found ${dealsharePos.length} Dealshare POs from dealshare_po_header (original data)`);
+
+      for (const dealsharePo of dealsharePos) {
+        // Use original Dealshare data exactly as uploaded
+        const originalDealsharePo = {
+          id: 8000000 + dealsharePo.id, // Dealshare IDs start from 8000000 to avoid conflicts
+          po_number: dealsharePo.po_number,
+          po_date: dealsharePo.po_created_date,
+          platform: { id: 8, pf_name: "Dealshare" },
+          vendor_name: dealsharePo.shipped_by || '',
+          status: 'Active',
+          created_at: dealsharePo.created_at,
+          updated_at: dealsharePo.updated_at,
+          order_date: dealsharePo.po_created_date,
+          expiry_date: dealsharePo.po_expiry_date,
+          city: '',
+          state: '',
+          serving_distributor: dealsharePo.shipped_by || '',
+          vendor_po_number: dealsharePo.po_number,
+          bill_amount: dealsharePo.total_gross_amount || '0',
+          total_amount: dealsharePo.total_gross_amount || '0',
+          total_quantity: dealsharePo.total_quantity || '0',
+          total_items: dealsharePo.total_items || 0,
+          orderItems: dealsharePo.poItems?.map((line, index) => ({
+            id: line.id || (3000000 + dealsharePo.id * 100 + index), // Generate unique ID
+            po_id: dealsharePo.id,
+            platform_id: 8,
+            product_id: null,
+            item_code: line.sku || '',
+            item_name: line.product_name || '',
+            item_description: line.product_name || '',
+            sap_code: line.sku || '',
+            quantity: line.quantity || 0,
+            basic_rate: line.buying_price?.toString() || '0',
+            landing_rate: line.buying_price?.toString() || '0',
+            status: 'Pending',
+            platform_code: line.sku || '',
+            uom: 'PCS',
+            gst_rate: line.gst_percent?.toString() || '0',
+            total_amount: line.gross_amount?.toString() || '0',
+            hsn_code: line.hsn_code || '',
+            mrp: line.mrp_tax_inclusive?.toString() || '0',
+            cost_price: parseFloat(line.buying_price?.toString() || '0'),
+            po_line_number: line.line_number || index + 1
+          })) || []
+        };
+
+        result.push(originalDealsharePo as any);
+      }
+    } catch (error) {
+      console.error('❌ getAllPos: Error fetching Dealshare POs:', error);
+    }
+
     // PRIORITY 2: Fetch POs from po_master table (but exclude platform-specific tables to avoid duplicates)
     const posWithPlatforms = await db
       .select({
@@ -1166,7 +1222,7 @@ export class DatabaseStorage implements IStorage {
     // Sort results by created_at descending (most recent uploads first)
     result.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
-    console.log(`📊 getAllPos: Returning ${result.length} POs total (po_master + Zepto + Blinkit + Swiggy + Flipkart + BigBasket + CityMall)`);
+    console.log(`📊 getAllPos: Returning ${result.length} POs total (po_master + Zepto + Blinkit + Swiggy + Flipkart + BigBasket + CityMall + Dealshare)`);
 
     return result;
   }
@@ -1477,7 +1533,65 @@ export class DatabaseStorage implements IStorage {
       console.error(`❌ getPoById: Error checking CityMall tables for PO ${id}:`, error);
     }
 
-    // PRIORITY 7: Check po_master table (unified POs)
+    // PRIORITY 7: Check Dealshare-specific tables (original data)
+    console.log(`🔍 getPoById: Checking Dealshare tables for PO ${id}...`);
+    try {
+      // Check if this is a Dealshare ID (starts with 8000000)
+      let dealshareId = id;
+      if (id >= 8000000 && id < 9000000) {
+        dealshareId = id - 8000000; // Convert back to original Dealshare ID
+        console.log(`🔍 getPoById: Detected Dealshare ID mapping ${id} -> ${dealshareId}`);
+      }
+
+      const dealsharePo = await this.getDealsharePoById(dealshareId);
+      if (dealsharePo) {
+        console.log(`✅ getPoById: Found Dealshare PO ${id} in dealshare_po_header (using original data)`);
+
+        // Return RAW Dealshare table data PLUS frontend compatibility fields
+        const rawDealsharePo = {
+          // Add platform info for frontend identification
+          platform: { id: 8, pf_name: "Dealshare" },
+          // All original dealshare_po_header columns exactly as they are
+          ...dealsharePo,
+          // Frontend compatibility fields (mapped from raw data)
+          po_date: dealsharePo.po_created_date,
+          order_date: dealsharePo.po_created_date,
+          expiry_date: dealsharePo.po_expiry_date,
+          city: '',
+          state: '',
+          serving_distributor: dealsharePo.shipped_by || '',
+          vendor_name: dealsharePo.shipped_by || '',
+          total_amount: dealsharePo.total_gross_amount?.toString() || '0',
+          // Convert poItems to orderItems for frontend compatibility
+          orderItems: dealsharePo.poItems.map(line => ({
+            // All original dealshare_po_lines columns exactly as they are
+            ...line,
+            // Frontend compatibility fields (mapped from raw data)
+            item_name: line.product_name || 'Dealshare Product',
+            product_description: line.product_name,
+            item_code: line.sku || '',
+            quantity: line.quantity || 0,
+            basic_rate: line.buying_price?.toString() || '0',
+            landing_rate: line.buying_price?.toString() || '0',
+            total_amount: line.gross_amount?.toString() || '0',
+            hsn_code: line.hsn_code || '',
+            mrp: line.mrp_tax_inclusive?.toString() || '0',
+            platform_code: line.sku || '',
+            sap_code: line.sku || '',
+            uom: 'PCS',
+            gst_rate: line.gst_percent?.toString() || '0',
+            cess_rate: line.cess_percent?.toString() || '0'
+          }))
+        };
+
+        console.log(`✅ getPoById: Returning RAW Dealshare PO ${id} with ${rawDealsharePo.orderItems.length} items`);
+        return rawDealsharePo as any;
+      }
+    } catch (error) {
+      console.error(`❌ getPoById: Error checking Dealshare tables for PO ${id}:`, error);
+    }
+
+    // PRIORITY 8: Check po_master table (unified POs)
     const masterPoResult = await db
       .select({
         master: poMaster,
@@ -1566,7 +1680,7 @@ export class DatabaseStorage implements IStorage {
       return convertedPo as any;
     }
 
-    // PRIORITY 3: Fallback to original pf_po table lookup
+    // PRIORITY 4: Fallback to original pf_po table lookup
     console.log(`🔍 getPoById: Checking pf_po table for PO ${id}...`);
     const [result] = await db
       .select({
@@ -4234,7 +4348,7 @@ export class DatabaseStorage implements IStorage {
     
     const result = [];
     for (const po of pos) {
-      const poItems = await db.select().from(dealsharePoItems).where(eq(dealsharePoItems.po_header_id, po.id));
+      const poItems = await db.select().from(dealsharePoLines).where(eq(dealsharePoLines.po_header_id, po.id));
       result.push({
         ...po,
         poItems
@@ -4251,7 +4365,7 @@ export class DatabaseStorage implements IStorage {
       return undefined;
     }
 
-    const poItems = await db.select().from(dealsharePoItems).where(eq(dealsharePoItems.po_header_id, po.id));
+    const poItems = await db.select().from(dealsharePoLines).where(eq(dealsharePoLines.po_header_id, po.id));
     
     return {
       ...po,
@@ -4266,21 +4380,34 @@ export class DatabaseStorage implements IStorage {
 
   async createDealsharePo(header: InsertDealsharePoHeader, items: InsertDealsharePoItems[]): Promise<DealsharePoHeader> {
     return await db.transaction(async (tx) => {
+      // Schema now accepts string values directly - no conversion needed
+      console.log('🔍 STORAGE: Using header data directly (string timestamps supported)');
+
       // Insert into platform-specific tables
       const [createdPo] = await tx.insert(dealsharePoHeader).values(header).returning();
       
       if (items.length > 0) {
-        const itemsWithPoId = items.map(item => ({
-          ...item,
-          po_header_id: createdPo.id
-        }));
-        await tx.insert(dealsharePoItems).values(itemsWithPoId);
-        
-        // Also insert into consolidated po_master and po_lines tables
-        await this.insertIntoPoMasterAndLines(tx, 'Dealshare', createdPo, itemsWithPoId);
+        const itemsWithPoId = items.map(item => {
+          const safeItem = { ...item, po_header_id: createdPo.id };
+
+          // Convert any timestamp fields in items that might be strings
+          const itemDateFields = ['created_at', 'updated_at'];
+          itemDateFields.forEach(field => {
+            if (safeItem[field] && typeof safeItem[field] === 'string') {
+              console.log(`🔧 STORAGE FIX: Converting item ${field} from string "${safeItem[field]}" to Date object`);
+              safeItem[field] = new Date(safeItem[field]);
+            }
+          });
+
+          return safeItem;
+        });
+        await tx.insert(dealsharePoLines).values(itemsWithPoId);
+
+        // Commented out: Skip inserting into consolidated po_master and po_lines tables
+        // await this.insertIntoPoMasterAndLines(tx, 'Dealshare', createdPo, itemsWithPoId);
       } else {
-        // Insert header only into po_master
-        await this.insertIntoPoMasterAndLines(tx, 'Dealshare', createdPo, []);
+        // Commented out: Skip inserting header only into po_master
+        // await this.insertIntoPoMasterAndLines(tx, 'Dealshare', createdPo, []);
       }
       
       return createdPo;
@@ -4296,13 +4423,13 @@ export class DatabaseStorage implements IStorage {
         .returning();
 
       if (items && items.length > 0) {
-        await tx.delete(dealsharePoItems).where(eq(dealsharePoItems.po_header_id, id));
+        await tx.delete(dealsharePoLines).where(eq(dealsharePoLines.po_header_id, id));
         
         const itemsWithPoId = items.map(item => ({
           ...item,
           po_header_id: id
         }));
-        await tx.insert(dealsharePoItems).values(itemsWithPoId);
+        await tx.insert(dealsharePoLines).values(itemsWithPoId);
       }
 
       return updatedPo;
@@ -4311,7 +4438,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteDealsharePo(id: number): Promise<void> {
     await db.transaction(async (tx) => {
-      await tx.delete(dealsharePoItems).where(eq(dealsharePoItems.po_header_id, id));
+      await tx.delete(dealsharePoLines).where(eq(dealsharePoLines.po_header_id, id));
       await tx.delete(dealsharePoHeader).where(eq(dealsharePoHeader.id, id));
     });
   }

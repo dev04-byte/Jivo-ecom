@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { BigBasketPODetailView } from "@/components/po/bigbasket-po-detail-view";
+import { DealsharePODetailView } from "@/components/po/dealshare-po-detail-view";
 import type { PfPo, PfMst, PfOrderItems } from "@shared/schema";
 
 interface POWithDetails extends Omit<PfPo, 'platform'> {
@@ -237,10 +238,13 @@ export default function PODetails() {
             </Card>
           </div>
 
-          {/* Order Items - Use BigBasket view for BigBasket POs */}
+          {/* Order Items - Use platform-specific views */}
           {po.platform?.pf_name?.toLowerCase().includes('bigbasket') ||
            po.platform?.pf_name?.toLowerCase() === 'bigbasket' ? (
             <BigBasketPODetailView po={po as any} orderItems={po.orderItems as any} />
+          ) : po.platform?.pf_name?.toLowerCase().includes('dealshare') ||
+               po.platform?.pf_name?.toLowerCase() === 'dealshare' ? (
+            <DealsharePODetailView po={po as any} orderItems={po.orderItems as any} />
           ) : (
             <Card>
               <CardHeader>

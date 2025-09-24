@@ -79,6 +79,53 @@ export interface FlipkartGroceryPoLines {
   updated_at?: Date | null;
 }
 
-export type FlipkartGroceryPO = FlipkartGroceryPoHeader & { 
-  poLines: FlipkartGroceryPoLines[] 
+export type FlipkartGroceryPO = FlipkartGroceryPoHeader & {
+  poLines: FlipkartGroceryPoLines[]
+};
+
+export interface DealsharePoHeader {
+  id: number;
+  po_number: string;
+  po_created_date?: Date | null;
+  po_delivery_date?: Date | null;
+  po_expiry_date?: Date | null;
+  shipped_by?: string | null;
+  shipped_by_address?: string | null;
+  shipped_by_gstin?: string | null;
+  shipped_by_phone?: string | null;
+  vendor_code?: string | null;
+  shipped_to?: string | null;
+  shipped_to_address?: string | null;
+  shipped_to_gstin?: string | null;
+  bill_to?: string | null;
+  bill_to_address?: string | null;
+  bill_to_gstin?: string | null;
+  comments?: string | null;
+  total_items?: number | null;
+  total_quantity?: string | null;
+  total_gross_amount?: string | null;
+  uploaded_by?: string | null;
+  created_at?: Date | null;
+  updated_at?: Date | null;
+}
+
+export interface DealsharePoLines {
+  id: number;
+  po_header_id: number;
+  line_number: number;
+  sku?: string | null;
+  product_name?: string | null;
+  hsn_code?: string | null;
+  quantity?: number | null;
+  mrp_tax_inclusive?: string | null;
+  buying_price?: string | null;
+  gst_percent?: string | null;
+  cess_percent?: string | null;
+  gross_amount?: string | null;
+  created_at?: Date | null;
+  updated_at?: Date | null;
+}
+
+export type DealsharePO = DealsharePoHeader & {
+  poItems: DealsharePoLines[]
 };
