@@ -751,9 +751,7 @@ export const blinkitPoLinesRelations = relations(blinkitPoLines, ({ one }) => ({
 
 // Insert schemas for Blinkit PO tables
 export const insertBlinkitPoHeaderSchema = createInsertSchema(blinkitPoHeader).omit({
-  id: true,
-  created_at: true,
-  updated_at: true
+  id: true
 });
 
 export const insertBlinkitPoLinesSchema = createInsertSchema(blinkitPoLines).omit({
