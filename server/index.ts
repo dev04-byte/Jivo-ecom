@@ -6,8 +6,9 @@ import dotenv from "dotenv";
 // Load environment variables
 dotenv.config();
 
-// FORCE SERVER RESTART - LIVE FIX V5 ACTIVE
-console.log('🚀 SERVER RESTART - LIVE FIX V5 LOADED - LINE ITEMS EXTRACTION FIXED');
+// FORCE SERVER RESTART - DEALSHARE FUNCTIONALITY ACTIVE
+console.log('🚀 SERVER RESTART - DEALSHARE PO VIEW FUNCTIONALITY ACTIVE - ' + new Date().toISOString());
+console.log('📦 Dealshare features: Upload, View, Manage POs - Build timestamp:', new Date().toISOString());
 
 const app = express();
 // Increase body parser limits for large CSV imports (bulk Swiggy POs)
