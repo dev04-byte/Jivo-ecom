@@ -209,59 +209,74 @@ export function SwiggyPoDetails({ po, open, onOpenChange }: SwiggyPoDetailsProps
           <h3 className="text-lg font-semibold">Complete Line Items Data</h3>
         </div>
 
-        <div className="border rounded-lg overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12">Line #</TableHead>
-                <TableHead>Item Code</TableHead>
-                <TableHead>HSN Code</TableHead>
-                <TableHead>Product UPC</TableHead>
-                <TableHead>Product Description</TableHead>
-                <TableHead className="text-right">UOM</TableHead>
-                <TableHead className="text-right">Qty</TableHead>
-                <TableHead className="text-right">MRP</TableHead>
-                <TableHead className="text-right">Basic Cost</TableHead>
-                <TableHead className="text-right">Tax</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {po.poLines.map((line) => (
-                <TableRow key={line.id}>
-                  <TableCell>{line.line_number}</TableCell>
-                  <TableCell className="font-mono text-xs">{line.item_code}</TableCell>
-                  <TableCell>
-                    {line.hsn_code ? (
-                      <Badge variant="outline" className="text-xs">
-                        {line.hsn_code}
-                      </Badge>
-                    ) : (
-                      <span className="text-gray-400 text-xs">Via Platform</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{line.item_code}</TableCell>
-                  <TableCell className="max-w-xs truncate" title={line.item_description}>
-                    {line.item_description}
-                  </TableCell>
-                  <TableCell className="text-right">Unit</TableCell>
-                  <TableCell className="text-right font-medium">{line.quantity || 0}</TableCell>
-                  <TableCell className="text-right font-medium">
-                    {line.mrp ? `₹${(typeof line.mrp === 'string' ? parseFloat(line.mrp) : line.mrp).toFixed(2)}` : '₹0.00'}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {line.unit_base_cost ? `₹${(typeof line.unit_base_cost === 'string' ? parseFloat(line.unit_base_cost) : line.unit_base_cost).toFixed(2)}` : '₹0.00'}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {line.tax_amount ? `₹${(typeof line.tax_amount === 'string' ? parseFloat(line.tax_amount) : line.tax_amount).toFixed(2)}` : '₹0.00'}
-                  </TableCell>
-                  <TableCell className="text-right font-medium bg-green-50">
-                    {line.line_total ? `₹${(typeof line.line_total === 'string' ? parseFloat(line.line_total) : line.line_total).toFixed(2)}` : '₹0.00'}
-                  </TableCell>
+        {/* Header showing total items count */}
+        <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-blue-800">
+              Showing all {po.poLines?.length || 0} line items
+            </span>
+            <span className="text-xs text-blue-600">
+              Scroll horizontally and vertically to view all data
+            </span>
+          </div>
+        </div>
+
+        {/* Enhanced scrollable table container */}
+        <div className="border border-slate-200 rounded-lg bg-white">
+          <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
+            <Table>
+              <TableHeader className="sticky top-0 bg-white border-b border-slate-200 z-10">
+                <TableRow>
+                  <TableHead className="w-12 min-w-[50px]">Line #</TableHead>
+                  <TableHead className="min-w-[120px]">Item Code</TableHead>
+                  <TableHead className="min-w-[100px]">HSN Code</TableHead>
+                  <TableHead className="min-w-[120px]">Product UPC</TableHead>
+                  <TableHead className="min-w-[250px]">Product Description</TableHead>
+                  <TableHead className="text-right min-w-[60px]">UOM</TableHead>
+                  <TableHead className="text-right min-w-[80px]">Qty</TableHead>
+                  <TableHead className="text-right min-w-[100px]">MRP</TableHead>
+                  <TableHead className="text-right min-w-[120px]">Basic Cost</TableHead>
+                  <TableHead className="text-right min-w-[100px]">Tax</TableHead>
+                  <TableHead className="text-right min-w-[120px]">Amount</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {po.poLines.map((line) => (
+                  <TableRow key={line.id} className="hover:bg-slate-50">
+                    <TableCell>{line.line_number}</TableCell>
+                    <TableCell className="font-mono text-xs">{line.item_code}</TableCell>
+                    <TableCell>
+                      {line.hsn_code ? (
+                        <Badge variant="outline" className="text-xs">
+                          {line.hsn_code}
+                        </Badge>
+                      ) : (
+                        <span className="text-gray-400 text-xs">Via Platform</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{line.item_code}</TableCell>
+                    <TableCell title={line.item_description} className="max-w-[250px]">
+                      <div className="truncate">{line.item_description}</div>
+                    </TableCell>
+                    <TableCell className="text-right">Unit</TableCell>
+                    <TableCell className="text-right font-medium">{line.quantity || 0}</TableCell>
+                    <TableCell className="text-right font-medium">
+                      {line.mrp ? `₹${(typeof line.mrp === 'string' ? parseFloat(line.mrp) : line.mrp).toFixed(2)}` : '₹0.00'}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {line.unit_base_cost ? `₹${(typeof line.unit_base_cost === 'string' ? parseFloat(line.unit_base_cost) : line.unit_base_cost).toFixed(2)}` : '₹0.00'}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {line.tax_amount ? `₹${(typeof line.tax_amount === 'string' ? parseFloat(line.tax_amount) : line.tax_amount).toFixed(2)}` : '₹0.00'}
+                    </TableCell>
+                    <TableCell className="text-right font-medium bg-green-50">
+                      {line.line_total ? `₹${(typeof line.line_total === 'string' ? parseFloat(line.line_total) : line.line_total).toFixed(2)}` : '₹0.00'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </div>
 
         {/* Additional Line Item Details Section */}

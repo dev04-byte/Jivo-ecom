@@ -20,9 +20,17 @@ const sslEnabled = process.env.NODE_ENV === 'production' ||
 export const pool = new Pool({
   connectionString,
   ssl: sslEnabled ? { rejectUnauthorized: false } : undefined,
-  max: 20, // Maximum number of clients in the pool
-  idleTimeoutMillis: 30000, // How long a client is allowed to remain idle
-  connectionTimeoutMillis: 10000, // How long to wait for a connection
+  max: 5, // Further reduce max connections for stability
+  min: 1, // Reduce minimum connections
+  idleTimeoutMillis: 30000, // 30 seconds idle timeout
+  connectionTimeoutMillis: 10000, // 10 seconds connection timeout
+  acquireTimeoutMillis: 10000, // 10 seconds to acquire connection
+  // Retry logic for connection failures
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 5000,
+  // Add statement timeout
+  statement_timeout: 30000, // 30 seconds for queries
+  query_timeout: 30000, // 30 seconds for queries
 });
 
 // One Drizzle client for the whole app

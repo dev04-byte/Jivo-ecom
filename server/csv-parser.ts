@@ -565,15 +565,26 @@ interface ParsedCityMallPO {
 }
 
 export function parseCityMallPO(csvContent: string, uploadedBy: string, filename?: string): ParsedCityMallPO {
-  const records = parse(csvContent, {
-    columns: true,
-    skip_empty_lines: true,
-    trim: true
-  });
+  try {
+    console.log('Starting CityMall CSV parsing...');
+    console.log('Filename:', filename);
+    console.log('Content length:', csvContent.length);
 
-  if (records.length === 0) {
-    throw new Error('CSV file is empty or invalid');
-  }
+    const records = parse(csvContent, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true
+    });
+
+    console.log('Parsed records count:', records.length);
+    if (records.length > 0) {
+      console.log('First record keys:', Object.keys(records[0]));
+      console.log('First record:', records[0]);
+    }
+
+    if (records.length === 0) {
+      throw new Error('CSV file is empty or invalid');
+    }
 
   // Extract PO number from filename or use a generated one
   let poNumber = `CM${Date.now()}`;
@@ -667,6 +678,10 @@ export function parseCityMallPO(csvContent: string, uploadedBy: string, filename
   };
 
   return { header, lines };
+  } catch (error) {
+    console.error('Error parsing CityMall CSV:', error);
+    throw error;
+  }
 }
 
 export function parseBlinkitPO(fileContent: Buffer, uploadedBy: string): {

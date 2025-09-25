@@ -1624,16 +1624,31 @@ export function PlatformPOForm() {
               </div>
             ) : (
               <>
-                <div className="space-y-6">
-                  {lineItems.map((item) => (
-                    <LineItemRow
-                      key={item.tempId}
-                      item={item}
-                      platformId={form.watch("platform")}
-                      onUpdate={(updates) => updateLineItem(item.tempId, updates)}
-                      onRemove={() => removeLineItem(item.tempId)}
-                    />
-                  ))}
+                {/* Header showing total items count */}
+                <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-blue-800">
+                      Showing all {lineItems.length} line items
+                    </span>
+                    <span className="text-xs text-blue-600">
+                      Scroll horizontally and vertically to view all data
+                    </span>
+                  </div>
+                </div>
+
+                {/* Scrollable line items container */}
+                <div className="max-h-[80vh] overflow-y-auto overflow-x-auto border border-slate-200 rounded-lg bg-slate-50/50">
+                  <div className="min-w-[1200px] space-y-6 p-4">
+                    {lineItems.map((item) => (
+                      <LineItemRow
+                        key={item.tempId}
+                        item={item}
+                        platformId={form.watch("platform")}
+                        onUpdate={(updates) => updateLineItem(item.tempId, updates)}
+                        onRemove={() => removeLineItem(item.tempId)}
+                      />
+                    ))}
+                  </div>
                 </div>
                 
                 {/* Enhanced Summary */}
