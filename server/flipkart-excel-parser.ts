@@ -340,8 +340,13 @@ function parseDate(dateStr: string | undefined): Date | undefined {
       const excelEpoch = new Date(1900, 0, 1);
       const millisecondsPerDay = 24 * 60 * 60 * 1000;
       const result = new Date(excelEpoch.getTime() + (serialNumber - 2) * millisecondsPerDay);
-      console.log(`📅 Converted Excel serial ${serialNumber} to date:`, result.toISOString().split('T')[0]);
-      return result;
+      if (!isNaN(result.getTime())) {
+        console.log(`📅 Converted Excel serial ${serialNumber} to date:`, result.toISOString().split('T')[0]);
+        return result;
+      } else {
+        console.warn(`⚠️ Invalid Excel serial date: ${serialNumber}`);
+        return new Date(); // Return current date as fallback
+      }
     }
 
     // Handle different date formats

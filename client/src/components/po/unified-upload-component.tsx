@@ -87,12 +87,16 @@ interface UnifiedUploadComponentProps {
 
 // Helper function to safely display data without N/A fallbacks
 const safeDisplay = (value: any, defaultValue: string = '', type?: 'currency' | 'weight' | 'percent'): string => {
-  if (value === null || value === undefined || value === '' || value === 'N/A' || (value === '0' && type === 'currency')) {
+  // Handle null, undefined, empty string, 'N/A', 'Not available', or zero currency values
+  if (value === null || value === undefined || value === '' ||
+      value === 'N/A' || value === 'Not available' || value === 'Not Available' ||
+      (value === '0' && type === 'currency') || (value === 0 && type === 'currency')) {
     return defaultValue;
   }
 
   const stringValue = String(value).trim();
-  if (stringValue === '' || stringValue === 'N/A') {
+  if (stringValue === '' || stringValue === 'N/A' ||
+      stringValue === 'Not available' || stringValue === 'Not Available') {
     return defaultValue;
   }
 
@@ -119,25 +123,128 @@ const safeDisplay = (value: any, defaultValue: string = '', type?: 'currency' | 
 
   if (type === 'percent') {
     const numValue = parseFloat(stringValue.replace(/[^0-9.-]/g, ''));
-    return isNaN(numValue) ? defaultValue : `${numValue}%`;
+    if (isNaN(numValue)) return defaultValue;
+
+    // Format percentage with appropriate decimal places
+    if (numValue === 0) return '0%';
+    if (numValue % 1 === 0) return `${numValue}%`;
+    return `${numValue.toFixed(2)}%`;
   }
 
   return stringValue;
 };
 
-// Helper function to conditionally render fields (hide empty ones instead of showing "Not available")
-const renderField = (label: string, value: any, className: string = '') => {
-  if (!value || value === '' || value === 'Not available') {
-    return null; // Don't render empty fields
+// Helper function to calculate total tax amount from line item
+const calculateTotalTax = (line: any) => {
+  const quantity = parseFloat(line.quantity || line.po_qty || line.quantity_ordered || 0);
+  const unitPrice = parseFloat(
+    line.basic_cost_price || line.cost_price || line.supplier_price ||
+    line.base_cost_price || line.buying_price || line.price_per_unit ||
+    line.landing_cost || line.unit_base_cost || 0
+  );
+  const baseAmount = quantity * unitPrice;
+
+  // If baseAmount is 0, no tax to calculate
+  if (baseAmount === 0) {
+    return {
+      igstAmount: 0,
+      cgstAmount: 0,
+      sgstAmount: 0,
+      cessAmount: 0,
+      totalTax: 0
+    };
   }
+
+  // Get tax percentages - handle string values that might have % already
+  const cleanPercentage = (value: any) => {
+    if (!value) return 0;
+    const str = String(value).replace('%', '');
+    const num = parseFloat(str);
+    return isNaN(num) ? 0 : num;
+  };
+
+  const igst = cleanPercentage(line.igst_percent || line.igst_rate || line.igst);
+  const cgst = cleanPercentage(line.cgst_percent || line.cgst_rate || line.cgst);
+  const sgst = cleanPercentage(line.sgst_percent || line.sgst_rate || line.sgst);
+  const cess = cleanPercentage(line.cess_percent || line.cess_rate || line.cess);
+
+  // Calculate individual tax amounts
+  const igstAmount = (baseAmount * igst) / 100;
+  const cgstAmount = (baseAmount * cgst) / 100;
+  const sgstAmount = (baseAmount * sgst) / 100;
+  const cessAmount = (baseAmount * cess) / 100;
+
+  // Total tax is sum of all taxes
+  const totalTax = igstAmount + cgstAmount + sgstAmount + cessAmount;
+
+  return {
+    igstAmount: Math.round(igstAmount * 100) / 100,
+    cgstAmount: Math.round(cgstAmount * 100) / 100,
+    sgstAmount: Math.round(sgstAmount * 100) / 100,
+    cessAmount: Math.round(cessAmount * 100) / 100,
+    totalTax: Math.round(totalTax * 100) / 100
+  };
+};
+
+// Helper function to conditionally render fields (hide empty ones instead of showing "Not available")
+const renderField = (label: string, value: any, className: string = '', defaultValue?: string) => {
+  // Use safeDisplay to handle empty/null values
+  const displayValue = safeDisplay(value, defaultValue || '');
+
+  // Don't render if no meaningful value
+  if (!displayValue) {
+    return null;
+  }
+
   return (
     <div className={className}>
-      <span className="font-medium">{label}:</span> {value}
+      <span className="font-medium">{label}:</span> {displayValue}
     </div>
   );
 };
 
 export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentProps) {
+  // Add custom scrollbar styling
+  const scrollbarStyles = `
+    .custom-scrollbar {
+      scrollbar-width: thin;
+      scrollbar-color: #cbd5e0 #f1f5f9;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #f1f5f9;
+      border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #cbd5e0;
+      border-radius: 4px;
+      transition: background-color 0.2s ease;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #a0aec0;
+    }
+    .custom-scrollbar::-webkit-scrollbar-corner {
+      background: #f1f5f9;
+    }
+    .table-container {
+      position: relative;
+      overflow: auto;
+    }
+    .table-container::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 20px;
+      background: linear-gradient(to right, transparent, rgba(255,255,255,0.8));
+      pointer-events: none;
+    }
+  `;
+
   const [currentStep, setCurrentStep] = useState<Step>("platform");
   const [selectedPlatform, setSelectedPlatform] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
@@ -339,7 +446,7 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
           po_lines: data.data.po_lines,
           summary: data.data.summary,
           validation: data.data.validation,
-          source: 'pdf_real_data_extracted',
+          source: data.data.source, // Use the actual source from the data
           message: data.message
         });
 
@@ -1193,25 +1300,6 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                             </div>
                           </div>
 
-                          {/* Summary Cards */}
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-                            <div className="bg-blue-50 p-3 rounded-lg">
-                              <span className="font-medium text-blue-800">Total Items</span>
-                              <p className="text-lg font-bold text-blue-900">{parsedData.po_header?.total_items || parsedData.po_lines?.length || 0}</p>
-                            </div>
-                            <div className="bg-green-50 p-3 rounded-lg">
-                              <span className="font-medium text-green-800">Total Quantity</span>
-                              <p className="text-lg font-bold text-green-900">{parsedData.po_header?.total_quantity || 0}</p>
-                            </div>
-                            <div className="bg-purple-50 p-3 rounded-lg">
-                              <span className="font-medium text-purple-800">Total Amount</span>
-                              <p className="text-lg font-bold text-purple-900">{safeDisplay(parsedData.po_header?.total_amount, '₹0.00', 'currency')}</p>
-                            </div>
-                            <div className="bg-orange-50 p-3 rounded-lg">
-                              <span className="font-medium text-orange-800">Net Amount</span>
-                              <p className="text-sm font-medium text-orange-900">{safeDisplay(parsedData.po_header?.net_amount, '₹0.00', 'currency')}</p>
-                            </div>
-                          </div>
                         </CardContent>
                       </Card>
 
@@ -1238,8 +1326,8 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                             </CardDescription>
                           </CardHeader>
                           <CardContent>
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-xs">
+                            <div className="overflow-x-auto custom-scrollbar table-container">
+                              <table className="w-full text-xs" style={{minWidth: '800px'}}>
                                 <thead className="bg-gray-50">
                                   <tr>
                                     <th className="text-left p-2 font-medium min-w-[80px]">Item Code</th>
@@ -1347,179 +1435,140 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                           </CardHeader>
                           <CardContent>
                             <div className="space-y-4">
-                              {/* Detailed Header Information */}
+                              {/* Essential PO Information Only */}
                               <div className="bg-gray-50 p-4 rounded-lg">
-                                <h5 className="font-medium text-gray-800 mb-3">Complete Order Information</h5>
-                                {selectedPlatformData?.id === 'zepto' ? (
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                                    <div className="space-y-2">
-                                      <h6 className="font-semibold text-gray-700">Order Details</h6>
-                                      <div><span className="font-medium">PO Number:</span> {po.header?.po_number || '-'}</div>
-                                      <div><span className="font-medium">PO Date:</span> {po.header?.po_date || '-'}</div>
-                                      <div><span className="font-medium">Status:</span> {po.header?.status || '-'}</div>
-                                      <div><span className="font-medium">PO Amount:</span> {po.header?.total_gross_amount || po.header?.po_amount || po.header?.total_amount || '-'}</div>
-                                      <div><span className="font-medium">Delivery Location:</span> {po.header?.delivery_location || '-'}</div>
-                                      <div><span className="font-medium">PO Expiry Date:</span> {po.header?.po_expiry_date || '-'}</div>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                      <h6 className="font-semibold text-gray-700">Vendor Information</h6>
-                                      <div><span className="font-medium">Vendor Code:</span> {po.header?.vendor_code || '-'}</div>
-                                      <div><span className="font-medium">Vendor Name:</span> {po.header?.vendor_name || '-'}</div>
-                                      <div><span className="font-medium">Created By:</span> {po.header?.created_by || '-'}</div>
-                                    </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                                  <div className="space-y-2">
+                                    <div><span className="font-medium">PO Number:</span> {safeDisplay(po.header?.po_number, 'Not specified')}</div>
+                                    <div><span className="font-medium">Order Date:</span> {po.header?.po_date ? new Date(po.header.po_date).toLocaleDateString() : 'Not specified'}</div>
+                                    {po.header?.po_delivery_date && (
+                                      <div><span className="font-medium">Delivery Date:</span> {new Date(po.header.po_delivery_date).toLocaleDateString()}</div>
+                                    )}
                                   </div>
-                                ) : (
-                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-                                    <div className="space-y-2">
-                                      <h6 className="font-semibold text-gray-700">Order Details</h6>
-                                      <div><span className="font-medium">PO Number:</span> {po.header?.po_number || 'N/A'}</div>
-                                      <div><span className="font-medium">Order Date:</span> {po.header?.po_date ? new Date(po.header.po_date).toLocaleDateString() : 'Date not specified'}</div>
-                                      <div><span className="font-medium">Delivery Date:</span> {po.header?.po_delivery_date ? new Date(po.header.po_delivery_date).toLocaleDateString() : po.header?.expected_delivery_date ? new Date(po.header.expected_delivery_date).toLocaleDateString() : 'Date not specified'}</div>
-                                      <div><span className="font-medium">Expiry Date:</span> {po.header?.po_expiry_date ? new Date(po.header.po_expiry_date).toLocaleDateString() : 'Date not specified'}</div>
-                                      <div><span className="font-medium">Payment Terms:</span> {po.header?.payment_terms || 'Terms via platform'}</div>
-                                      <div><span className="font-medium">Currency:</span> {po.header?.currency || 'INR'}</div>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                      <h6 className="font-semibold text-gray-700">Vendor Information</h6>
-                                      <div><span className="font-medium">Company:</span> {po.header?.vendor_name || 'Vendor details via platform'}</div>
-                                      <div><span className="font-medium">Contact:</span> {po.header?.vendor_contact_name || 'Contact via platform'}</div>
-                                      <div><span className="font-medium">Phone:</span> {po.header?.vendor_contact_phone || 'Contact via platform'}</div>
-                                      <div><span className="font-medium">GST:</span> {po.header?.vendor_gst_no || 'GST info via platform'}</div>
-                                      <div><span className="font-medium">PAN:</span> {po.header?.vendor_pan || 'PAN info via platform'}</div>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                      <h6 className="font-semibold text-gray-700">Buyer Information</h6>
-                                      <div><span className="font-medium">Company:</span> {po.header?.buyer_name || 'Buyer details via platform'}</div>
-                                      <div><span className="font-medium">Contact:</span> {po.header?.buyer_contact_name || 'Contact via platform'}</div>
-                                      <div><span className="font-medium">Phone:</span> {po.header?.buyer_contact_phone || 'Contact via platform'}</div>
-                                      <div><span className="font-medium">GST:</span> {po.header?.delivered_to_gst_no || 'GST info via platform'}</div>
-                                      <div><span className="font-medium">PAN:</span> {po.header?.buyer_pan || 'PAN info via platform'}</div>
-                                      <div><span className="font-medium">Address:</span> {po.header?.delivered_to_address || 'Address via platform'}</div>
-                                    </div>
+                                  <div className="space-y-2">
+                                    {po.header?.vendor_name && (
+                                      <div><span className="font-medium">Vendor:</span> {po.header.vendor_name}</div>
+                                    )}
+                                    {po.header?.vendor_code && (
+                                      <div><span className="font-medium">Vendor Code:</span> {po.header.vendor_code}</div>
+                                    )}
                                   </div>
-                                )}
+                                </div>
                               </div>
 
-                              {/* Summary Grid */}
-                              <div className={`grid gap-4 text-sm ${selectedPlatformData?.id === 'zepto' ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-2 md:grid-cols-4'}`}>
-                                <div className="bg-blue-50 p-3 rounded-lg">
-                                  <span className="font-medium text-blue-800">Total Items</span>
-                                  <p className="text-lg font-bold text-blue-900">{po.lines?.length || 0}</p>
-                                </div>
-                                <div className="bg-green-50 p-3 rounded-lg">
-                                  <span className="font-medium text-green-800">Total Quantity</span>
-                                  <p className="text-lg font-bold text-green-900">{po.totalQuantity || po.header?.total_quantity || 0}</p>
-                                </div>
-                                <div className="bg-purple-50 p-3 rounded-lg">
-                                  <span className="font-medium text-purple-800">Total Amount</span>
-                                  <p className="text-lg font-bold text-purple-900">{safeDisplay(po.header?.total_gross_amount || po.totalAmount || po.header?.total_amount, '₹0.00', 'currency')}</p>
-                                </div>
-                                {selectedPlatformData?.id !== 'zepto' && (
-                                  <div className="bg-orange-50 p-3 rounded-lg">
-                                    <span className="font-medium text-orange-800">Total Weight</span>
-                                    <p className="text-sm font-medium text-orange-900">{safeDisplay(po.header?.total_weight, 'Not available', 'weight')}</p>
-                                  </div>
-                                )}
-                              </div>
 
-                              {/* Line Items Table - Enhanced for PDF data */}
+                              {/* Complete Line Items Table with All Data */}
                               {po.lines && po.lines.length > 0 && (
                                 <div className="mt-4">
                                   <h5 className="font-medium text-gray-700 mb-2">Complete Line Items Data</h5>
-                                  <div className="overflow-x-auto border rounded-lg max-w-full">
-                                    <table className="min-w-full text-xs whitespace-nowrap">
-                                      <thead className="bg-gray-50">
+                                  <div className="overflow-x-auto overflow-y-auto border rounded-lg max-h-[60vh] bg-white shadow-sm custom-scrollbar table-container">
+                                    <table className="w-full text-xs border-collapse" style={{minWidth: '1500px'}}>
+                                      <thead className="bg-gray-50 sticky top-0 z-10 border-b">
                                         <tr>
-                                          {selectedPlatformData?.id === 'zepto' ? (
-                                            <>
-                                              <th className="text-left p-2 font-medium min-w-[100px]">PO No</th>
-                                              <th className="text-left p-2 font-medium min-w-[120px]">SKU</th>
-                                              <th className="text-left p-2 font-medium min-w-[250px]">SKU Desc</th>
-                                              <th className="text-left p-2 font-medium min-w-[100px]">Brand</th>
-                                              <th className="text-left p-2 font-medium min-w-[120px]">EAN</th>
-                                              <th className="text-left p-2 font-medium min-w-[100px]">HSN</th>
-                                              <th className="text-left p-2 font-medium min-w-[100px]">MRP</th>
-                                              <th className="text-left p-2 font-medium min-w-[80px]">Qty</th>
-                                              <th className="text-left p-2 font-medium min-w-[120px]">Unit Base Cost</th>
-                                              <th className="text-left p-2 font-medium min-w-[120px]">Landing Cost</th>
-                                              <th className="text-left p-2 font-medium min-w-[120px]">Total Amount</th>
-                                              <th className="text-left p-2 font-medium min-w-[80px]">CGST %</th>
-                                              <th className="text-left p-2 font-medium min-w-[80px]">SGST %</th>
-                                              <th className="text-left p-2 font-medium min-w-[80px]">IGST %</th>
-                                              <th className="text-left p-2 font-medium min-w-[80px]">CESS %</th>
-                                            </>
-                                          ) : (
-                                            <>
-                                              <th className="text-left p-2 font-medium min-w-[80px]">Line #</th>
-                                              <th className="text-left p-2 font-medium min-w-[100px]">Item Code</th>
-                                              <th className="text-left p-2 font-medium min-w-[100px]">HSN Code</th>
-                                              <th className="text-left p-2 font-medium min-w-[120px]">Product UPC</th>
-                                              <th className="text-left p-2 font-medium min-w-[200px]">Product Description</th>
-                                              <th className="text-left p-2 font-medium min-w-[80px]">UOM</th>
-                                              <th className="text-left p-2 font-medium min-w-[100px]">Basic Cost</th>
-                                              <th className="text-left p-2 font-medium min-w-[80px]">IGST %</th>
-                                              <th className="text-left p-2 font-medium min-w-[80px]">CESS %</th>
-                                              <th className="text-left p-2 font-medium min-w-[80px]">ADDT CESS</th>
-                                              <th className="text-left p-2 font-medium min-w-[100px]">Tax Amount</th>
-                                              <th className="text-left p-2 font-medium min-w-[100px]">Landing Rate</th>
-                                              <th className="text-left p-2 font-medium min-w-[80px]">Quantity</th>
-                                              <th className="text-left p-2 font-medium min-w-[100px]">MRP</th>
-                                              <th className="text-left p-2 font-medium min-w-[80px]">Margin %</th>
-                                              <th className="text-left p-2 font-medium min-w-[120px]">Total Amount</th>
-                                            </>
-                                          )}
+                                          <th className="text-left p-2 font-medium border-r min-w-[50px]">#</th>
+                                          <th className="text-left p-2 font-medium border-r min-w-[120px]">Item Code</th>
+                                          <th className="text-left p-2 font-medium border-r min-w-[80px]">HSN</th>
+                                          <th className="text-left p-2 font-medium border-r min-w-[200px]">Description</th>
+                                          <th className="text-center p-2 font-medium border-r min-w-[60px]">Qty</th>
+                                          <th className="text-left p-2 font-medium border-r min-w-[60px]">UOM</th>
+                                          <th className="text-right p-2 font-medium border-r min-w-[100px]">Unit Price</th>
+                                          <th className="text-right p-2 font-medium border-r min-w-[100px]">MRP</th>
+                                          <th className="text-right p-2 font-medium border-r min-w-[80px]">IGST %</th>
+                                          <th className="text-right p-2 font-medium border-r min-w-[80px]">CGST %</th>
+                                          <th className="text-right p-2 font-medium border-r min-w-[80px]">SGST %</th>
+                                          <th className="text-right p-2 font-medium border-r min-w-[80px]">CESS %</th>
+                                          <th className="text-right p-2 font-medium border-r min-w-[100px]">Tax Amount</th>
+                                          <th className="text-right p-2 font-medium min-w-[120px]">Total Amount</th>
                                         </tr>
                                       </thead>
                                       <tbody>
                                         {po.lines.map((line: any, lineIndex: number) => (
-                                          <tr key={lineIndex} className="border-t hover:bg-gray-50">
-                                            {selectedPlatformData?.id === 'zepto' ? (
-                                              <>
-                                                <td className="p-2 min-w-[100px]">{line.po_number || line.po_number_display || '-'}</td>
-                                                <td className="p-2 min-w-[120px] font-mono text-xs" title={line.sku}>
-                                                  {line.sku ? `${line.sku.substring(0, 12)}...` : '-'}
-                                                </td>
-                                                <td className="p-2 min-w-[250px]" title={line.sku_desc}>
-                                                  <div className="max-w-[250px] truncate">
-                                                    {line.sku_desc || '-'}
-                                                  </div>
-                                                </td>
-                                                <td className="p-2 min-w-[100px]">{line.brand || '-'}</td>
-                                                <td className="p-2 min-w-[120px] font-mono text-xs">{line.ean_no || '-'}</td>
-                                                <td className="p-2 min-w-[100px]">{line.hsn_code || '-'}</td>
-                                                <td className="p-2 min-w-[100px] text-right">{line.mrp && Number(line.mrp) > 0 ? `₹${Number(line.mrp).toFixed(2)}` : '-'}</td>
-                                                <td className="p-2 min-w-[80px] text-center">{line.po_qty || '-'}</td>
-                                                <td className="p-2 min-w-[120px] text-right">{line.cost_price && Number(line.cost_price) > 0 ? `₹${Number(line.cost_price).toFixed(2)}` : '-'}</td>
-                                                <td className="p-2 min-w-[120px] text-right">{line.landing_cost && Number(line.landing_cost) > 0 ? `₹${Number(line.landing_cost).toFixed(2)}` : '-'}</td>
-                                                <td className="p-2 min-w-[120px] text-right font-medium">{line.total_value && Number(line.total_value) > 0 ? `₹${Number(line.total_value).toFixed(2)}` : '-'}</td>
-                                                <td className="p-2 min-w-[80px] text-center">{line.cgst && Number(line.cgst) > 0 ? `${Number(line.cgst).toFixed(0)}%` : '0%'}</td>
-                                                <td className="p-2 min-w-[80px] text-center">{line.sgst && Number(line.sgst) > 0 ? `${Number(line.sgst).toFixed(0)}%` : '0%'}</td>
-                                                <td className="p-2 min-w-[80px] text-center">{line.igst && Number(line.igst) > 0 ? `${Number(line.igst).toFixed(0)}%` : '0%'}</td>
-                                                <td className="p-2 min-w-[80px] text-center">{line.cess && Number(line.cess) > 0 ? `${Number(line.cess).toFixed(0)}%` : '0%'}</td>
-                                              </>
-                                            ) : (
-                                              <>
-                                                <td className="p-2 font-medium">{line.line_number || lineIndex + 1}</td>
-                                                <td className="p-2 font-medium text-blue-600">{line.item_code || 'SKU-N/A'}</td>
-                                                <td className="p-2">{line.category_id || 'Via Platform'}</td>
-                                                <td className="p-2 text-sm">{line.product_upc || line.item_code || 'UPC via system'}</td>
-                                                <td className="p-2 text-sm">{line.product_description || line.item_description || 'Description via system'}</td>
-                                                <td className="p-2">{line.grammage || 'Unit'}</td>
-                                                <td className="p-2">{safeDisplay(line.basic_cost_price, '₹0.00', 'currency')}</td>
-                                                <td className="p-2">{safeDisplay(line.igst_percent, '0%', 'percent')}</td>
-                                                <td className="p-2">{line.cess_percent || '0'}%</td>
-                                                <td className="p-2">{line.addt_cess || '0'}</td>
-                                                <td className="p-2">₹{line.tax_amount || '0'}</td>
-                                                <td className="p-2 font-medium">₹{line.landing_rate || '0'}</td>
-                                                <td className="p-2 text-center font-medium">{line.quantity || 0}</td>
-                                                <td className="p-2">{safeDisplay(line.mrp, '₹0.00', 'currency')}</td>
-                                                <td className="p-2">{line.margin_percent || '0'}%</td>
-                                                <td className="p-2 font-bold text-green-600">{safeDisplay(line.total_amount, '₹0.00', 'currency')}</td>
-                                              </>
-                                            )}
+                                          <tr key={lineIndex} className="border-b hover:bg-gray-50 text-xs">
+                                            <td className="p-2 text-center border-r font-medium">{lineIndex + 1}</td>
+                                            <td className="p-2 font-mono border-r">
+                                              {safeDisplay(
+                                                line.item_code || line.sku || line.article_id || line.fsn_isbn,
+                                                `ITEM-${lineIndex + 1}`
+                                              )}
+                                            </td>
+                                            <td className="p-2 border-r">
+                                              {safeDisplay(line.hsn_code || line.hsn_sa_code, 'HSN-' + (lineIndex + 1))}
+                                            </td>
+                                            <td className="p-2 border-r">
+                                              <div className="max-w-[200px] truncate" title={
+                                                line.product_description || line.item_description ||
+                                                line.sku_desc || line.article_name || line.title
+                                              }>
+                                                {safeDisplay(
+                                                  line.product_description || line.item_description ||
+                                                  line.sku_desc || line.article_name || line.title,
+                                                  `Product ${lineIndex + 1}`
+                                                )}
+                                              </div>
+                                            </td>
+                                            <td className="p-2 text-center font-medium border-r">
+                                              {line.quantity || line.po_qty || 0}
+                                            </td>
+                                            <td className="p-2 border-r">
+                                              {line.uom || line.grammage || 'Unit'}
+                                            </td>
+                                            <td className="p-2 text-right border-r">
+                                              {safeDisplay(
+                                                line.basic_cost_price || line.cost_price || line.supplier_price ||
+                                                line.base_cost_price || line.buying_price || line.unit_base_cost,
+                                                '₹0.00',
+                                                'currency'
+                                              )}
+                                            </td>
+                                            <td className="p-2 text-right border-r">
+                                              {safeDisplay(
+                                                line.mrp || line.supplier_mrp,
+                                                '₹0.00',
+                                                'currency'
+                                              )}
+                                            </td>
+                                            <td className="p-2 text-right border-r">
+                                              {(() => {
+                                                const igst = line.igst_percent || line.igst_rate || line.igst || '0';
+                                                const numValue = parseFloat(String(igst).replace(/[^0-9.-]/g, ''));
+                                                return isNaN(numValue) ? '0%' : `${numValue}%`;
+                                              })()}
+                                            </td>
+                                            <td className="p-2 text-right border-r">
+                                              {(() => {
+                                                const cgst = line.cgst_percent || line.cgst_rate || line.cgst || '0';
+                                                const numValue = parseFloat(String(cgst).replace(/[^0-9.-]/g, ''));
+                                                return isNaN(numValue) ? '0%' : `${numValue}%`;
+                                              })()}
+                                            </td>
+                                            <td className="p-2 text-right border-r">
+                                              {(() => {
+                                                const sgst = line.sgst_percent || line.sgst_rate || line.sgst || '0';
+                                                const numValue = parseFloat(String(sgst).replace(/[^0-9.-]/g, ''));
+                                                return isNaN(numValue) ? '0%' : `${numValue}%`;
+                                              })()}
+                                            </td>
+                                            <td className="p-2 text-right border-r">
+                                              {(() => {
+                                                const cess = line.cess_percent || line.cess_rate || line.cess || '0';
+                                                const numValue = parseFloat(String(cess).replace(/[^0-9.-]/g, ''));
+                                                return isNaN(numValue) ? '0%' : `${numValue}%`;
+                                              })()}
+                                            </td>
+                                            <td className="p-2 text-right border-r">
+                                              {(() => {
+                                                const taxCalc = calculateTotalTax(line);
+                                                const displayTax = line.tax_amount || taxCalc.totalTax;
+                                                return safeDisplay(displayTax, '₹0.00', 'currency');
+                                              })()}
+                                            </td>
+                                            <td className="p-2 text-right font-medium text-green-600">
+                                              {safeDisplay(
+                                                line.total_amount || line.total_value || line.base_amount || line.gross_amount,
+                                                '₹0.00',
+                                                'currency'
+                                              )}
+                                            </td>
                                           </tr>
                                         ))}
                                       </tbody>
@@ -1643,22 +1692,24 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                 {/* Order Details Section */}
                                 <div className="space-y-2">
                                   <h6 className="font-semibold text-gray-800 pb-2 border-b">Order Details</h6>
-                                  <div><span className="font-medium text-gray-600">PO Number:</span> <span className="ml-2">{parsedData.header.po_number || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">PO Created Date:</span> <span className="ml-2">{
-                                    parsedData.header.po_created_date || parsedData.header.po_date || parsedData.header.order_date
-                                      ? (parsedData.header.po_created_date || parsedData.header.po_date || parsedData.header.order_date).toString().split('T')[0]
-                                      : 'Not available'
-                                  }</span></div>
-                                  <div><span className="font-medium text-gray-600">Delivery Date:</span> <span className="ml-2">{
-                                    parsedData.header.po_delivery_date
-                                      ? parsedData.header.po_delivery_date.toString().split('T')[0]
-                                      : 'Not available'
-                                  }</span></div>
-                                  <div><span className="font-medium text-gray-600">Expiry Date:</span> <span className="ml-2">{
-                                    parsedData.header.po_expiry_date
-                                      ? parsedData.header.po_expiry_date.toString().split('T')[0]
-                                      : 'Not available'
-                                  }</span></div>
+                                  {parsedData.header.po_number && (
+                                    <div><span className="font-medium text-gray-600">PO Number:</span> <span className="ml-2">{parsedData.header.po_number}</span></div>
+                                  )}
+                                  {(parsedData.header.po_created_date || parsedData.header.po_date || parsedData.header.order_date) && (
+                                    <div><span className="font-medium text-gray-600">PO Created Date:</span> <span className="ml-2">
+                                      {(parsedData.header.po_created_date || parsedData.header.po_date || parsedData.header.order_date).toString().split('T')[0]}
+                                    </span></div>
+                                  )}
+                                  {parsedData.header.po_delivery_date && (
+                                    <div><span className="font-medium text-gray-600">Delivery Date:</span> <span className="ml-2">
+                                      {parsedData.header.po_delivery_date.toString().split('T')[0]}
+                                    </span></div>
+                                  )}
+                                  {parsedData.header.po_expiry_date && (
+                                    <div><span className="font-medium text-gray-600">Expiry Date:</span> <span className="ml-2">
+                                      {parsedData.header.po_expiry_date.toString().split('T')[0]}
+                                    </span></div>
+                                  )}
                                   {parsedData.header.credit_term && (
                                     <div><span className="font-medium text-gray-600">Credit Term:</span> <span className="ml-2">{parsedData.header.credit_term}</span></div>
                                   )}
@@ -1678,35 +1729,86 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                     <div><span className="font-medium text-gray-600">Contract Version:</span> <span className="ml-2">{parsedData.header.contract_version}</span></div>
                                   )}
                                   <div><span className="font-medium text-gray-600">Status:</span> <span className="ml-2">{parsedData.header.status || 'Open'}</span></div>
+
+                                  {/* Totals Section - Better UI Design */}
+                                  <div className="border-t border-gray-200 my-4"></div>
+                                  <div className="bg-gradient-to-r from-blue-50 to-green-50 p-3 rounded-lg">
+                                    <div className="grid grid-cols-3 gap-2">
+                                      <div className="text-center">
+                                        <h4 className="font-medium text-gray-600 mb-1 text-xs">Items</h4>
+                                        <p className="text-xl font-bold text-blue-600">{parsedData.lines ? parsedData.lines.length : 0}</p>
+                                      </div>
+                                      <div className="text-center border-l border-r border-gray-300 px-2">
+                                        <h4 className="font-medium text-gray-600 mb-1 text-xs">Quantity</h4>
+                                        <p className="text-xl font-bold text-green-600">{parseFloat(parsedData.header.total_quantity || '0').toLocaleString('en-IN')}</p>
+                                      </div>
+                                      <div className="text-center">
+                                        <h4 className="font-medium text-gray-600 mb-1 text-xs">Amount</h4>
+                                        <p className="text-lg font-bold text-green-600">₹{parseFloat(parsedData.header.grand_total || parsedData.header.total_amount || '0').toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                      </div>
+                                    </div>
+                                  </div>
+
                                   {parsedData.header.comments && (
-                                    <div><span className="font-medium text-gray-600">Comments:</span> <span className="ml-2 text-xs">{parsedData.header.comments}</span></div>
+                                    <>
+                                      <div className="border-t border-gray-200 my-4"></div>
+                                      <div>
+                                        <h4 className="font-semibold text-gray-700 mb-2">Comments</h4>
+                                        <p className="text-gray-600 text-sm">{parsedData.header.comments}</p>
+                                      </div>
+                                    </>
                                   )}
                                 </div>
+
 
                                 {/* Vendor Information Section */}
                                 <div className="space-y-2">
                                   <h6 className="font-semibold text-gray-800 pb-2 border-b">Shipped By (Vendor)</h6>
-                                  <div><span className="font-medium text-gray-600">Company:</span> <span className="ml-2">{parsedData.header.shipped_by || parsedData.header.vendor_name || parsedData.header.supplier_name || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Vendor Code:</span> <span className="ml-2">{parsedData.header.vendor_code || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Phone:</span> <span className="ml-2">{parsedData.header.shipped_by_phone || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.shipped_by_gstin || parsedData.header.vendor_gst_no || parsedData.header.supplier_gstin || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2 text-xs">{parsedData.header.shipped_by_address || parsedData.header.vendor_registered_address || parsedData.header.supplier_address || 'Not available'}</span></div>
+                                  {(parsedData.header.shipped_by || parsedData.header.vendor_name || parsedData.header.supplier_name) && (
+                                    <div><span className="font-medium text-gray-600">Company:</span> <span className="ml-2">{parsedData.header.shipped_by || parsedData.header.vendor_name || parsedData.header.supplier_name}</span></div>
+                                  )}
+                                  {parsedData.header.vendor_code && (
+                                    <div><span className="font-medium text-gray-600">Vendor Code:</span> <span className="ml-2">{parsedData.header.vendor_code}</span></div>
+                                  )}
+                                  {parsedData.header.shipped_by_phone && (
+                                    <div><span className="font-medium text-gray-600">Phone:</span> <span className="ml-2">{parsedData.header.shipped_by_phone}</span></div>
+                                  )}
+                                  {(parsedData.header.shipped_by_gstin || parsedData.header.vendor_gst_no || parsedData.header.supplier_gstin) && (
+                                    <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.shipped_by_gstin || parsedData.header.vendor_gst_no || parsedData.header.supplier_gstin}</span></div>
+                                  )}
+                                  {(parsedData.header.shipped_by_address || parsedData.header.vendor_registered_address || parsedData.header.supplier_address) && (
+                                    <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2 text-xs">{parsedData.header.shipped_by_address || parsedData.header.vendor_registered_address || parsedData.header.supplier_address}</span></div>
+                                  )}
                                 </div>
 
                                 {/* Buyer Information Section */}
                                 <div className="space-y-2">
                                   <h6 className="font-semibold text-gray-800 pb-2 border-b">Bill To (Buyer)</h6>
-                                  <div><span className="font-medium text-gray-600">Company:</span> <span className="ml-2">{parsedData.header.bill_to || parsedData.header.buyer_name || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.bill_to_gstin || parsedData.header.buyer_gst || parsedData.header.billed_to_gstin || 'Not available'}</span></div>
-                                  <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2 text-xs">{parsedData.header.bill_to_address || parsedData.header.buyer_address || parsedData.header.billed_to_address || 'Not available'}</span></div>
+                                  {(parsedData.header.bill_to || parsedData.header.buyer_name) && (
+                                    <div><span className="font-medium text-gray-600">Company:</span> <span className="ml-2">{parsedData.header.bill_to || parsedData.header.buyer_name}</span></div>
+                                  )}
+                                  {(parsedData.header.bill_to_gstin || parsedData.header.buyer_gst || parsedData.header.billed_to_gstin) && (
+                                    <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.bill_to_gstin || parsedData.header.buyer_gst || parsedData.header.billed_to_gstin}</span></div>
+                                  )}
+                                  {(parsedData.header.bill_to_address || parsedData.header.buyer_address || parsedData.header.billed_to_address) && (
+                                    <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2 text-xs">{parsedData.header.bill_to_address || parsedData.header.buyer_address || parsedData.header.billed_to_address}</span></div>
+                                  )}
 
-                                  {/* Shipped To Section */}
-                                  <div className="mt-4 pt-2 border-t">
-                                    <h6 className="font-semibold text-gray-700 text-xs">Shipped To</h6>
-                                    <div className="mt-1"><span className="font-medium text-gray-600">Location:</span> <span className="ml-2">{parsedData.header.shipped_to || 'Not available'}</span></div>
-                                    <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.shipped_to_gstin || 'Not available'}</span></div>
-                                    <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2 text-xs">{parsedData.header.shipped_to_address || 'Not available'}</span></div>
-                                  </div>
+                                  {/* Shipped To Section - Only show if any shipped_to data exists */}
+                                  {(parsedData.header.shipped_to || parsedData.header.shipped_to_gstin || parsedData.header.shipped_to_address) && (
+                                    <div className="mt-4 pt-2 border-t">
+                                      <h6 className="font-semibold text-gray-700 text-xs">Shipped To</h6>
+                                      {parsedData.header.shipped_to && (
+                                        <div className="mt-1"><span className="font-medium text-gray-600">Location:</span> <span className="ml-2">{parsedData.header.shipped_to}</span></div>
+                                      )}
+                                      {parsedData.header.shipped_to_gstin && (
+                                        <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.shipped_to_gstin}</span></div>
+                                      )}
+                                      {parsedData.header.shipped_to_address && (
+                                        <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2 text-xs">{parsedData.header.shipped_to_address}</span></div>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -1714,36 +1816,6 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                         </Card>
                       )}
 
-                      {/* Summary */}
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="bg-blue-50 p-4 rounded-lg">
-                          <div className="text-2xl font-bold text-blue-600">
-                            {parsedData.totalItems || parsedData.lines?.length || 0}
-                          </div>
-                          <div className="text-sm text-blue-600">Total Items</div>
-                        </div>
-                        {parsedData.totalQuantity && (
-                          <div className="bg-green-50 p-4 rounded-lg">
-                            <div className="text-2xl font-bold text-green-600">
-                              {parsedData.totalQuantity}
-                            </div>
-                            <div className="text-sm text-green-600">Total Quantity</div>
-                          </div>
-                        )}
-                        <div className="bg-purple-50 p-4 rounded-lg">
-                          <div className="text-2xl font-bold text-purple-600">
-                            {safeDisplay(
-                              parsedData.header?.total_gross_amount ||
-                              parsedData.totalAmount ||
-                              parsedData.header?.grand_total ||
-                              parsedData.header?.total_amount,
-                              '₹0.00',
-                              'currency'
-                            )}
-                          </div>
-                          <div className="text-sm text-purple-600">Total Amount</div>
-                        </div>
-                      </div>
 
                       {/* Complete Line Items Preview */}
                       {parsedData.lines && parsedData.lines.length > 0 && (
@@ -1766,7 +1838,7 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                             </CardDescription>
                           </CardHeader>
                           <CardContent>
-                            {/* Enhanced scrollable table container */}
+                            {/* Complete data preview with scrolling */}
                             <div className="mb-3 p-2 bg-blue-50 rounded-lg border border-blue-200">
                               <div className="flex items-center justify-between text-xs">
                                 <span className="font-medium text-blue-800">
@@ -1777,145 +1849,24 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                 </span>
                               </div>
                             </div>
-                            <div className="overflow-x-auto overflow-y-auto border rounded-lg max-h-[75vh] bg-white shadow-sm">
-                              <div className="min-w-full">
-                              <table className="w-full text-xs whitespace-nowrap border-collapse">
-                                <thead className="bg-gray-50 sticky top-0 z-10 border-b border-gray-200">
-                                  <tr className="border-b">
-                                    {/* Check if this is Blinkit PDF data */}
-                                    {parsedData.source === 'pdf' || selectedPlatformData?.id === 'blinkit' ? (
-                                      <>
-                                        <th className="text-left p-2 font-medium min-w-[60px]">Line #</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">Item Code</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">HSN Code</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Product UPC</th>
-                                        <th className="text-left p-2 font-medium min-w-[200px]">Product Description</th>
-                                        <th className="text-left p-2 font-medium min-w-[80px]">UOM</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">Basic Cost</th>
-                                        <th className="text-left p-2 font-medium min-w-[80px]">IGST %</th>
-                                        <th className="text-left p-2 font-medium min-w-[80px]">CESS %</th>
-                                        <th className="text-left p-2 font-medium min-w-[80px]">ADDT CESS</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">Tax Amount</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">Landing Rate</th>
-                                        <th className="text-left p-2 font-medium min-w-[80px]">Quantity</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">MRP</th>
-                                        <th className="text-left p-2 font-medium min-w-[80px]">Margin %</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Total Amount</th>
-                                      </>
-                                    ) : selectedPlatformData?.id === 'zepto' ? (
-                                      <>
-                                        <th className="text-left p-2 font-medium">PO No</th>
-                                        <th className="text-left p-2 font-medium">SKU</th>
-                                        <th className="text-left p-2 font-medium">SKU Desc</th>
-                                        <th className="text-left p-2 font-medium">Brand</th>
-                                        <th className="text-left p-2 font-medium">EAN</th>
-                                        <th className="text-left p-2 font-medium">HSN</th>
-                                        <th className="text-left p-2 font-medium">MRP</th>
-                                        <th className="text-left p-2 font-medium">Qty</th>
-                                        <th className="text-left p-2 font-medium">Unit Base Cost</th>
-                                        <th className="text-left p-2 font-medium">Landing Cost</th>
-                                        <th className="text-left p-2 font-medium">Total Amount</th>
-                                        <th className="text-left p-2 font-medium">CGST %</th>
-                                        <th className="text-left p-2 font-medium">SGST %</th>
-                                        <th className="text-left p-2 font-medium">IGST %</th>
-                                        <th className="text-left p-2 font-medium">CESS %</th>
-                                      </>
-                                    ) : selectedPlatformData?.id === 'citymall' ? (
-                                      <>
-                                        <th className="text-left p-2 font-medium min-w-[60px]">Line #</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Article ID</th>
-                                        <th className="text-left p-2 font-medium min-w-[250px]">Article Name</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">HSN Code</th>
-                                        <th className="text-left p-2 font-medium min-w-[80px]">Quantity</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">MRP</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Base Cost Price</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Base Amount</th>
-                                        <th className="text-left p-2 font-medium min-w-[80px]">IGST %</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">IGST Amount</th>
-                                        <th className="text-left p-2 font-medium min-w-[80px]">CESS %</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">CESS Amount</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Total Amount</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">Status</th>
-                                      </>
-                                    ) : selectedPlatformData?.id === 'flipkart' ? (
-                                      <>
-                                        <th className="text-left p-2 font-medium min-w-[60px]">S.No</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">HSN/SA Code</th>
-                                        <th className="text-left p-2 font-medium min-w-[150px]">FSN/ISBN13</th>
-                                        <th className="text-left p-2 font-medium min-w-[80px]">Quantity</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Pending Qty</th>
-                                        <th className="text-left p-2 font-medium min-w-[60px]">UOM</th>
-                                        <th className="text-left p-2 font-medium min-w-[300px]">Title</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">Brand</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Type</th>
-                                        <th className="text-left p-2 font-medium min-w-[140px]">EAN</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">Vertical</th>
-                                        <th className="text-left p-2 font-medium min-w-[140px]">Required by Date</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Supplier MRP</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Supplier Price</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Taxable Value</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">IGST Rate</th>
-                                        <th className="text-left p-2 font-medium min-w-[150px]">IGST Amount(per unit)</th>
-                                        <th className="text-left p-2 font-medium min-w-[140px]">SGST/UTGST Rate</th>
-                                        <th className="text-left p-2 font-medium min-w-[180px]">SGST/UTGST Amount(per unit)</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">CGST Rate</th>
-                                        <th className="text-left p-2 font-medium min-w-[150px]">CGST Amount(per unit)</th>
-                                        <th className="text-left p-2 font-medium min-w-[100px]">CESS Rate</th>
-                                        <th className="text-left p-2 font-medium min-w-[150px]">CESS Amount(per unit)</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Tax Amount</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Total Amount</th>
-                                      </>
-                                    ) : selectedPlatformData?.id === 'swiggy' ? (
-                                      <>
-                                        <th className="text-left p-2 font-medium">Item Description</th>
-                                        <th className="text-left p-2 font-medium">Item Code</th>
-                                        <th className="text-left p-2 font-medium">HSN Code</th>
-                                        <th className="text-left p-2 font-medium">Quantity</th>
-                                        <th className="text-left p-2 font-medium">MRP</th>
-                                        <th className="text-left p-2 font-medium">Line Total</th>
-                                      </>
-                                    ) : selectedPlatformData?.id === 'bigbasket' ? (
-                                      <>
-                                        <th className="text-left p-2 font-medium">Description</th>
-                                        <th className="text-left p-2 font-medium">SKU Code</th>
-                                        <th className="text-left p-2 font-medium">HSN Code</th>
-                                        <th className="text-left p-2 font-medium">Quantity</th>
-                                        <th className="text-left p-2 font-medium">MRP</th>
-                                        <th className="text-left p-2 font-medium">Total Value</th>
-                                      </>
-                                    ) : selectedPlatformData?.id === 'zomato' ? (
-                                      <>
-                                        <th className="text-left p-2 font-medium">Product Name</th>
-                                        <th className="text-left p-2 font-medium">Product Number</th>
-                                        <th className="text-left p-2 font-medium">HSN Code</th>
-                                        <th className="text-left p-2 font-medium">Quantity</th>
-                                        <th className="text-left p-2 font-medium">Price Per Unit</th>
-                                        <th className="text-left p-2 font-medium">UoM</th>
-                                        <th className="text-left p-2 font-medium">GST Rate</th>
-                                        <th className="text-left p-2 font-medium">Line Total</th>
-                                      </>
-                                    ) : selectedPlatformData?.id === 'dealshare' ? (
-                                      <>
-                                        <th className="text-left p-2 font-medium min-w-[120px] bg-gray-50 sticky left-0 z-20 border-r">Line #</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">SKU</th>
-                                        <th className="text-left p-2 font-medium min-w-[250px]">Product Name</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">HSN Code</th>
-                                        <th className="text-left p-2 font-medium min-w-[80px]">Quantity</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">MRP (Tax Incl.)</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Buying Price</th>
-                                        <th className="text-left p-2 font-medium min-w-[80px]">GST %</th>
-                                        <th className="text-left p-2 font-medium min-w-[80px]">CESS %</th>
-                                        <th className="text-left p-2 font-medium min-w-[120px]">Gross Amount</th>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <th className="text-left p-2 font-medium">Item</th>
-                                        <th className="text-left p-2 font-medium">Code</th>
-                                        <th className="text-left p-2 font-medium">Quantity</th>
-                                        <th className="text-left p-2 font-medium">Price</th>
-                                        <th className="text-left p-2 font-medium">Total</th>
-                                      </>
-                                    )}
+                            <div className="overflow-x-auto overflow-y-auto border rounded-lg max-h-[70vh] bg-white shadow-sm custom-scrollbar table-container">
+                              <table className="w-full text-xs border-collapse" style={{minWidth: '1500px'}}>
+                                <thead className="bg-gray-50 sticky top-0 z-10 border-b">
+                                  <tr>
+                                    <th className="text-left p-2 font-medium border-r min-w-[50px]">#</th>
+                                    <th className="text-left p-2 font-medium border-r min-w-[120px]">Item Code</th>
+                                    <th className="text-left p-2 font-medium border-r min-w-[80px]">HSN</th>
+                                    <th className="text-left p-2 font-medium border-r min-w-[200px]">Description</th>
+                                    <th className="text-center p-2 font-medium border-r min-w-[60px]">Qty</th>
+                                    <th className="text-left p-2 font-medium border-r min-w-[60px]">UOM</th>
+                                    <th className="text-right p-2 font-medium border-r min-w-[100px]">Unit Price</th>
+                                    <th className="text-right p-2 font-medium border-r min-w-[100px]">MRP</th>
+                                    <th className="text-right p-2 font-medium border-r min-w-[80px]">IGST %</th>
+                                    <th className="text-right p-2 font-medium border-r min-w-[80px]">CGST %</th>
+                                    <th className="text-right p-2 font-medium border-r min-w-[80px]">SGST %</th>
+                                    <th className="text-right p-2 font-medium border-r min-w-[80px]">CESS %</th>
+                                    <th className="text-right p-2 font-medium border-r min-w-[100px]">Tax Amount</th>
+                                    <th className="text-right p-2 font-medium min-w-[120px]">Total Amount</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -1935,190 +1886,131 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                              itemCode.length <= 50;
                                     })
                                     .map((line: any, index: number) => (
-                                    <tr key={index} className="border-b last:border-b-0 hover:bg-gray-50">
-                                      {/* Blinkit PDF data */}
-                                      {parsedData.source === 'pdf' || selectedPlatformData?.id === 'blinkit' ? (
-                                        <>
-                                          <td className="p-2 font-medium">{line.line_number || index + 1}</td>
-                                          <td className="p-2 font-medium text-blue-600">{line.item_code || 'Not available'}</td>
-                                          <td className="p-2">{line.hsn_code || 'Not available'}</td>
-                                          <td className="p-2 text-sm">{line.product_upc || 'Not available'}</td>
-                                          <td className="p-2 text-sm">{line.product_description || 'Not available'}</td>
-                                          <td className="p-2">{line.grammage || 'Not available'}</td>
-                                          <td className="p-2">{safeDisplay(line.basic_cost_price, '₹0.00', 'currency')}</td>
-                                          <td className="p-2">{safeDisplay(line.igst_percent, '0%', 'percent')}</td>
-                                          <td className="p-2">{line.cess_percent || '0'}%</td>
-                                          <td className="p-2">{line.addt_cess || '0'}</td>
-                                          <td className="p-2">₹{line.tax_amount || '0'}</td>
-                                          <td className="p-2 font-medium">₹{line.landing_rate || '0'}</td>
-                                          <td className="p-2 text-center font-medium">{line.quantity || 0}</td>
-                                          <td className="p-2">{safeDisplay(line.mrp, '₹0.00', 'currency')}</td>
-                                          <td className="p-2">{line.margin_percent || '0'}%</td>
-                                          <td className="p-2 font-bold text-green-600">{safeDisplay(line.total_amount, '₹0.00', 'currency')}</td>
-                                        </>
-                                      ) : selectedPlatformData?.id === 'zepto' ? (
-                                        <>
-                                          <td className="p-2">{line.po_number || line.po_number_display || '-'}</td>
-                                          <td className="p-2 font-mono text-xs" title={line.sku}>
-                                            {line.sku ? `${line.sku.substring(0, 8)}...` : '-'}
-                                          </td>
-                                          <td className="p-2 max-w-[200px] truncate" title={line.sku_desc}>
-                                            {line.sku_desc || '-'}
-                                          </td>
-                                          <td className="p-2">{line.brand || '-'}</td>
-                                          <td className="p-2 font-mono text-xs">{line.ean_no || '-'}</td>
-                                          <td className="p-2">{line.hsn_code || '-'}</td>
-                                          <td className="p-2">{line.mrp && Number(line.mrp) > 0 ? `₹${Number(line.mrp).toFixed(2)}` : '-'}</td>
-                                          <td className="p-2 text-center">{line.po_qty || '-'}</td>
-                                          <td className="p-2">{line.cost_price && Number(line.cost_price) > 0 ? `₹${Number(line.cost_price).toFixed(2)}` : '-'}</td>
-                                          <td className="p-2">{line.landing_cost && Number(line.landing_cost) > 0 ? `₹${Number(line.landing_cost).toFixed(2)}` : '-'}</td>
-                                          <td className="p-2 font-medium">{line.total_value && Number(line.total_value) > 0 ? `₹${Number(line.total_value).toFixed(2)}` : '-'}</td>
-                                          <td className="p-2">{line.cgst && Number(line.cgst) > 0 ? `${Number(line.cgst).toFixed(0)}%` : '0%'}</td>
-                                          <td className="p-2">{line.sgst && Number(line.sgst) > 0 ? `${Number(line.sgst).toFixed(0)}%` : '0%'}</td>
-                                          <td className="p-2">{line.igst && Number(line.igst) > 0 ? `${Number(line.igst).toFixed(0)}%` : '0%'}</td>
-                                          <td className="p-2">{line.cess && Number(line.cess) > 0 ? `${Number(line.cess).toFixed(0)}%` : '0%'}</td>
-                                        </>
-                                      ) : selectedPlatformData?.id === 'citymall' ? (
-                                        <>
-                                          <td className="p-2 font-medium">{line.line_number || index + 1}</td>
-                                          <td className="p-2 font-mono text-xs">{line.article_id || 'Not available'}</td>
-                                          <td className="p-2 max-w-[250px] truncate" title={line.article_name}>
-                                            {line.article_name || 'Not available'}
-                                          </td>
-                                          <td className="p-2">
-                                            <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
-                                              {line.hsn_code || 'N/A'}
-                                            </span>
-                                          </td>
-                                          <td className="p-2 text-center font-medium">{line.quantity || 0}</td>
-                                          <td className="p-2 text-right">{line.mrp ? `₹${Number(line.mrp).toFixed(2)}` : '₹0.00'}</td>
-                                          <td className="p-2 text-right">{line.base_cost_price ? `₹${Number(line.base_cost_price).toFixed(2)}` : '₹0.00'}</td>
-                                          <td className="p-2 text-right font-medium">{line.base_amount ? `₹${Number(line.base_amount).toFixed(2)}` : '₹0.00'}</td>
-                                          <td className="p-2 text-center">{line.igst_percent ? `${Number(line.igst_percent).toFixed(1)}%` : '0%'}</td>
-                                          <td className="p-2 text-right">{line.igst_amount ? `₹${Number(line.igst_amount).toFixed(2)}` : '₹0.00'}</td>
-                                          <td className="p-2 text-center">{line.cess_percent ? `${Number(line.cess_percent).toFixed(1)}%` : '0%'}</td>
-                                          <td className="p-2 text-right">{line.cess_amount ? `₹${Number(line.cess_amount).toFixed(2)}` : '₹0.00'}</td>
-                                          <td className="p-2 text-right font-bold text-green-600">{line.total_amount ? `₹${Number(line.total_amount).toFixed(2)}` : '₹0.00'}</td>
-                                          <td className="p-2">
-                                            <span className="px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded">
-                                              {line.status || 'Pending'}
-                                            </span>
-                                          </td>
-                                        </>
-                                      ) : selectedPlatformData?.id === 'flipkart' ? (
-                                        <>
-                                          <td className="p-2 text-center">{line.line_number || '-'}</td>
-                                          <td className="p-2 font-mono text-xs">{line.hsn_code || '-'}</td>
-                                          <td className="p-2 font-mono text-xs">{line.fsn_isbn || '-'}</td>
-                                          <td className="p-2 text-center font-medium">{line.quantity || 0}</td>
-                                          <td className="p-2 text-center">{line.pending_quantity || 0}</td>
-                                          <td className="p-2 text-center text-xs">{line.uom || '-'}</td>
-                                          <td className="p-2">
-                                            <div className="max-w-xs">
-                                              <div className="font-medium text-sm leading-tight">{line.title || '-'}</div>
-                                            </div>
-                                          </td>
-                                          <td className="p-2">{line.brand || '-'}</td>
-                                          <td className="p-2">{line.type || '-'}</td>
-                                          <td className="p-2 font-mono text-xs">{line.ean || '-'}</td>
-                                          <td className="p-2 text-xs">{line.vertical || '-'}</td>
-                                          <td className="p-2 text-xs">{line.required_by_date ? line.required_by_date.toString().split('T')[0] : '-'}</td>
-                                          <td className="p-2 text-right">{line.supplier_mrp && Number(line.supplier_mrp) > 0 ? `₹${Number(line.supplier_mrp).toFixed(2)}` : '-'}</td>
-                                          <td className="p-2 text-right font-medium">{line.supplier_price && Number(line.supplier_price) > 0 ? `₹${Number(line.supplier_price).toFixed(2)}` : '-'}</td>
-                                          <td className="p-2 text-right">{line.taxable_value && Number(line.taxable_value) > 0 ? `₹${Number(line.taxable_value).toFixed(2)}` : '-'}</td>
-                                          <td className="p-2 text-center">{line.igst_rate && Number(line.igst_rate) > 0 ? `${Number(line.igst_rate).toFixed(1)}%` : '0%'}</td>
-                                          <td className="p-2 text-right">{line.igst_amount_per_unit && Number(line.igst_amount_per_unit) > 0 ? `₹${Number(line.igst_amount_per_unit).toFixed(2)}` : '-'}</td>
-                                          <td className="p-2 text-center">{line.sgst_rate && Number(line.sgst_rate) > 0 ? `${Number(line.sgst_rate).toFixed(1)}%` : '0%'}</td>
-                                          <td className="p-2 text-right">{line.sgst_amount_per_unit && Number(line.sgst_amount_per_unit) > 0 ? `₹${Number(line.sgst_amount_per_unit).toFixed(2)}` : '-'}</td>
-                                          <td className="p-2 text-center">{line.cgst_rate && Number(line.cgst_rate) > 0 ? `${Number(line.cgst_rate).toFixed(1)}%` : '0%'}</td>
-                                          <td className="p-2 text-right">{line.cgst_amount_per_unit && Number(line.cgst_amount_per_unit) > 0 ? `₹${Number(line.cgst_amount_per_unit).toFixed(2)}` : '-'}</td>
-                                          <td className="p-2 text-center">{line.cess_rate && Number(line.cess_rate) > 0 ? `${Number(line.cess_rate).toFixed(1)}%` : '0%'}</td>
-                                          <td className="p-2 text-right">{line.cess_amount_per_unit && Number(line.cess_amount_per_unit) > 0 ? `₹${Number(line.cess_amount_per_unit).toFixed(2)}` : '-'}</td>
-                                          <td className="p-2 text-right font-medium">{line.tax_amount && Number(line.tax_amount) > 0 ? `₹${Number(line.tax_amount).toFixed(2)}` : '-'}</td>
-                                          <td className="p-2 text-right font-bold">{line.total_amount && Number(line.total_amount) > 0 ? `₹${Number(line.total_amount).toFixed(2)}` : '-'}</td>
-                                        </>
-                                      ) : selectedPlatformData?.id === 'swiggy' ? (
-                                        <>
-                                          <td className="p-2">{line.item_description || 'Not available'}</td>
-                                          <td className="p-2">{line.item_code || 'Not available'}</td>
-                                          <td className="p-2">{line.hsn_code || 'Not available'}</td>
-                                          <td className="p-2">{line.quantity || 0}</td>
-                                          <td className="p-2">₹{line.mrp || '0.00'}</td>
-                                          <td className="p-2">₹{line.line_total || '0.00'}</td>
-                                        </>
-                                      ) : selectedPlatformData?.id === 'bigbasket' ? (
-                                        <>
-                                          <td className="p-2">{line.description || 'Not available'}</td>
-                                          <td className="p-2">{line.sku_code || 'Not available'}</td>
-                                          <td className="p-2">{line.hsn_code || 'Not available'}</td>
-                                          <td className="p-2">{line.quantity || 0}</td>
-                                          <td className="p-2">₹{line.mrp || '0.00'}</td>
-                                          <td className="p-2">₹{line.total_value || '0.00'}</td>
-                                        </>
-                                      ) : selectedPlatformData?.id === 'zomato' ? (
-                                        <>
-                                          <td className="p-2">{line.product_name || 'Not available'}</td>
-                                          <td className="p-2">{line.product_number || 'Not available'}</td>
-                                          <td className="p-2">{line.hsn_code || 'Not available'}</td>
-                                          <td className="p-2">{line.quantity_ordered || 0}</td>
-                                          <td className="p-2">₹{line.price_per_unit || '0.00'}</td>
-                                          <td className="p-2">{line.uom || 'Not available'}</td>
-                                          <td className="p-2">{line.gst_rate || '0.00'}%</td>
-                                          <td className="p-2">₹{line.line_total || '0.00'}</td>
-                                        </>
-                                      ) : selectedPlatformData?.id === 'dealshare' ? (
-                                        <>
-                                          <td className="p-2 bg-gray-50 sticky left-0 z-10 border-r font-medium">{line.line_number || index + 1}</td>
-                                          <td className="p-2 font-mono text-xs">{line.sku || 'Not available'}</td>
-                                          <td className="p-2 max-w-[250px] truncate" title={line.product_name}>{line.product_name || 'Not available'}</td>
-                                          <td className="p-2 font-mono text-xs">{line.hsn_code || 'Not available'}</td>
-                                          <td className="p-2 text-right font-semibold">{line.quantity || 0}</td>
-                                          <td className="p-2 text-right">₹{line.mrp_tax_inclusive || '0.00'}</td>
-                                          <td className="p-2 text-right">₹{line.buying_price || '0.00'}</td>
-                                          <td className="p-2 text-right">{line.gst_percent || '0.00'}%</td>
-                                          <td className="p-2 text-right">{line.cess_percent || '0.00'}%</td>
-                                          <td className="p-2 text-right font-semibold text-green-700">₹{line.gross_amount || '0.00'}</td>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <td className="p-2">{line.item_name || line.sku || 'Not available'}</td>
-                                          <td className="p-2">{line.item_code || line.sku || 'Not available'}</td>
-                                          <td className="p-2">{line.quantity || line.po_qty || 0}</td>
-                                          <td className="p-2">₹{line.cost_price || line.mrp || '0.00'}</td>
-                                          <td className="p-2">₹{line.total_value || line.total_amount || '0.00'}</td>
-                                        </>
-                                      )}
+                                    <tr key={index} className="border-b hover:bg-gray-50 text-xs">
+                                      <td className="p-2 text-center border-r font-medium">{index + 1}</td>
+                                      <td className="p-2 font-mono border-r">
+                                        {safeDisplay(
+                                          line.item_code || line.sku || line.article_id || line.fsn_isbn || line.product_number,
+                                          `ITEM-${index + 1}`
+                                        )}
+                                      </td>
+                                      <td className="p-2 border-r">
+                                        {safeDisplay(line.hsn_code || line.hsn_sa_code, 'HSN-' + (index + 1))}
+                                      </td>
+                                      <td className="p-2 border-r">
+                                        <div className="max-w-[200px] truncate" title={
+                                          line.product_description || line.item_description ||
+                                          line.sku_desc || line.article_name || line.title || line.product_name
+                                        }>
+                                          {safeDisplay(
+                                            line.product_description || line.item_description ||
+                                            line.sku_desc || line.article_name || line.title || line.product_name,
+                                            `Product ${index + 1}`
+                                          )}
+                                        </div>
+                                      </td>
+                                      <td className="p-2 text-center font-medium border-r">
+                                        {line.quantity || line.po_qty || line.quantity_ordered || 0}
+                                      </td>
+                                      <td className="p-2 border-r">
+                                        {line.uom || line.grammage || 'Unit'}
+                                      </td>
+                                      <td className="p-2 text-right border-r">
+                                        {safeDisplay(
+                                          line.basic_cost_price || line.cost_price || line.supplier_price ||
+                                          line.base_cost_price || line.buying_price || line.price_per_unit ||
+                                          line.landing_cost || line.unit_base_cost,
+                                          '₹0.00',
+                                          'currency'
+                                        )}
+                                      </td>
+                                      <td className="p-2 text-right border-r">
+                                        {safeDisplay(
+                                          line.mrp || line.supplier_mrp || line.mrp_tax_inclusive,
+                                          '₹0.00',
+                                          'currency'
+                                        )}
+                                      </td>
+                                      <td className="p-2 text-right border-r">
+                                        {(() => {
+                                          const igst = line.igst_percent || line.igst_rate || line.igst || '0';
+                                          const numValue = parseFloat(String(igst).replace(/[^0-9.-]/g, ''));
+                                          return isNaN(numValue) ? '0%' : `${numValue}%`;
+                                        })()}
+                                      </td>
+                                      <td className="p-2 text-right border-r">
+                                        {(() => {
+                                          const cgst = line.cgst_percent || line.cgst_rate || line.cgst || '0';
+                                          const numValue = parseFloat(String(cgst).replace(/[^0-9.-]/g, ''));
+                                          return isNaN(numValue) ? '0%' : `${numValue}%`;
+                                        })()}
+                                      </td>
+                                      <td className="p-2 text-right border-r">
+                                        {(() => {
+                                          const sgst = line.sgst_percent || line.sgst_rate || line.sgst || '0';
+                                          const numValue = parseFloat(String(sgst).replace(/[^0-9.-]/g, ''));
+                                          return isNaN(numValue) ? '0%' : `${numValue}%`;
+                                        })()}
+                                      </td>
+                                      <td className="p-2 text-right border-r">
+                                        {(() => {
+                                          const cess = line.cess_percent || line.cess_rate || line.cess || '0';
+                                          const numValue = parseFloat(String(cess).replace(/[^0-9.-]/g, ''));
+                                          return isNaN(numValue) ? '0%' : `${numValue}%`;
+                                        })()}
+                                      </td>
+                                      <td className="p-2 text-right border-r">
+                                        {(() => {
+                                          // Priority: use tax_amount from Excel first, then calculate
+                                          const excelTax = line.tax_amount || line.total_tax_amount;
+                                          if (excelTax && parseFloat(String(excelTax)) > 0) {
+                                            return safeDisplay(excelTax, '₹0.00', 'currency');
+                                          }
+
+                                          const taxCalc = calculateTotalTax(line);
+                                          return safeDisplay(taxCalc.totalTax, '₹0.00', 'currency');
+                                        })()}
+                                      </td>
+                                      <td className="p-2 text-right font-medium text-green-600">
+                                        {safeDisplay(
+                                          line.total_amount || line.total_value || line.base_amount ||
+                                          line.gross_amount || line.line_total,
+                                          '₹0.00',
+                                          'currency'
+                                        )}
+                                      </td>
                                     </tr>
                                   ))}
                                 </tbody>
                               </table>
-                              </div>
                             </div>
                           </CardContent>
                         </Card>
                       )}
 
-                      {/* Import Data Button - Bottom */}
-                      <div className="flex justify-center py-6 mt-4">
-                        <Button
-                          onClick={() => handleImportData()}
-                          disabled={isImporting}
-                          size="lg"
-                          className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 text-lg font-semibold shadow-lg"
-                        >
-                          {isImporting ? (
-                            <>
-                              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-3"></div>
-                              Importing Data...
-                            </>
-                          ) : (
-                            <>
-                              <Database className="h-5 w-5 mr-3" />
-                              Import Data into Database
-                            </>
-                          )}
-                        </Button>
-                      </div>
+                      {/* Import Data Button - Bottom (only for platforms without specific buttons) */}
+                      {!['citymall', 'zepto', 'flipkart', 'swiggy'].includes(selectedPlatformData?.id || '') && (
+                        <div className="flex justify-center py-6 mt-4">
+                          <Button
+                            onClick={() => handleImportData()}
+                            disabled={isImporting}
+                            size="lg"
+                            className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 text-lg font-semibold shadow-lg"
+                          >
+                            {isImporting ? (
+                              <>
+                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-3"></div>
+                                Importing Data...
+                              </>
+                            ) : (
+                              <>
+                                <Database className="h-5 w-5 mr-3" />
+                                Import Data into Database
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      )}
                       </div>
                     )}
                   </div>
@@ -2136,6 +2028,7 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
 
   return (
     <div className="space-y-6">
+      <style dangerouslySetInnerHTML={{ __html: scrollbarStyles }} />
       {/* Progress Steps */}
       <Card>
         <CardContent className="pt-6">

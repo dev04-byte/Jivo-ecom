@@ -142,21 +142,67 @@ const updatePoMasterSchema = z.object({
 
 const createFlipkartGroceryPoSchema = z.object({
   header: insertFlipkartGroceryPoHeaderSchema.extend({
-    order_date: z.string().transform(str => new Date(str)),
-    po_expiry_date: z.string().optional().transform(str => str ? new Date(str) : undefined),
+    order_date: z.string().transform(str => {
+      const date = new Date(str);
+      if (isNaN(date.getTime())) {
+        throw new Error(`Invalid order_date: ${str}`);
+      }
+      return date;
+    }),
+    po_expiry_date: z.string().optional().transform(str => {
+      if (!str) return undefined;
+      const date = new Date(str);
+      if (isNaN(date.getTime())) {
+        console.warn(`Invalid po_expiry_date: ${str}, using default`);
+        return undefined;
+      }
+      return date;
+    }),
   }),
   lines: z.array(insertFlipkartGroceryPoLinesSchema.extend({
-    required_by_date: z.string().optional().transform(str => str ? new Date(str) : undefined),
+    required_by_date: z.string().optional().transform(str => {
+      if (!str) return undefined;
+      const date = new Date(str);
+      if (isNaN(date.getTime())) {
+        console.warn(`Invalid required_by_date: ${str}, using default`);
+        return undefined;
+      }
+      return date;
+    }),
   }))
 });
 
 const updateFlipkartGroceryPoSchema = z.object({
   header: insertFlipkartGroceryPoHeaderSchema.partial().extend({
-    order_date: z.string().optional().transform(str => str ? new Date(str) : undefined),
-    po_expiry_date: z.string().optional().transform(str => str ? new Date(str) : undefined),
+    order_date: z.string().optional().transform(str => {
+      if (!str) return undefined;
+      const date = new Date(str);
+      if (isNaN(date.getTime())) {
+        console.warn(`Invalid order_date: ${str}, using default`);
+        return undefined;
+      }
+      return date;
+    }),
+    po_expiry_date: z.string().optional().transform(str => {
+      if (!str) return undefined;
+      const date = new Date(str);
+      if (isNaN(date.getTime())) {
+        console.warn(`Invalid po_expiry_date: ${str}, using default`);
+        return undefined;
+      }
+      return date;
+    }),
   }),
   lines: z.array(insertFlipkartGroceryPoLinesSchema.extend({
-    required_by_date: z.string().optional().transform(str => str ? new Date(str) : undefined),
+    required_by_date: z.string().optional().transform(str => {
+      if (!str) return undefined;
+      const date = new Date(str);
+      if (isNaN(date.getTime())) {
+        console.warn(`Invalid required_by_date: ${str}, using default`);
+        return undefined;
+      }
+      return date;
+    }),
   })).optional()
 });
 
@@ -179,8 +225,49 @@ const updateDistributorPoSchema = z.object({
   items: z.array(insertDistributorOrderItemsSchema).optional()
 });
 
+// Utility function for safe toISOString conversion
+function safeToISOString(value: any): string | undefined {
+  if (!value) return undefined;
+  try {
+    if (value instanceof Date) {
+      return !isNaN(value.getTime()) ? value.toISOString() : undefined;
+    }
+    const date = new Date(value);
+    return !isNaN(date.getTime()) ? date.toISOString() : undefined;
+  } catch (error) {
+    console.warn('Failed to convert value to ISO string:', value, error);
+    return undefined;
+  }
+}
+
+// Utility function to convert ISO strings back to Date objects for database insertion
+function convertIsoStringsToDateObjects(data: any, vendor: string): any {
+  if (Array.isArray(data)) {
+    return data.map(item => convertIsoStringsToDateObjects(item, vendor));
+  } else if (data && typeof data === 'object') {
+    const result = { ...data };
+    Object.keys(result).forEach(key => {
+      if ((key.includes('date') || key.includes('Date')) && typeof result[key] === 'string') {
+        try {
+          const dateObj = new Date(result[key]);
+          if (!isNaN(dateObj.getTime())) {
+            result[key] = dateObj;
+            console.log(`🔄 ${vendor}: Converted ${key} from ISO string back to Date object`);
+          } else {
+            console.warn(`⚠️ ${vendor}: Invalid date string for ${key}:`, result[key]);
+          }
+        } catch (error) {
+          console.warn(`⚠️ ${vendor}: Failed to convert ${key} to Date:`, error);
+        }
+      }
+    });
+    return result;
+  }
+  return data;
+}
+
 // Configure multer for file uploads
-const upload = multer({ 
+const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
 });
@@ -859,8 +946,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/pos", async (_req, res) => {
     try {
       const pos = await storage.getAllPos();
+
+      // Debug: Log Zomato POs specifically
+      const zomatoPOs = pos.filter(po => po.platform?.pf_name === 'Zomato');
+      console.log(`🔍 API /pos: Returning ${pos.length} total POs, including ${zomatoPOs.length} Zomato POs`);
+      if (zomatoPOs.length > 0) {
+        console.log('🔍 Zomato POs:', zomatoPOs.map(po => ({
+          id: po.id,
+          po_number: po.po_number,
+          order_date: po.order_date,
+          platform: po.platform.pf_name
+        })));
+      }
+
       res.json(pos);
     } catch (error) {
+      console.error('❌ Error in /api/pos:', error);
       res.status(500).json({ message: "Failed to fetch POs" });
     }
   });
@@ -868,8 +969,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/pos/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      console.log(`🔍 API /pos/${id}: Searching for PO with ID ${id}`);
 
-      // PRIORITY 1: Check platform-specific tables first (Zepto, Blinkit)
+      // PRIORITY 1: Check platform-specific tables first (Zepto, Blinkit, Zomato)
       // This ensures we show original data from each platform's tables
       const platformPo = await storage.getPoById(id);
       if (platformPo) {
@@ -882,6 +984,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         return res.json(platformPo);
+      } else {
+        console.log(`❌ No PO found in platform-specific tables for ID ${id}`);
       }
 
       // PRIORITY 2: Fall back to po_master table if not found in platform tables
@@ -1396,7 +1500,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           cess_amount_per_unit: line.cess_amount_per_unit ? parseFloat(line.cess_amount_per_unit.toString()) : 0,
           tax_amount: line.tax_amount ? parseFloat(line.tax_amount.toString()) : 0,
           total_amount: line.total_amount ? parseFloat(line.total_amount.toString()) : 0,
-          required_by_date: line.required_by_date ? new Date(line.required_by_date).toISOString().split('T')[0] : ""
+          required_by_date: line.required_by_date ? (() => {
+            try {
+              const date = line.required_by_date instanceof Date ? line.required_by_date : new Date(line.required_by_date);
+              return date instanceof Date && !isNaN(date.getTime()) ? date.toISOString().split('T')[0] : "";
+            } catch (error) {
+              console.warn('Invalid date for required_by_date:', line.required_by_date, error);
+              return "";
+            }
+          })() : ""
         }))
       });
     } catch (error) {
@@ -1452,7 +1564,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cess_amount_per_unit: line.cess_amount_per_unit ? parseFloat(line.cess_amount_per_unit.toString()) : 0,
         tax_amount: line.tax_amount ? parseFloat(line.tax_amount.toString()) : 0,
         total_amount: line.total_amount ? parseFloat(line.total_amount.toString()) : 0,
-        required_by_date: line.required_by_date ? new Date(line.required_by_date).toISOString().split('T')[0] : ""
+        required_by_date: line.required_by_date ? (() => {
+          try {
+            const date = line.required_by_date instanceof Date ? line.required_by_date : new Date(line.required_by_date);
+            return date instanceof Date && !isNaN(date.getTime()) ? date.toISOString().split('T')[0] : "";
+          } catch (error) {
+            console.warn('Invalid date for required_by_date:', line.required_by_date, error);
+            return "";
+          }
+        })() : ""
       }));
       
       res.json(formattedLines);
@@ -3653,9 +3773,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Use platform-specific methods to ensure data goes into both platform-specific AND consolidated tables
         if (vendor === 'flipkart') {
           console.log('🔄 Creating Flipkart PO:', cleanHeader.po_number);
-          console.log('📄 Header data:', JSON.stringify(cleanHeader, null, 2));
-          console.log('📦 Lines data:', cleanLines.length, 'items');
-          createdPo = await storage.createFlipkartGroceryPo(cleanHeader, cleanLines);
+
+          // Convert Date objects from Excel parsing to ISO strings for database (schema uses mode: 'string')
+          const safeHeader = { ...cleanHeader };
+          Object.keys(safeHeader).forEach(key => {
+            if (safeHeader[key] instanceof Date && typeof safeHeader[key].toISOString === 'function') {
+              console.log(`🔧 Flipkart: Converting header field ${key} from Date object to ISO string`);
+              safeHeader[key] = safeHeader[key].toISOString();
+            }
+          });
+
+          const safeLines = cleanLines?.map(line => {
+            const safeLine = { ...line };
+            Object.keys(safeLine).forEach(key => {
+              if (safeLine[key] instanceof Date && typeof safeLine[key].toISOString === 'function') {
+                console.log(`🔧 Flipkart: Converting line field ${key} from Date object to ISO string`);
+                safeLine[key] = safeLine[key].toISOString();
+              }
+            });
+            return safeLine;
+          }) || [];
+
+          // Convert ISO strings back to Date objects for database insertion
+          const headerForDb = convertIsoStringsToDateObjects(safeHeader, 'Flipkart');
+          const linesForDb = convertIsoStringsToDateObjects(safeLines, 'Flipkart');
+
+          console.log('📄 Header data:', JSON.stringify(headerForDb, null, 2));
+          console.log('📦 Lines data:', linesForDb.length, 'items');
+          createdPo = await storage.createFlipkartGroceryPo(headerForDb, linesForDb);
           console.log('✅ Flipkart PO created:', createdPo.id);
 
           // VERIFICATION: Immediately check if the PO exists in database
@@ -3674,19 +3819,129 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         } else if (vendor === 'zepto') {
           console.log('📋 Creating Zepto PO:', cleanHeader.po_number);
-          createdPo = await storage.createZeptoPo(cleanHeader, cleanLines);
+
+          // Convert Date objects from Excel parsing to ISO strings for database (schema uses mode: 'string')
+          const safeHeader = { ...cleanHeader };
+          Object.keys(safeHeader).forEach(key => {
+            if (safeHeader[key] instanceof Date && typeof safeHeader[key].toISOString === 'function') {
+              console.log(`🔧 Zepto: Converting header field ${key} from Date object to ISO string`);
+              safeHeader[key] = safeHeader[key].toISOString();
+            }
+          });
+
+          const safeLines = cleanLines?.map(line => {
+            const safeLine = { ...line };
+            Object.keys(safeLine).forEach(key => {
+              if (safeLine[key] instanceof Date && typeof safeLine[key].toISOString === 'function') {
+                console.log(`🔧 Zepto: Converting line field ${key} from Date object to ISO string`);
+                safeLine[key] = safeLine[key].toISOString();
+              }
+            });
+            return safeLine;
+          }) || [];
+
+          // Convert ISO strings back to Date objects for database insertion
+          const headerForDb = { ...safeHeader };
+          Object.keys(headerForDb).forEach(key => {
+            if ((key.includes('date') || key.includes('Date')) && typeof headerForDb[key] === 'string') {
+              try {
+                const dateObj = new Date(headerForDb[key]);
+                if (!isNaN(dateObj.getTime())) {
+                  headerForDb[key] = dateObj;
+                  console.log(`🔄 Zepto: Converted ${key} from ISO string back to Date object`);
+                }
+              } catch (error) {
+                console.warn(`⚠️ Zepto: Failed to convert ${key} to Date:`, error);
+              }
+            }
+          });
+
+          const linesForDb = safeLines.map(line => {
+            const lineForDb = { ...line };
+            Object.keys(lineForDb).forEach(key => {
+              if ((key.includes('date') || key.includes('Date')) && typeof lineForDb[key] === 'string') {
+                try {
+                  const dateObj = new Date(lineForDb[key]);
+                  if (!isNaN(dateObj.getTime())) {
+                    lineForDb[key] = dateObj;
+                    console.log(`🔄 Zepto: Converted line ${key} from ISO string back to Date object`);
+                  }
+                } catch (error) {
+                  console.warn(`⚠️ Zepto: Failed to convert line ${key} to Date:`, error);
+                }
+              }
+            });
+            return lineForDb;
+          });
+
+          createdPo = await storage.createZeptoPo(headerForDb, linesForDb);
         } else if (vendor === 'citymall') {
           console.log('🏢 Creating CityMall PO:', cleanHeader.po_number);
-          console.log('📊 CityMall Header Data:', JSON.stringify(cleanHeader, null, 2));
-          console.log('📝 CityMall Lines Count:', cleanLines.length);
-          console.log('📝 CityMall First Line:', JSON.stringify(cleanLines[0], null, 2));
+
+          // Convert Date objects from Excel parsing to ISO strings for database (schema uses mode: 'string')
+          const safeHeader = { ...cleanHeader };
+          Object.keys(safeHeader).forEach(key => {
+            if (safeHeader[key] instanceof Date && typeof safeHeader[key].toISOString === 'function') {
+              console.log(`🔧 CityMall: Converting header field ${key} from Date object to ISO string`);
+              safeHeader[key] = safeHeader[key].toISOString();
+            }
+          });
+
+          const safeLines = cleanLines?.map(line => {
+            const safeLine = { ...line };
+            Object.keys(safeLine).forEach(key => {
+              if (safeLine[key] instanceof Date && typeof safeLine[key].toISOString === 'function') {
+                console.log(`🔧 CityMall: Converting line field ${key} from Date object to ISO string`);
+                safeLine[key] = safeLine[key].toISOString();
+              }
+            });
+            return safeLine;
+          }) || [];
+
+          console.log('📊 CityMall Header Data:', JSON.stringify(safeHeader, null, 2));
+          console.log('📝 CityMall Lines Count:', safeLines.length);
+          console.log('📝 CityMall First Line:', JSON.stringify(safeLines[0], null, 2));
 
           // Validate required fields for CityMall
-          if (!cleanHeader.po_number) {
+          if (!safeHeader.po_number) {
             throw new Error('PO number is required for CityMall');
           }
 
-          createdPo = await storage.createCityMallPo(cleanHeader, cleanLines);
+          // Convert ISO strings back to Date objects for database insertion
+          const headerForDb = { ...safeHeader };
+          Object.keys(headerForDb).forEach(key => {
+            if ((key.includes('date') || key.includes('Date')) && typeof headerForDb[key] === 'string') {
+              try {
+                const dateObj = new Date(headerForDb[key]);
+                if (!isNaN(dateObj.getTime())) {
+                  headerForDb[key] = dateObj;
+                  console.log(`🔄 CityMall: Converted ${key} from ISO string back to Date object`);
+                }
+              } catch (error) {
+                console.warn(`⚠️ CityMall: Failed to convert ${key} to Date:`, error);
+              }
+            }
+          });
+
+          const linesForDb = safeLines.map(line => {
+            const lineForDb = { ...line };
+            Object.keys(lineForDb).forEach(key => {
+              if ((key.includes('date') || key.includes('Date')) && typeof lineForDb[key] === 'string') {
+                try {
+                  const dateObj = new Date(lineForDb[key]);
+                  if (!isNaN(dateObj.getTime())) {
+                    lineForDb[key] = dateObj;
+                    console.log(`🔄 CityMall: Converted line ${key} from ISO string back to Date object`);
+                  }
+                } catch (error) {
+                  console.warn(`⚠️ CityMall: Failed to convert line ${key} to Date:`, error);
+                }
+              }
+            });
+            return lineForDb;
+          });
+
+          createdPo = await storage.createCityMallPo(headerForDb, linesForDb);
           console.log('✅ CityMall PO Created Successfully:', createdPo.id);
         } else if (vendor === 'blinkit') {
           // Filter and clean header data to match ACTUAL database schema
@@ -3735,32 +3990,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return filteredLine;
           });
 
+          // Convert Date objects from Excel parsing to ISO strings for database (schema uses mode: 'string')
+          Object.keys(filteredHeader).forEach(key => {
+            if (filteredHeader[key] instanceof Date && typeof filteredHeader[key].toISOString === 'function') {
+              console.log(`🔧 Blinkit: Converting header field ${key} from Date object to ISO string`);
+              filteredHeader[key] = filteredHeader[key].toISOString();
+            }
+          });
+
+          const safeFilteredLines = filteredLines?.map(line => {
+            const safeLine = { ...line };
+            Object.keys(safeLine).forEach(key => {
+              if (safeLine[key] instanceof Date && typeof safeLine[key].toISOString === 'function') {
+                console.log(`🔧 Blinkit: Converting line field ${key} from Date object to ISO string`);
+                safeLine[key] = safeLine[key].toISOString();
+              }
+            });
+            return safeLine;
+          }) || [];
+
           // Use the function with duplicate checking
           const blinkitPoData = {
             po_header: filteredHeader,
-            po_lines: filteredLines
+            po_lines: safeFilteredLines
           };
           const insertResult = await insertBlinkitPoData(blinkitPoData);
           createdPo = {
             id: insertResult.headerId,
             ...filteredHeader
           };
-        } else if (vendor === 'zepto') {
-          // Handle Zepto using the specialized database operations
-          const zeptoPoData = {
-            header: cleanHeader,
-            lines: cleanLines
-          };
-          const insertResult = await insertZeptoPoToDatabase(zeptoPoData);
-          if (!insertResult.success) {
-            throw new Error(insertResult.message);
-          }
-          createdPo = insertResult.data;
         } else if (vendor === 'swiggy') {
           // Handle Swiggy using the specialized database operations with duplicate checking
+          // Convert Date objects from Excel parsing to ISO strings for database (schema uses mode: 'string')
+          const safeHeader = { ...cleanHeader };
+          Object.keys(safeHeader).forEach(key => {
+            if (safeHeader[key] instanceof Date && typeof safeHeader[key].toISOString === 'function') {
+              console.log(`🔧 Swiggy: Converting header field ${key} from Date object to ISO string`);
+              safeHeader[key] = safeHeader[key].toISOString();
+            }
+          });
+
+          const safeLines = cleanLines?.map(line => {
+            const safeLine = { ...line };
+            Object.keys(safeLine).forEach(key => {
+              if (safeLine[key] instanceof Date && typeof safeLine[key].toISOString === 'function') {
+                console.log(`🔧 Swiggy: Converting line field ${key} from Date object to ISO string`);
+                safeLine[key] = safeLine[key].toISOString();
+              }
+            });
+            return safeLine;
+          }) || [];
+
           const swiggyPoData = {
-            header: cleanHeader,
-            lines: cleanLines
+            header: safeHeader,
+            lines: safeLines
           };
           const insertResult = await insertSwiggyPoToDatabase(swiggyPoData);
           if (!insertResult.success) {
@@ -3768,9 +4051,218 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
           createdPo = insertResult.data;
         } else if (vendor === 'bigbasket') {
-          createdPo = await storage.createBigbasketPo(cleanHeader, cleanLines);
+          // Convert Date objects from Excel parsing to ISO strings for database (schema uses mode: 'string')
+          const safeHeader = { ...cleanHeader };
+          Object.keys(safeHeader).forEach(key => {
+            if (safeHeader[key] instanceof Date && typeof safeHeader[key].toISOString === 'function') {
+              console.log(`🔧 BigBasket: Converting header field ${key} from Date object to ISO string`);
+              safeHeader[key] = safeHeader[key].toISOString();
+            }
+          });
+
+          const safeLines = cleanLines?.map(line => {
+            const safeLine = { ...line };
+            Object.keys(safeLine).forEach(key => {
+              if (safeLine[key] instanceof Date && typeof safeLine[key].toISOString === 'function') {
+                console.log(`🔧 BigBasket: Converting line field ${key} from Date object to ISO string`);
+                safeLine[key] = safeLine[key].toISOString();
+              }
+            });
+            return safeLine;
+          }) || [];
+
+          // Convert ISO strings back to Date objects for database insertion
+          const headerForDb = { ...safeHeader };
+          Object.keys(headerForDb).forEach(key => {
+            if ((key.includes('date') || key.includes('Date')) && typeof headerForDb[key] === 'string') {
+              try {
+                const dateObj = new Date(headerForDb[key]);
+                if (!isNaN(dateObj.getTime())) {
+                  headerForDb[key] = dateObj;
+                  console.log(`🔄 BigBasket: Converted ${key} from ISO string back to Date object`);
+                }
+              } catch (error) {
+                console.warn(`⚠️ BigBasket: Failed to convert ${key} to Date:`, error);
+              }
+            }
+          });
+
+          const linesForDb = safeLines.map(line => {
+            const lineForDb = { ...line };
+            Object.keys(lineForDb).forEach(key => {
+              if ((key.includes('date') || key.includes('Date')) && typeof lineForDb[key] === 'string') {
+                try {
+                  const dateObj = new Date(lineForDb[key]);
+                  if (!isNaN(dateObj.getTime())) {
+                    lineForDb[key] = dateObj;
+                    console.log(`🔄 BigBasket: Converted line ${key} from ISO string back to Date object`);
+                  }
+                } catch (error) {
+                  console.warn(`⚠️ BigBasket: Failed to convert line ${key} to Date:`, error);
+                }
+              }
+            });
+            return lineForDb;
+          });
+
+          createdPo = await storage.createBigbasketPo(headerForDb, linesForDb);
         } else if (vendor === 'zomato') {
-          createdPo = await storage.createZomatoPo(cleanHeader, cleanLines);
+          console.log('🔍 Zomato: Before createZomatoPo call');
+
+          // Prepare Zomato header with proper date fields as Date objects (Zomato schema expects Date objects, not strings)
+          const now = new Date();
+
+          // Filter header to only include fields that exist in the Zomato schema
+          const validZomatoFields = [
+            'po_number', 'po_date', 'expected_delivery_date', 'account_number', 'vendor_id',
+            'bill_from_name', 'bill_from_address', 'bill_from_gstin', 'bill_from_phone',
+            'bill_to_name', 'bill_to_address', 'bill_to_gstin',
+            'ship_from_name', 'ship_from_address', 'ship_from_gstin',
+            'ship_to_name', 'ship_to_address', 'ship_to_gstin',
+            'total_items', 'total_quantity', 'grand_total', 'total_tax_amount', 'uploaded_by'
+          ];
+
+          const safeHeader: any = {};
+
+          // Only copy valid fields from cleanHeader
+          validZomatoFields.forEach(field => {
+            if (cleanHeader[field] !== undefined) {
+              safeHeader[field] = cleanHeader[field];
+            }
+          });
+
+          // Ensure proper date handling for date fields with strict type checking
+          const safeDateConvert = (value: any): Date | null => {
+            if (!value) return null;
+            if (value instanceof Date) return value;
+            try {
+              const date = new Date(value);
+              return isNaN(date.getTime()) ? null : date;
+            } catch {
+              return null;
+            }
+          };
+
+          safeHeader.po_date = safeDateConvert(cleanHeader.po_date || cleanHeader.po_created_date) || now;
+          safeHeader.expected_delivery_date = safeDateConvert(cleanHeader.expected_delivery_date || cleanHeader.po_delivery_date || cleanHeader.delivery_date) || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+          // Ensure all other fields are properly typed
+          if (safeHeader.total_items !== undefined) {
+            safeHeader.total_items = parseInt(String(safeHeader.total_items)) || 0;
+          }
+          if (safeHeader.total_quantity !== undefined) {
+            safeHeader.total_quantity = String(safeHeader.total_quantity);
+          }
+          if (safeHeader.grand_total !== undefined) {
+            safeHeader.grand_total = String(safeHeader.grand_total);
+          }
+          if (safeHeader.total_tax_amount !== undefined) {
+            safeHeader.total_tax_amount = String(safeHeader.total_tax_amount);
+          }
+
+          console.log('🔍 Zomato: Enhanced header with Date objects:', {
+            po_number: safeHeader.po_number,
+            po_date: safeHeader.po_date,
+            expected_delivery_date: safeHeader.expected_delivery_date
+          });
+
+          // Don't convert to ISO strings - Zomato schema expects Date objects
+          console.log('🔍 Zomato: About to call createZomatoPo');
+          console.log('🔍 Zomato: safeHeader keys:', Object.keys(safeHeader));
+          console.log('🔍 Zomato: cleanLines length:', cleanLines?.length || 0);
+
+          // Debug: Check what's in safeHeader before passing to storage
+          Object.keys(safeHeader).forEach(key => {
+            if (key.includes('date') || key.includes('Date')) {
+              const value = safeHeader[key];
+              console.log(`🔍 Zomato routes date field ${key}:`, {
+                value,
+                type: typeof value,
+                isDate: value instanceof Date
+              });
+            }
+          });
+
+          // Filter line items to only include fields that exist in the Zomato items schema
+          const validZomatoItemFields = [
+            'line_number', 'product_number', 'product_name', 'hsn_code',
+            'quantity_ordered', 'price_per_unit', 'uom', 'gst_rate',
+            'total_tax_amount', 'line_total'
+          ];
+
+          const safeLines = (cleanLines || []).map((line, index) => {
+            const safeLine: any = {};
+            validZomatoItemFields.forEach(field => {
+              if (line[field] !== undefined) {
+                safeLine[field] = line[field];
+              }
+            });
+
+            // Map some fields from the parser to schema fields with type safety
+            if (line.tax_amount !== undefined) {
+              safeLine.total_tax_amount = String(line.tax_amount);
+            }
+            if (line.total_amount !== undefined) {
+              safeLine.line_total = String(line.total_amount);
+            }
+            if (line.line_total !== undefined) {
+              safeLine.line_total = String(line.line_total);
+            }
+            // Use legacy gst_rate field if available
+            if (line.gst_rate !== undefined) {
+              safeLine.gst_rate = String(line.gst_rate);
+            }
+
+            // Ensure proper types for numeric fields
+            if (safeLine.line_number !== undefined) {
+              safeLine.line_number = parseInt(String(safeLine.line_number)) || (index + 1);
+            } else {
+              safeLine.line_number = index + 1;
+            }
+
+            if (safeLine.quantity_ordered !== undefined) {
+              safeLine.quantity_ordered = String(safeLine.quantity_ordered);
+            }
+            if (safeLine.price_per_unit !== undefined) {
+              safeLine.price_per_unit = String(safeLine.price_per_unit);
+            }
+
+            // Ensure all string fields are actually strings
+            ['product_number', 'product_name', 'hsn_code', 'uom'].forEach(field => {
+              if (safeLine[field] !== undefined) {
+                safeLine[field] = String(safeLine[field]);
+              }
+            });
+
+            return safeLine;
+          });
+
+          console.log('🔍 Zomato: Filtered safeLines count:', safeLines.length);
+
+          // Final safety check: Create completely clean objects manually to preserve Date types
+          const finalSafeHeader = {};
+          Object.keys(safeHeader).forEach(key => {
+            const value = safeHeader[key];
+            if (value !== undefined && value !== null) {
+              finalSafeHeader[key] = value;
+            }
+          });
+
+          const finalSafeLines = safeLines.map(line => {
+            const cleanLine = {};
+            Object.keys(line).forEach(key => {
+              const value = line[key];
+              if (value !== undefined && value !== null) {
+                cleanLine[key] = value;
+              }
+            });
+            return cleanLine;
+          });
+
+          console.log('🔍 Zomato: Final header keys:', Object.keys(finalSafeHeader));
+          console.log('🔍 Zomato: About to call storage with final data');
+
+          createdPo = await storage.createZomatoPo(finalSafeHeader, finalSafeLines);
         } else if (vendor === 'dealshare') {
           console.log('🔍 DealShare: Before createDealsharePo call');
 
@@ -3794,7 +4286,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Convert Date objects from Excel parsing to ISO strings for database (schema uses mode: 'string')
           Object.keys(safeHeader).forEach(key => {
-            if (safeHeader[key] instanceof Date) {
+            if (safeHeader[key] instanceof Date && typeof safeHeader[key].toISOString === 'function') {
               console.log(`🔧 DealShare: Converting header field ${key} from Date object to ISO string`);
               safeHeader[key] = safeHeader[key].toISOString();
             }
@@ -3803,7 +4295,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const safeLines = cleanLines?.map(line => {
             const safeLine = { ...line };
             Object.keys(safeLine).forEach(key => {
-              if (safeLine[key] instanceof Date) {
+              if (safeLine[key] instanceof Date && typeof safeLine[key].toISOString === 'function') {
                 console.log(`🔧 DealShare: Converting line field ${key} from Date object to ISO string`);
                 safeLine[key] = safeLine[key].toISOString();
               }
@@ -5938,9 +6430,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             req.file.buffer.toString('utf8'),
             businessUnit,
             periodType,
-            reportDate.toISOString(),
-            periodStart ? periodStart.toISOString() : undefined,
-            periodEnd ? periodEnd.toISOString() : undefined
+            reportDate instanceof Date && !isNaN(reportDate.getTime()) ? reportDate.toISOString() : new Date().toISOString(),
+            periodStart && periodStart instanceof Date && !isNaN(periodStart.getTime()) ? periodStart.toISOString() : undefined,
+            periodEnd && periodEnd instanceof Date && !isNaN(periodEnd.getTime()) ? periodEnd.toISOString() : undefined
           );
         } else if (platform === "blinkit") {
           parsedData = await parseBlinkitInventoryCsv(
@@ -6140,9 +6632,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           targetTable: tableName,
           importedCount: insertedItems.length,
           summary: parsedData.summary,
-          reportDate: reportDate.toISOString(),
-          periodStart: periodStart?.toISOString(),
-          periodEnd: periodEnd?.toISOString()
+          reportDate: reportDate instanceof Date && !isNaN(reportDate.getTime()) ? reportDate.toISOString() : new Date().toISOString(),
+          periodStart: periodStart && periodStart instanceof Date && !isNaN(periodStart.getTime()) ? periodStart.toISOString() : undefined,
+          periodEnd: periodEnd && periodEnd instanceof Date && !isNaN(periodEnd.getTime()) ? periodEnd.toISOString() : undefined
         });
 
       } catch (parseError: any) {

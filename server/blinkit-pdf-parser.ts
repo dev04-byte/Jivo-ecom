@@ -28,7 +28,10 @@ export function parseBlinkitPDF(pdfData: any, uploadedBy: string): {
     const header: any = {
       // ACTUAL Database columns
       po_number: orderDetails?.poNumber || `BL${Date.now()}`,
-      po_date: orderDetails?.date ? parseBlinkitDate(orderDetails.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      po_date: orderDetails?.date ? (() => {
+        const date = parseBlinkitDate(orderDetails.date);
+        return date instanceof Date && !isNaN(date.getTime()) ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+      })() : new Date().toISOString().split('T')[0],
       po_type: orderDetails?.poType || 'PO',
       currency: orderDetails?.currency || 'INR',
       buyer_name: buyer?.company || 'HANDS ON TRADES PRIVATE LIMITED',
@@ -53,8 +56,14 @@ export function parseBlinkitPDF(pdfData: any, uploadedBy: string): {
       spoc_phone: buyer?.phone || '+91 9068342018',
       spoc_email: vendor?.email || 'marketplace@jivo.in',
       payment_terms: orderDetails?.paymentTerms || '30 Days',
-      po_expiry_date: orderDetails?.expiryDate ? parseBlinkitDate(orderDetails.expiryDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      po_delivery_date: orderDetails?.deliveryDate ? parseBlinkitDate(orderDetails.deliveryDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      po_expiry_date: orderDetails?.expiryDate ? (() => {
+        const date = parseBlinkitDate(orderDetails.expiryDate);
+        return date instanceof Date && !isNaN(date.getTime()) ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+      })() : new Date().toISOString().split('T')[0],
+      po_delivery_date: orderDetails?.deliveryDate ? (() => {
+        const date = parseBlinkitDate(orderDetails.deliveryDate);
+        return date instanceof Date && !isNaN(date.getTime()) ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+      })() : new Date().toISOString().split('T')[0],
       total_quantity: summary?.totalQuantity || items.reduce((sum, item) => sum + (item.quantity || 0), 0),
       total_items: summary?.totalItems || items.length,
       total_weight: summary?.totalWeight ? String(summary.totalWeight) : calculateTotalWeightFromItems(items),

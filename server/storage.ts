@@ -1029,6 +1029,71 @@ export class DatabaseStorage implements IStorage {
       console.error('❌ getAllPos: Error fetching Dealshare POs:', error);
     }
 
+    // Fetch Zomato POs from zomato_po_header (original Zomato data)
+    try {
+      const zomatoPos = await this.getAllZomatoPos();
+      console.log(`📊 getAllPos: Found ${zomatoPos.length} Zomato POs from zomato_po_header (original data)`);
+
+      for (const zomatoPo of zomatoPos) {
+        // Calculate total amount from po items
+        const totalAmount = zomatoPo.poItems?.reduce((sum, item) => {
+          const itemTotal = parseFloat(item.total_amount?.toString() || '0');
+          return sum + itemTotal;
+        }, 0) || parseFloat(zomatoPo.grand_total?.toString() || '0');
+
+        // Calculate the unified ID first
+        const unifiedId = 9000000 + zomatoPo.id;
+
+        // Map order items first
+        const orderItems = zomatoPo.poItems?.map((line: any, index: number) => ({
+          id: line.id,
+          po_id: unifiedId, // Use the pre-calculated ID
+          item_name: line.product_name || '',
+          sap_code: line.product_number || '',
+          quantity: parseInt(line.quantity_ordered?.toString() || '1', 10),
+          basic_rate: line.price_per_unit?.toString() || '0',
+          gst_rate: line.gst_rate?.toString() || '0',
+          landing_rate: line.total_amount?.toString() || line.line_total?.toString() || '0',
+          status: 'active',
+          create_on: line.created_at || new Date(),
+          create_by: 'zomato',
+          modify_on: line.updated_at || line.created_at || new Date(),
+          modify_by: 'zomato',
+          hsn_code: line.hsn_code || '',
+          mrp: '0',
+          cost_price: parseFloat(line.price_per_unit?.toString() || '0'),
+          po_line_number: line.line_number || index + 1
+        })) || [];
+
+        // Use original Zomato data exactly as uploaded
+        const originalZomatoPo = {
+          id: unifiedId, // Zomato IDs start from 9000000 to avoid conflicts
+          po_number: zomatoPo.po_number,
+          po_date: zomatoPo.po_date || new Date(), // Ensure we have a valid date
+          order_date: zomatoPo.po_date || new Date(), // Frontend expects order_date
+          platform: { id: 9, pf_name: "Zomato" },
+          vendor_name: zomatoPo.bill_from_name || 'KNOWTABLE ONLINE SERVICES PRIVATE LIMITED',
+          status: 'Active',
+          created_at: zomatoPo.created_at,
+          updated_at: zomatoPo.updated_at,
+          expiry_date: zomatoPo.expected_delivery_date || null,
+          serving_distributor: null,
+          city: 'Mumbai', // Default for Zomato Hyperpure
+          state: 'Maharashtra',
+          region: '',
+          area: '',
+          appointment_date: null,
+          delivery_date: zomatoPo.expected_delivery_date || null,
+          attachment: null,
+          orderItems: orderItems
+        };
+
+        result.push(originalZomatoPo as any);
+      }
+    } catch (error) {
+      console.error('❌ getAllPos: Error fetching Zomato POs:', error);
+    }
+
     // PRIORITY 2: Fetch POs from po_master table (but exclude platform-specific tables to avoid duplicates)
     const posWithPlatforms = await db
       .select({
@@ -1222,7 +1287,7 @@ export class DatabaseStorage implements IStorage {
     // Sort results by created_at descending (most recent uploads first)
     result.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
-    console.log(`📊 getAllPos: Returning ${result.length} POs total (po_master + Zepto + Blinkit + Swiggy + Flipkart + BigBasket + CityMall + Dealshare)`);
+    console.log(`📊 getAllPos: Returning ${result.length} POs total (po_master + Zepto + Blinkit + Swiggy + Flipkart + BigBasket + CityMall + Dealshare + Zomato)`);
 
     return result;
   }
@@ -1591,7 +1656,80 @@ export class DatabaseStorage implements IStorage {
       console.error(`❌ getPoById: Error checking Dealshare tables for PO ${id}:`, error);
     }
 
-    // PRIORITY 8: Check po_master table (unified POs)
+    // PRIORITY 8: Check Zomato-specific tables (original data)
+    console.log(`🔍 getPoById: Checking Zomato tables for PO ${id}...`);
+    try {
+      // Check if this is a Zomato ID (starts with 9000000)
+      let zomatoId = id;
+      if (id >= 9000000 && id < 10000000) {
+        zomatoId = id - 9000000; // Convert back to original Zomato ID
+        console.log(`🔍 getPoById: Detected Zomato ID mapping ${id} -> ${zomatoId}`);
+      }
+
+      const zomatoPo = await this.getZomatoPoById(zomatoId);
+      if (zomatoPo) {
+        console.log(`✅ getPoById: Found Zomato PO ${id} in zomato_po_header (using original data)`);
+
+        // Return RAW Zomato table data PLUS frontend compatibility fields
+        const rawZomatoPo = {
+          // Add platform info for frontend identification
+          platform: { id: 9, pf_name: "Zomato" },
+          id: id, // Use the unified ID for consistency
+          po_number: zomatoPo.po_number,
+          po_date: zomatoPo.po_date || new Date(),
+          order_date: zomatoPo.po_date || new Date(), // Frontend compatibility
+          status: 'Active',
+          created_at: zomatoPo.created_at,
+          updated_at: zomatoPo.updated_at,
+          expiry_date: zomatoPo.expected_delivery_date || null,
+          vendor_name: zomatoPo.bill_from_name || 'KNOWTABLE ONLINE SERVICES PRIVATE LIMITED',
+          buyer_name: zomatoPo.ship_to_name || 'Zomato Hyperpure Private Limited',
+          vendor_address: zomatoPo.bill_from_address || '',
+          buyer_address: zomatoPo.bill_to_address || '',
+          vendor_gstin: zomatoPo.bill_from_gstin || '',
+          buyer_gstin: zomatoPo.bill_to_gstin || '',
+          total_amount: zomatoPo.grand_total?.toString() || '0',
+          total_items: zomatoPo.total_items || 0,
+          total_quantity: zomatoPo.total_quantity?.toString() || '0',
+          city: 'Mumbai',
+          state: 'Maharashtra',
+          serving_distributor: null,
+          region: '',
+          area: '',
+          appointment_date: null,
+          delivery_date: zomatoPo.expected_delivery_date || null,
+          attachment: null,
+          orderItems: zomatoPo.poItems?.map((line: any, index: number) => ({
+            id: line.id,
+            po_id: id, // Use the unified ID
+            item_name: line.product_name || '',
+            sap_code: line.product_number || '',
+            quantity: parseInt(line.quantity_ordered?.toString() || '1', 10),
+            basic_rate: line.price_per_unit?.toString() || '0',
+            gst_rate: line.gst_rate?.toString() || '0',
+            landing_rate: line.total_amount?.toString() || line.line_total?.toString() || '0',
+            total_amount: line.total_amount?.toString() || line.line_total?.toString() || '0',
+            status: 'active',
+            create_on: line.created_at || new Date(),
+            create_by: 'zomato',
+            modify_on: line.updated_at || line.created_at || new Date(),
+            modify_by: 'zomato',
+            hsn_code: line.hsn_code || '',
+            mrp: '0',
+            cost_price: parseFloat(line.price_per_unit?.toString() || '0'),
+            po_line_number: line.line_number || index + 1,
+            uom: line.uom || 'PCS'
+          })) || []
+        };
+
+        console.log(`✅ getPoById: Returning RAW Zomato PO ${id} with ${rawZomatoPo.orderItems.length} items`);
+        return rawZomatoPo as any;
+      }
+    } catch (error) {
+      console.error(`❌ getPoById: Error checking Zomato tables for PO ${id}:`, error);
+    }
+
+    // PRIORITY 9: Check po_master table (unified POs)
     const masterPoResult = await db
       .select({
         master: poMaster,
@@ -1680,7 +1818,7 @@ export class DatabaseStorage implements IStorage {
       return convertedPo as any;
     }
 
-    // PRIORITY 4: Fallback to original pf_po table lookup
+    // PRIORITY 10: Fallback to original pf_po table lookup
     console.log(`🔍 getPoById: Checking pf_po table for PO ${id}...`);
     const [result] = await db
       .select({
@@ -2301,9 +2439,23 @@ export class DatabaseStorage implements IStorage {
       const safeParseDate = (dateValue: any, allowNull: boolean = true): Date | null => {
         try {
           if (!dateValue) return allowNull ? null : new Date();
+
+          // If it's already a Date object, return it
+          if (dateValue instanceof Date) {
+            return isNaN(dateValue.getTime()) ? (allowNull ? null : new Date()) : dateValue;
+          }
+
+          // If it's a string, parse it
+          if (typeof dateValue === 'string') {
+            const date = new Date(dateValue);
+            return isNaN(date.getTime()) ? (allowNull ? null : new Date()) : date;
+          }
+
+          // For any other type, try to convert to Date
           const date = new Date(dateValue);
           return isNaN(date.getTime()) ? (allowNull ? null : new Date()) : date;
-        } catch {
+        } catch (error) {
+          console.error(`❌ safeParseDate error for value:`, dateValue, error);
           return allowNull ? null : new Date();
         }
       };
@@ -2396,13 +2548,36 @@ export class DatabaseStorage implements IStorage {
         vendor_po_number: poMasterData.vendor_po_number,
         platform_id: poMasterData.platform_id,
         po_date: poMasterData.po_date,
+        delivery_date: poMasterData.delivery_date,
+        appointment_date: poMasterData.appointment_date,
+        expiry_date: poMasterData.expiry_date,
         distributor_id: poMasterData.distributor_id,
         company_id: poMasterData.company_id
       });
 
-      const createdPoMaster = await tx.insert(poMaster).values(poMasterData).returning();
-      const poMasterId = createdPoMaster[0].id;
-      console.log(`✅ Created po_master record with ID: ${poMasterId}`);
+      // Debug: Check all date fields before insertion
+      Object.keys(poMasterData).forEach(key => {
+        const value = (poMasterData as any)[key];
+        if (key.includes('date') || key.includes('Date')) {
+          console.log(`🔍 Date field ${key}:`, {
+            value,
+            type: typeof value,
+            isDate: value instanceof Date,
+            hasToISOString: value && typeof value.toISOString === 'function'
+          });
+        }
+      });
+
+      let poMasterId: number;
+      try {
+        const createdPoMaster = await tx.insert(poMaster).values(poMasterData).returning();
+        poMasterId = createdPoMaster[0].id;
+        console.log(`✅ Created po_master record with ID: ${poMasterId}`);
+      } catch (poMasterError) {
+        console.error(`❌ CRITICAL: Error inserting into po_master table:`, poMasterError);
+        console.error(`❌ poMasterData that caused the error:`, JSON.stringify(poMasterData, null, 2));
+        throw poMasterError; // Re-throw to see the full error chain
+      }
 
       // Process each line item
       if (platformLines && platformLines.length > 0) {
@@ -4257,6 +4432,7 @@ export class DatabaseStorage implements IStorage {
   // Zomato PO methods
   async getAllZomatoPos(): Promise<(ZomatoPoHeader & { poItems: ZomatoPoItems[] })[]> {
     const pos = await db.select().from(zomatoPoHeader).orderBy(desc(zomatoPoHeader.created_at));
+    console.log(`🔍 getAllZomatoPos: Found ${pos.length} Zomato PO headers in database`);
     
     const result = [];
     for (const po of pos) {
@@ -4292,23 +4468,57 @@ export class DatabaseStorage implements IStorage {
 
   async createZomatoPo(header: InsertZomatoPoHeader, items: InsertZomatoPoItems[]): Promise<ZomatoPoHeader> {
     return await db.transaction(async (tx) => {
-      // Insert into platform-specific tables
-      const [createdPo] = await tx.insert(zomatoPoHeader).values(header).returning();
-      
+      console.log('🔍 Zomato: About to insert into zomato_po_header table');
+      console.log('🔍 Zomato: Header data:', JSON.stringify(header, null, 2));
+
+      // Debug: Check all date fields in header
+      Object.keys(header).forEach(key => {
+        const value = (header as any)[key];
+        if (key.includes('date') || key.includes('Date')) {
+          console.log(`🔍 Zomato header date field ${key}:`, {
+            value,
+            type: typeof value,
+            isDate: value instanceof Date,
+            hasToISOString: value && typeof value.toISOString === 'function'
+          });
+        }
+      });
+
+      // Insert into platform-specific tables with error handling
+      let createdPo: any;
+      try {
+        const result = await tx.insert(zomatoPoHeader).values(header).returning();
+        createdPo = result[0];
+        console.log('✅ Zomato: Successfully inserted into zomato_po_header');
+      } catch (zomatoHeaderError) {
+        console.error('❌ CRITICAL: Error inserting into zomato_po_header table:', zomatoHeaderError);
+        console.error('❌ Header data that caused error:', JSON.stringify(header, null, 2));
+        throw zomatoHeaderError;
+      }
+
       if (items.length > 0) {
         const itemsWithPoId = items.map(item => ({
           ...item,
           po_header_id: createdPo.id
         }));
-        await tx.insert(zomatoPoItems).values(itemsWithPoId);
-        
-        // Also insert into consolidated po_master and po_lines tables
-        await this.insertIntoPoMasterAndLines(tx, 'Zomato', createdPo, itemsWithPoId);
+
+        try {
+          await tx.insert(zomatoPoItems).values(itemsWithPoId);
+          console.log('✅ Zomato: Successfully inserted into zomato_po_items');
+        } catch (zomatoItemsError) {
+          console.error('❌ CRITICAL: Error inserting into zomato_po_items table:', zomatoItemsError);
+          throw zomatoItemsError;
+        }
+
+        // TEMPORARILY DISABLED: Also insert into consolidated po_master and po_lines tables
+        // await this.insertIntoPoMasterAndLines(tx, 'Zomato', createdPo, itemsWithPoId);
+        console.log('⚠️ Zomato: Skipping po_master insertion for debugging');
       } else {
-        // Insert header only into po_master
-        await this.insertIntoPoMasterAndLines(tx, 'Zomato', createdPo, []);
+        // TEMPORARILY DISABLED: Insert header only into po_master
+        // await this.insertIntoPoMasterAndLines(tx, 'Zomato', createdPo, []);
+        console.log('⚠️ Zomato: Skipping po_master insertion for debugging (no items)');
       }
-      
+
       return createdPo;
     });
   }
@@ -4418,7 +4628,7 @@ export class DatabaseStorage implements IStorage {
     return await db.transaction(async (tx) => {
       const [updatedPo] = await tx
         .update(dealsharePoHeader)
-        .set({ ...header, updated_at: new Date() })
+        .set({ ...header, updated_at: new Date().toISOString() as any })
         .where(eq(dealsharePoHeader.id, id))
         .returning();
 

@@ -135,9 +135,9 @@ export async function parseBlinkitInventoryCsv(
           platform: 'blinkit',
           businessUnit,
           periodType,
-          reportDate: reportDate?.toISOString(),
-          periodStart: periodStart?.toISOString(),
-          periodEnd: periodEnd?.toISOString(),
+          reportDate: reportDate && reportDate instanceof Date && !isNaN(reportDate.getTime()) ? reportDate.toISOString() : undefined,
+          periodStart: periodStart && periodStart instanceof Date && !isNaN(periodStart.getTime()) ? periodStart.toISOString() : undefined,
+          periodEnd: periodEnd && periodEnd instanceof Date && !isNaN(periodEnd.getTime()) ? periodEnd.toISOString() : undefined,
           totalItems: items.length,
           items,
           summary: {
