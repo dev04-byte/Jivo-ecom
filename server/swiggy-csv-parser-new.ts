@@ -182,7 +182,11 @@ function parseSingleSwiggyPO(records: any[], uploadedBy: string): ParsedSwiggyPO
         line_number: i + 1,
         item_code: row.SkuCode || '',
         item_description: row.SkuDescription || '',
+        category_id: row.CategoryId || '',
+        brand_name: row.BrandName || '',
         quantity: orderedQty,
+        received_qty: receivedQty,
+        balanced_qty: balancedQty,
         mrp: mrp,
         unit_base_cost: unitBaseCost,
         taxable_value: poLineValueWithoutTax > 0 ? poLineValueWithoutTax : (unitBaseCost * orderedQty),
@@ -197,6 +201,8 @@ function parseSingleSwiggyPO(records: any[], uploadedBy: string): ParsedSwiggyPO
         additional_cess: 0,
         total_tax_amount: tax,
         line_total: poLineValueWithTax,
+        po_ageing: poAgeing,
+        reference_po_number: row.ReferencePoNumber || '',
         // Keep original CSV columns for reference
         PoNumber: row.PoNumber || '',
         Entity: row.Entity || '',
@@ -254,14 +260,21 @@ function parseSingleSwiggyPO(records: any[], uploadedBy: string): ParsedSwiggyPO
 
   // Create header object with proper mapping to database schema
   const header: any = {
-    // Database schema fields
+    // Database schema fields - mapped from CSV columns
     po_number: poNumber,
+    entity: entity,
+    facility_id: facilityId,
+    facility_name: facilityName,
+    city: city,
     po_date: poCreatedAt,
     po_release_date: poModifiedAt,
     expected_delivery_date: expectedDeliveryDate,
     po_expiry_date: poExpiryDate,
+    supplier_code: supplierCode,
     vendor_name: vendorName,
     payment_terms: null,
+    otb_reference_number: firstRow.OtbReferenceNumber || '',
+    internal_external_po: firstRow.InternalExternalPo || '',
     total_items: lines.length,
     total_quantity: totalQuantity,
     total_taxable_value: totalTaxableValue,
