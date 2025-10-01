@@ -358,37 +358,57 @@ function parseSwiggyDate(dateStr: string | undefined): Date | null {
       }
     }
 
-    // Handle Swiggy date formats: "2025-09-18 20:09:28" and "2025-09-29"
+    // Handle DD-MM-YYYY HH:MM format (e.g., "30-09-2025 02:09")
     if (cleanDateStr.includes('-')) {
-      // Check if it's YYYY-MM-DD or YYYY-MM-DD HH:MM:SS format
       const parts = cleanDateStr.split(' ');
       const datePart = parts[0];
       const timePart = parts[1];
 
-      const [year, month, day] = datePart.split('-');
+      const datePieces = datePart.split('-');
 
-      if (year && month && day) {
-        let date;
+      console.log(`🔍 Parsing date with dashes: parts=${JSON.stringify(datePieces)}, time=${timePart}`);
 
-        if (timePart) {
-          // YYYY-MM-DD HH:MM:SS format
-          const [hours, minutes, seconds] = timePart.split(':');
-          date = new Date(
-            parseInt(year),
-            parseInt(month) - 1,
-            parseInt(day),
-            parseInt(hours || '0'),
-            parseInt(minutes || '0'),
-            parseInt(seconds || '0')
-          );
+      if (datePieces.length === 3) {
+        // Determine if it's DD-MM-YYYY or YYYY-MM-DD based on first value
+        const firstNum = parseInt(datePieces[0]);
+        let year, month, day;
+
+        if (firstNum > 31) {
+          // It's YYYY-MM-DD format
+          [year, month, day] = datePieces;
         } else {
-          // YYYY-MM-DD format
-          date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+          // It's DD-MM-YYYY format
+          [day, month, year] = datePieces;
         }
 
-        if (!isNaN(date.getTime())) {
-          console.log(`📅 Parsed Swiggy date "${cleanDateStr}" as:`, date.toISOString().split('T')[0]);
-          return date;
+        console.log(`🔍 Determined format: day=${day}, month=${month}, year=${year}`);
+
+        if (year && month && day) {
+          let date;
+
+          if (timePart) {
+            // Has time component
+            const [hours, minutes, seconds] = timePart.split(':');
+            date = new Date(
+              parseInt(year),
+              parseInt(month) - 1,
+              parseInt(day),
+              parseInt(hours || '0'),
+              parseInt(minutes || '0'),
+              parseInt(seconds || '0')
+            );
+          } else {
+            // No time component
+            date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+          }
+
+          console.log(`📅 Created Date object from "${cleanDateStr}":`, date.toISOString(), `Display:`, date.toString());
+
+          if (!isNaN(date.getTime())) {
+            return date;
+          } else {
+            console.warn(`⚠️ Date is invalid:`, date);
+          }
         }
       }
     }
