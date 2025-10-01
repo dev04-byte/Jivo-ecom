@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { BigBasketPODetailView } from "@/components/po/bigbasket-po-detail-view";
 import { DealsharePODetailView } from "@/components/po/dealshare-po-detail-view";
+import { AmazonPoDetailView } from "@/components/po/amazon-po-detail-view";
 import type { PfPo, PfMst, PfOrderItems } from "@shared/schema";
 
 interface POWithDetails extends Omit<PfPo, 'platform'> {
@@ -24,8 +25,12 @@ export default function PODetails() {
   const queryClient = useQueryClient();
   const poId = params.id;
 
+  // Determine if this is an Amazon PO (IDs >= 10000000 and < 11000000)
+  const isAmazonPo = poId && parseInt(poId) >= 10000000 && parseInt(poId) < 11000000;
+  const amazonId = isAmazonPo ? parseInt(poId) - 10000000 : null;
+
   const { data: po, isLoading, error } = useQuery<POWithDetails>({
-    queryKey: [`/api/pos/${poId}`],
+    queryKey: isAmazonPo ? [`/api/amazon-pos/${amazonId}`] : [`/api/pos/${poId}`],
     enabled: !!poId
   });
 
@@ -88,14 +93,26 @@ export default function PODetails() {
     }
   };
 
-  const calculatePOTotals = (items: PfOrderItems[]) => {
-    const totalQuantity = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
-    const totalValue = items.reduce((sum, item) => {
-      const rate = parseFloat(item.landing_rate || '0');
-      const qty = item.quantity || 0;
-      return sum + (isNaN(rate) ? 0 : rate * qty);
-    }, 0);
-    return { totalQuantity, totalValue };
+  const calculatePOTotals = (items: PfOrderItems[] | any[]) => {
+    if (isAmazonPo && (po as any)?.poLines) {
+      // Calculate for Amazon PO structure
+      const amazonLines = (po as any).poLines;
+      const totalQuantity = amazonLines.reduce((sum: number, item: any) => sum + (item.quantity_ordered || 0), 0);
+      const totalValue = amazonLines.reduce((sum: number, item: any) => {
+        const total = parseFloat(item.total_cost || '0');
+        return sum + (isNaN(total) ? 0 : total);
+      }, 0);
+      return { totalQuantity, totalValue };
+    } else {
+      // Calculate for regular PO structure
+      const totalQuantity = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
+      const totalValue = items.reduce((sum, item) => {
+        const rate = parseFloat(item.landing_rate || '0');
+        const qty = item.quantity || 0;
+        return sum + (isNaN(rate) ? 0 : rate * qty);
+      }, 0);
+      return { totalQuantity, totalValue };
+    }
   };
 
   if (isLoading) {
@@ -128,7 +145,7 @@ export default function PODetails() {
     );
   }
 
-  const { totalQuantity, totalValue } = calculatePOTotals(po.orderItems);
+  const { totalQuantity, totalValue } = calculatePOTotals(isAmazonPo ? (po as any).poLines || [] : po.orderItems);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -149,7 +166,7 @@ export default function PODetails() {
                 {po.po_number}
               </h1>
               <p className="text-gray-600 dark:text-gray-300 mt-1">
-                {po.platform.pf_name} • Created {po.order_date ? format(new Date(po.order_date), 'MMM dd, yyyy') : 'Date not available'}
+                {isAmazonPo ? 'Amazon' : po.platform?.pf_name} • Created {po.order_date ? format(new Date(po.order_date), 'MMM dd, yyyy') : po.created_at ? format(new Date(po.created_at), 'MMM dd, yyyy') : 'Date not available'}
               </p>
             </div>
             <Badge 
@@ -222,7 +239,7 @@ export default function PODetails() {
                 <div className="space-y-3">
                   <div className="flex justify-between">
                     <span className="text-gray-600">Total Items</span>
-                    <span className="font-semibold">{po.orderItems.length}</span>
+                    <span className="font-semibold">{isAmazonPo ? (po as any).poLines?.length || 0 : po.orderItems.length}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Total Quantity</span>
@@ -239,20 +256,51 @@ export default function PODetails() {
           </div>
 
           {/* Order Items - Use platform-specific views */}
-          {po.platform?.pf_name?.toLowerCase().includes('bigbasket') ||
-           po.platform?.pf_name?.toLowerCase() === 'bigbasket' ? (
+          {!isAmazonPo && po.platform?.pf_name?.toLowerCase().includes('bigbasket') ||
+           !isAmazonPo && po.platform?.pf_name?.toLowerCase() === 'bigbasket' ? (
             <BigBasketPODetailView po={po as any} orderItems={po.orderItems as any} />
-          ) : po.platform?.pf_name?.toLowerCase().includes('dealshare') ||
-               po.platform?.pf_name?.toLowerCase() === 'dealshare' ? (
+          ) : !isAmazonPo && po.platform?.pf_name?.toLowerCase().includes('dealshare') ||
+               !isAmazonPo && po.platform?.pf_name?.toLowerCase() === 'dealshare' ? (
             <DealsharePODetailView po={po as any} orderItems={po.orderItems as any} />
+          ) : isAmazonPo ||
+               (!isAmazonPo && po.platform?.pf_name?.toLowerCase().includes('amazon')) ||
+               (!isAmazonPo && po.platform?.pf_name?.toLowerCase() === 'amazon') ? (
+            <AmazonPoDetailView
+              header={{
+                po_number: po.po_number,
+                po_date: po.po_date,
+                shipment_date: (po as any).shipment_date,
+                delivery_date: (po as any).delivery_date,
+                ship_to_address: (po as any).ship_to_address,
+                vendor_code: (po as any).vendor_code,
+                vendor_name: (po as any).vendor_name,
+                buyer_name: (po as any).buyer_name,
+                currency: (po as any).currency,
+                total_amount: (po as any).total_amount,
+                tax_amount: (po as any).tax_amount,
+                shipping_cost: (po as any).shipping_cost,
+                discount_amount: (po as any).discount_amount,
+                net_amount: (po as any).net_amount,
+                status: po.status,
+                notes: (po as any).notes,
+                created_by: (po as any).created_by
+              }}
+              lines={isAmazonPo ? (po as any).poLines || [] : po.orderItems as any}
+              summary={{
+                totalItems: isAmazonPo ? (po as any).poLines?.length || 0 : po.orderItems.length,
+                totalQuantity: totalQuantity,
+                totalAmount: totalValue.toString(),
+                detectedVendor: 'amazon'
+              }}
+            />
           ) : (
             <Card>
               <CardHeader>
-                <CardTitle>Order Items ({po.orderItems.length})</CardTitle>
+                <CardTitle>Order Items ({isAmazonPo ? (po as any).poLines?.length || 0 : po.orderItems.length})</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {po.orderItems.length === 0 ? (
+                  {(isAmazonPo ? (po as any).poLines?.length === 0 : po.orderItems.length === 0) ? (
                     <div className="text-center py-8">
                       <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-500">No items in this purchase order</p>
@@ -260,7 +308,7 @@ export default function PODetails() {
                   ) : (
                     <>
                       {/* Show all columns dynamically */}
-                      {po.orderItems.map((item, index) => (
+                      {(isAmazonPo ? (po as any).poLines || [] : po.orderItems).map((item: any, index: number) => (
                         <div key={item.id || index} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3">
                           <h4 className="font-medium text-lg">Item {index + 1}</h4>
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">

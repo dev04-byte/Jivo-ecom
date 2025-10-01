@@ -49,6 +49,7 @@ export default function SwiggyUpload() {
 
   const confirmMutation = useMutation({
     mutationFn: async (data: any) => {
+      // Send data directly to API as the API handles both single and multiple POs
       const response = await fetch('/api/swiggy/confirm-insert', {
         method: 'POST',
         headers: {
@@ -59,16 +60,25 @@ export default function SwiggyUpload() {
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.message || error.error || 'Failed to import data');
+        throw new Error(error.message || error.error || 'Failed to import PO');
       }
 
       return response.json();
     },
     onSuccess: (data) => {
-      toast({
-        title: "Import Successful",
-        description: data.message || `Swiggy PO imported successfully!`,
-      });
+      if (data.totalPOs && data.totalPOs > 1) {
+        // Multiple POs imported
+        toast({
+          title: "Multiple POs imported successfully",
+          description: `${data.successCount || data.totalPOs} Swiggy POs have been imported`,
+        });
+      } else {
+        // Single PO imported
+        toast({
+          title: "Import Successful",
+          description: data.message || `Swiggy PO imported successfully!`,
+        });
+      }
       setFile(null);
       setPreviewData(null);
       queryClient.invalidateQueries({ queryKey: ["/api/swiggy-pos"] });
@@ -154,21 +164,21 @@ export default function SwiggyUpload() {
   const handleImport = () => {
     if (!previewData) {
       toast({
-        title: "No preview data",
+        title: "No data to import",
         description: "Please preview the file first",
         variant: "destructive",
       });
       return;
     }
 
-    // Prepare data based on preview structure
+    // Prepare data structure to match what the API expects
     if (previewData.poList) {
-      // Multiple POs from CSV
+      // Multiple POs from CSV - send as poList
       confirmMutation.mutate({
         poList: previewData.poList
       });
     } else {
-      // Single PO from Excel
+      // Single PO from Excel - send as po_header and po_lines
       confirmMutation.mutate({
         po_header: previewData.header,
         po_lines: previewData.lines
@@ -394,18 +404,57 @@ export default function SwiggyUpload() {
                       </div>
                     </div>
 
+                    {/* Summary Totals Cards for Multiple POs */}
+                    <div className="grid grid-cols-4 gap-4 mb-6">
+                      <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                        <div className="text-purple-600 font-medium text-sm mb-1">Total POs</div>
+                        <div className="text-2xl font-bold text-purple-700">{previewData.totalPOs || 0}</div>
+                      </div>
+
+                      <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                        <div className="text-blue-600 font-medium text-sm mb-1">Total Line Items</div>
+                        <div className="text-2xl font-bold text-blue-700">
+                          {previewData.poList?.reduce((sum: number, po: any) => sum + (po.lines?.length || 0), 0) || 0}
+                        </div>
+                      </div>
+
+                      <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                        <div className="text-green-600 font-medium text-sm mb-1">Total Quantity</div>
+                        <div className="text-2xl font-bold text-green-700">
+                          {previewData.poList?.reduce((sum: number, po: any) => {
+                            return sum + (po.lines?.reduce((lineSum: number, line: any) => lineSum + (parseInt(line.quantity) || 0), 0) || 0);
+                          }, 0).toLocaleString('en-IN') || 0}
+                        </div>
+                      </div>
+
+                      <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-200">
+                        <div className="text-emerald-600 font-medium text-sm mb-1">Total Amount</div>
+                        <div className="text-2xl font-bold text-emerald-700">
+                          ₹{(() => {
+                            const totalAmount = previewData.poList?.reduce((sum: number, po: any) => {
+                              const rawAmount = po.header?.grand_total || po.header?.total_amount || 0;
+                              const poAmount = typeof rawAmount === 'number' ? rawAmount : parseFloat(String(rawAmount).replace(/[^\d.-]/g, ''));
+                              return sum + (isNaN(poAmount) ? 0 : poAmount);
+                            }, 0) || 0;
+                            return totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="border rounded-lg overflow-hidden">
                       <div className="bg-gray-50 px-4 py-2 border-b">
-                        <div className="grid grid-cols-4 gap-4 text-sm font-medium text-gray-700">
+                        <div className="grid grid-cols-5 gap-4 text-sm font-medium text-gray-700">
                           <div>PO Number</div>
                           <div>PO Date</div>
                           <div>Vendor</div>
                           <div>Items Count</div>
+                          <div>Total Amount</div>
                         </div>
                       </div>
                       <div className="max-h-60 overflow-y-auto">
                         {previewData.poList.slice(0, 10).map((po: any, index: number) => (
-                          <div key={index} className="grid grid-cols-4 gap-4 px-4 py-3 border-b border-gray-100 hover:bg-gray-50">
+                          <div key={index} className="grid grid-cols-5 gap-4 px-4 py-3 border-b border-gray-100 hover:bg-gray-50">
                             <div className="font-medium text-blue-600">
                               {po.header.po_number}
                             </div>
@@ -417,6 +466,9 @@ export default function SwiggyUpload() {
                             </div>
                             <div className="text-sm text-gray-600">
                               {po.lines?.length || 0} items
+                            </div>
+                            <div className="text-sm font-medium text-green-600">
+                              ₹{(parseFloat(po.header.grand_total || po.header.total_amount || '0')).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </div>
                           </div>
                         ))}
@@ -440,7 +492,7 @@ export default function SwiggyUpload() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg border">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg border mb-4">
                       <div>
                         <span className="text-sm text-gray-600 block mb-1">PO Number</span>
                         <div className="font-semibold text-blue-600">
@@ -464,6 +516,38 @@ export default function SwiggyUpload() {
                         <span className="text-sm text-gray-600 block mb-1">Total Amount</span>
                         <div className="font-semibold text-green-600">
                           ₹{previewData.header?.grand_total?.toLocaleString() || 'N/A'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Summary Totals Cards */}
+                    <div className="grid grid-cols-3 gap-4 mb-4">
+                      <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                        <div className="text-blue-600 font-medium text-sm mb-1">Total Line Items</div>
+                        <div className="text-2xl font-bold text-blue-700">{previewData.lines?.length || 0}</div>
+                      </div>
+
+                      <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                        <div className="text-green-600 font-medium text-sm mb-1">Total Quantity</div>
+                        <div className="text-2xl font-bold text-green-700">
+                          {previewData.lines?.reduce((sum: number, line: any) => sum + (parseInt(line.quantity) || 0), 0).toLocaleString('en-IN') || 0}
+                        </div>
+                      </div>
+
+                      <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                        <div className="text-purple-600 font-medium text-sm mb-1">Total Amount</div>
+                        <div className="text-2xl font-bold text-purple-700">
+                          ₹{(() => {
+                            if (previewData.header?.grand_total) {
+                              return previewData.header.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                            }
+                            const calculatedTotal = previewData.lines?.reduce((sum: number, line: any) => {
+                              const rawTotal = line.total_amount || line.line_total || 0;
+                              const lineTotal = typeof rawTotal === 'number' ? rawTotal : parseFloat(String(rawTotal).replace(/[^\d.-]/g, ''));
+                              return sum + (isNaN(lineTotal) ? 0 : lineTotal);
+                            }, 0) || 0;
+                            return calculatedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -513,6 +597,18 @@ export default function SwiggyUpload() {
                     )}
                   </div>
                 )}
+
+                {/* Import Action Section like Zepto */}
+                <div className="flex gap-3 pt-4 border-t">
+                  <Button
+                    onClick={handleImport}
+                    disabled={confirmMutation.isPending}
+                    className="flex-1"
+                  >
+                    <Database className="h-4 w-4 mr-2" />
+                    {confirmMutation.isPending ? "Importing..." : "Import to Database"}
+                  </Button>
+                </div>
 
                 <div className="bg-green-50 border border-green-200 rounded-lg p-6">
                   <div className="text-center">

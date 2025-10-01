@@ -129,3 +129,65 @@ export interface DealsharePoLines {
 export type DealsharePO = DealsharePoHeader & {
   poItems: DealsharePoLines[]
 };
+
+export interface AmazonPoHeader {
+  id?: number;
+  po_number: string;
+  po_date?: Date | null;
+  shipment_date?: Date | null;
+  delivery_date?: Date | null;
+  ship_to_location?: string | null;
+  ship_to_address?: string | null;
+  bill_to_location?: string | null;
+  vendor_code?: string | null;
+  vendor_name?: string | null;
+  buyer_name?: string | null;
+  currency?: string | null;
+  total_amount?: string | null;
+  tax_amount?: string | null;
+  shipping_cost?: string | null;
+  discount_amount?: string | null;
+  net_amount?: string | null;
+  status?: string | null;
+  notes?: string | null;
+  created_by?: string | null;
+  created_at?: Date | null;
+  updated_at?: Date | null;
+}
+
+export interface AmazonPoLines {
+  id?: number;
+  header_id?: number;
+  line_number: number;
+  asin?: string | null;
+  sku?: string | null;
+  product_name?: string | null;
+  product_description?: string | null;
+  category?: string | null;
+  brand?: string | null;
+  upc?: string | null;
+  size?: string | null;
+  color?: string | null;
+  quantity_ordered: number;
+  unit_cost?: string | null;
+  total_cost?: string | null;
+  tax_rate?: string | null;
+  tax_amount?: string | null;
+  discount_percent?: string | null;
+  discount_amount?: string | null;
+  net_amount?: string | null;
+  supplier_reference?: string | null;
+  expected_delivery_date?: Date | null;
+  created_at?: Date | null;
+  updated_at?: Date | null;
+}
+
+export type AmazonPO = AmazonPoHeader & {
+  lines: AmazonPoLines[];
+  summary?: {
+    totalItems: number;
+    totalQuantity: number;
+    totalAmount: string;
+    detectedVendor?: string;
+  };
+};

@@ -11,6 +11,21 @@ import { Badge } from "@/components/ui/badge";
 import { AutoPopulateWidget } from "@/components/ui/auto-populate-widget";
 import { BlinkitPDFParser, type BlinkitPDFData } from "./blinkit-pdf-parser";
 import { BigBasketPODetailView } from "./bigbasket-po-detail-view";
+import { AmazonPoDetailView } from "./amazon-po-detail-view";
+
+// Safe number parsing to prevent NaN display issues
+const safeParseFloat = (value: any): number => {
+  if (value === null || value === undefined || value === '' || value === 'NaN') return 0;
+  if (typeof value === 'number') {
+    return isNaN(value) ? 0 : value;
+  }
+  if (typeof value === 'string') {
+    const cleanValue = value.replace(/[^\d.-]/g, '');
+    const parsed = parseFloat(cleanValue);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
 
 type Step = "platform" | "upload" | "preview";
 
@@ -78,6 +93,13 @@ const PLATFORMS: Platform[] = [
     description: "Upload Dealshare PO files",
     endpoint: "/api/dealshare-pos",
     queryKey: "/api/dealshare-pos"
+  },
+  {
+    id: "amazon",
+    name: "Amazon",
+    description: "Upload Amazon PO files",
+    endpoint: "/api/amazon-pos",
+    queryKey: "/api/amazon-pos"
   }
 ];
 
@@ -521,6 +543,29 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
           totalPOs: data.totalPOs,
           multiPO: true,
           source: 'swiggy_multiple_pos'
+        });
+
+        setCurrentStep("preview");
+        return;
+      }
+
+      // Handle new Blinkit multi-PO response (MUST be before legacy fallback!)
+      if (data.poList && data.totalPOs && (data.detectedVendor === 'blinkit' || data.source?.includes('blinkit') || data.source === 'blinkit_excel_multiple_pos' || selectedPlatform === 'blinkit')) {
+        toast({
+          title: "Blinkit POs Found",
+          description: `Found ${data.totalPOs} Blinkit POs in the file`,
+        });
+
+        // Store the Blinkit multi-PO data
+        setParsedData({
+          success: true,
+          poList: data.poList,
+          detectedVendor: 'blinkit',
+          totalPOs: data.totalPOs,
+          totalItems: data.totalItems,
+          totalAmount: data.totalAmount,
+          multiPO: true,
+          source: 'blinkit_multiple_pos'
         });
 
         setCurrentStep("preview");
@@ -1335,9 +1380,6 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                     <th className="text-left p-2 font-medium min-w-[120px]">Product UPC</th>
                                     <th className="text-left p-2 font-medium min-w-[200px]">Description</th>
                                     <th className="text-left p-2 font-medium min-w-[100px]">Basic Cost</th>
-                                    <th className="text-left p-2 font-medium min-w-[80px]">IGST %</th>
-                                    <th className="text-left p-2 font-medium min-w-[80px]">CESS %</th>
-                                    <th className="text-left p-2 font-medium min-w-[80px]">ADDT CESS</th>
                                     <th className="text-left p-2 font-medium min-w-[100px]">Tax Amount</th>
                                     <th className="text-left p-2 font-medium min-w-[100px]">Landing Rate</th>
                                     <th className="text-left p-2 font-medium min-w-[80px]">Quantity</th>
@@ -1369,10 +1411,19 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                       <td className="p-2 text-sm">{line.product_upc || ''}</td>
                                       <td className="p-2 text-sm">{line.product_description || ''}</td>
                                       <td className="p-2">{safeDisplay(line.basic_cost_price, '₹0.00', 'currency')}</td>
-                                      <td className="p-2">{safeDisplay(line.igst_percent, '0%', 'percent')}</td>
-                                      <td className="p-2">{line.cess_percent || '0'}%</td>
-                                      <td className="p-2">{line.addt_cess || '0'}</td>
-                                      <td className="p-2">₹{line.tax_amount || '0'}</td>
+                                      <td className="p-2">{(() => {
+                                        // For Blinkit data, show the exact tax_amount from tax_value column
+                                        if (line.tax_amount) {
+                                          const taxAmount = parseFloat(line.tax_amount || '0');
+                                          return taxAmount.toFixed(0);
+                                        }
+
+                                        // Fallback for other platforms - show calculated tax amount
+                                        const taxableValue = parseFloat(line.taxable_value || line.basic_value || '0');
+                                        const totalAmount = parseFloat(line.total_amount || line.line_total || '0');
+                                        const taxAmount = totalAmount - taxableValue;
+                                        return taxAmount.toFixed(0);
+                                      })()}</td>
                                       <td className="p-2 font-medium">₹{line.landing_rate || '0'}</td>
                                       <td className="p-2 text-center font-medium">{line.quantity || 0}</td>
                                       <td className="p-2">{safeDisplay(line.mrp, '₹0.00', 'currency')}</td>
@@ -1467,16 +1518,11 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                         <tr>
                                           <th className="text-left p-2 font-medium border-r min-w-[50px]">#</th>
                                           <th className="text-left p-2 font-medium border-r min-w-[120px]">Item Code</th>
-                                          <th className="text-left p-2 font-medium border-r min-w-[80px]">HSN</th>
                                           <th className="text-left p-2 font-medium border-r min-w-[200px]">Description</th>
                                           <th className="text-center p-2 font-medium border-r min-w-[60px]">Qty</th>
                                           <th className="text-left p-2 font-medium border-r min-w-[60px]">UOM</th>
                                           <th className="text-right p-2 font-medium border-r min-w-[100px]">Unit Price</th>
                                           <th className="text-right p-2 font-medium border-r min-w-[100px]">MRP</th>
-                                          <th className="text-right p-2 font-medium border-r min-w-[80px]">IGST %</th>
-                                          <th className="text-right p-2 font-medium border-r min-w-[80px]">CGST %</th>
-                                          <th className="text-right p-2 font-medium border-r min-w-[80px]">SGST %</th>
-                                          <th className="text-right p-2 font-medium border-r min-w-[80px]">CESS %</th>
                                           <th className="text-right p-2 font-medium border-r min-w-[100px]">Tax Amount</th>
                                           <th className="text-right p-2 font-medium min-w-[120px]">Total Amount</th>
                                         </tr>
@@ -1490,9 +1536,6 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                                 line.item_code || line.sku || line.article_id || line.fsn_isbn,
                                                 `ITEM-${lineIndex + 1}`
                                               )}
-                                            </td>
-                                            <td className="p-2 border-r">
-                                              {safeDisplay(line.hsn_code || line.hsn_sa_code, 'HSN-' + (lineIndex + 1))}
                                             </td>
                                             <td className="p-2 border-r">
                                               <div className="max-w-[200px] truncate" title={
@@ -1529,42 +1572,22 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                             </td>
                                             <td className="p-2 text-right border-r">
                                               {(() => {
-                                                const igst = line.igst_percent || line.igst_rate || line.igst || '0';
-                                                const numValue = parseFloat(String(igst).replace(/[^0-9.-]/g, ''));
-                                                return isNaN(numValue) ? '0%' : `${numValue}%`;
-                                              })()}
-                                            </td>
-                                            <td className="p-2 text-right border-r">
-                                              {(() => {
-                                                const cgst = line.cgst_percent || line.cgst_rate || line.cgst || '0';
-                                                const numValue = parseFloat(String(cgst).replace(/[^0-9.-]/g, ''));
-                                                return isNaN(numValue) ? '0%' : `${numValue}%`;
-                                              })()}
-                                            </td>
-                                            <td className="p-2 text-right border-r">
-                                              {(() => {
-                                                const sgst = line.sgst_percent || line.sgst_rate || line.sgst || '0';
-                                                const numValue = parseFloat(String(sgst).replace(/[^0-9.-]/g, ''));
-                                                return isNaN(numValue) ? '0%' : `${numValue}%`;
-                                              })()}
-                                            </td>
-                                            <td className="p-2 text-right border-r">
-                                              {(() => {
-                                                const cess = line.cess_percent || line.cess_rate || line.cess || '0';
-                                                const numValue = parseFloat(String(cess).replace(/[^0-9.-]/g, ''));
-                                                return isNaN(numValue) ? '0%' : `${numValue}%`;
-                                              })()}
-                                            </td>
-                                            <td className="p-2 text-right border-r">
-                                              {(() => {
-                                                const taxCalc = calculateTotalTax(line);
-                                                const displayTax = line.tax_amount || taxCalc.totalTax;
-                                                return safeDisplay(displayTax, '₹0.00', 'currency');
+                                                // For Blinkit data, show the exact tax_amount from tax_value column
+                                                if (line.tax_amount) {
+                                                  const taxAmount = parseFloat(line.tax_amount || '0');
+                                                  return taxAmount.toFixed(0);
+                                                }
+
+                                                // Fallback for other platforms - show calculated tax amount
+                                                const taxableValue = parseFloat(line.taxable_value || line.PoLineValueWithoutTax || line.basic_value || '0');
+                                                const totalAmount = parseFloat(line.line_total || line.PoLineValueWithTax || line.total_amount || '0');
+                                                const taxAmount = totalAmount - taxableValue;
+                                                return taxAmount.toFixed(0);
                                               })()}
                                             </td>
                                             <td className="p-2 text-right font-medium text-green-600">
                                               {safeDisplay(
-                                                line.total_amount || line.total_value || line.base_amount || line.gross_amount,
+                                                line.total_amount || line.total_value,
                                                 '₹0.00',
                                                 'currency'
                                               )}
@@ -1676,6 +1699,264 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                             }}
                           />
                         </div>
+                      ) : (parsedData.detectedVendor === 'amazon' || selectedPlatform === 'amazon') ? (
+                        <div className="space-y-4">
+                          <h3 className="text-lg font-semibold text-yellow-600">Amazon PO Preview</h3>
+                          <AmazonPoDetailView
+                            header={parsedData.header || {}}
+                            lines={parsedData.lines || []}
+                            summary={{
+                              totalItems: parsedData.totalItems || parsedData.lines?.length || 0,
+                              totalQuantity: parsedData.totalQuantity || 0,
+                              totalAmount: parsedData.totalAmount || parsedData.header?.total_amount || "0",
+                              detectedVendor: parsedData.detectedVendor || "Amazon"
+                            }}
+                          />
+                        </div>
+                      ) : (selectedPlatform === 'swiggy' && (parsedData.poList || (parsedData.header && parsedData.lines))) ? (
+                        <div className="space-y-4">
+                          <h3 className="text-lg font-semibold text-orange-600">
+                            {parsedData.poList ? `Swiggy Primary POs Preview (${parsedData.poList.length} POs)` : 'Swiggy Primary PO Preview'}
+                          </h3>
+
+                          {/* Summary Statistics for Multiple POs */}
+                          {parsedData.poList && (
+                            <Card>
+                              <CardHeader>
+                                <CardTitle className="text-base">Summary Overview</CardTitle>
+                                <CardDescription>
+                                  All {parsedData.poList.length} Swiggy POs combined
+                                </CardDescription>
+                              </CardHeader>
+                              <CardContent>
+                                <div className="bg-gradient-to-r from-blue-50 to-green-50 p-4 rounded-lg">
+                                  <div className="grid grid-cols-4 gap-4">
+                                    <div className="text-center">
+                                      <h4 className="font-medium text-gray-600 mb-1 text-xs">POs</h4>
+                                      <p className="text-2xl font-bold text-purple-600">{parsedData.totalPOs}</p>
+                                    </div>
+                                    <div className="text-center border-l border-gray-300 px-4">
+                                      <h4 className="font-medium text-gray-600 mb-1 text-xs">Total Items</h4>
+                                      <p className="text-2xl font-bold text-blue-600">{parsedData.totalItems}</p>
+                                    </div>
+                                    <div className="text-center border-l border-gray-300 px-4">
+                                      <h4 className="font-medium text-gray-600 mb-1 text-xs">Total Quantity</h4>
+                                      <p className="text-2xl font-bold text-green-600">
+                                        {parsedData.poList.reduce((sum: number, po: any) => sum + (po.totalQuantity || 0), 0).toLocaleString('en-IN')}
+                                      </p>
+                                    </div>
+                                    <div className="text-center border-l border-gray-300 px-4">
+                                      <h4 className="font-medium text-gray-600 mb-1 text-xs">Total Amount</h4>
+                                      <p className="text-xl font-bold text-green-600">
+                                        ₹{(() => {
+                                          const amount = parseFloat(parsedData.totalAmount || '0');
+                                          return isNaN(amount) ? '0.00' : amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                                        })()}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          )}
+
+                          {/* Individual PO Details */}
+                          {parsedData.poList ? (
+                            <div className="space-y-4">
+                              {parsedData.poList.slice(0, 3).map((po: any, poIndex: number) => (
+                                <Card key={poIndex}>
+                                  <CardHeader>
+                                    <CardTitle className="text-base">
+                                      PO #{po.header.PoNumber || po.header.po_number} - {po.header.VendorName || po.header.vendor_name}
+                                    </CardTitle>
+                                    <CardDescription>
+                                      {po.lines.length} items • Status: {po.header.Status || po.header.status} •
+                                      Amount: ₹{parseFloat(po.header.PoAmount || po.header.grand_total || '0').toLocaleString('en-IN')}
+                                    </CardDescription>
+                                  </CardHeader>
+                                  <CardContent>
+                                    <div className="overflow-x-auto">
+                                      <table className="w-full text-xs">
+                                        <thead className="bg-gray-50">
+                                          <tr>
+                                            <th className="text-left p-2 font-medium">#</th>
+                                            <th className="text-left p-2 font-medium">Item Code</th>
+                                            <th className="text-left p-2 font-medium">Description</th>
+                                            <th className="text-right p-2 font-medium">Qty</th>
+                                            <th className="text-right p-2 font-medium">Unit Price</th>
+                                            <th className="text-right p-2 font-medium">Total</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {po.lines.slice(0, 5).map((line: any, lineIndex: number) => (
+                                            <tr key={lineIndex} className="border-t hover:bg-gray-50">
+                                              <td className="p-2 text-center font-medium">{lineIndex + 1}</td>
+                                              <td className="p-2 font-mono text-blue-600">{line.SkuCode || line.item_code}</td>
+                                              <td className="p-2">
+                                                <div className="max-w-[200px] truncate" title={line.SkuDescription || line.item_description}>
+                                                  {line.SkuDescription || line.item_description}
+                                                </div>
+                                              </td>
+                                              <td className="p-2 text-right font-medium">{line.OrderedQty || line.quantity}</td>
+                                              <td className="p-2 text-right">₹{parseFloat(line.UnitBasedCost || line.unit_base_cost || '0').toFixed(2)}</td>
+                                              <td className="p-2 text-right font-medium">₹{parseFloat(line.PoLineValueWithTax || line.total_value || '0').toFixed(2)}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                      {po.lines.length > 5 && (
+                                        <div className="text-center text-gray-500 text-sm py-2">
+                                          Showing first 5 items of {po.lines.length} total items in this PO
+                                        </div>
+                                      )}
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              ))}
+                              {parsedData.poList.length > 3 && (
+                                <div className="text-center text-gray-500 text-sm py-4 bg-gray-50 rounded-lg">
+                                  Showing first 3 POs of {parsedData.poList.length} total POs. All will be imported to database.
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            /* Single PO View */
+                            <div className="space-y-4">
+                              {/* Single PO Header Information */}
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle className="text-base">Swiggy PO Information</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                  <div className="bg-gray-50 p-4 rounded-lg">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-sm">
+                                      {/* Order Details */}
+                                      <div className="space-y-2">
+                                        <h6 className="font-semibold text-gray-700 pb-2 border-b">Order Details</h6>
+                                        <div className="space-y-1">
+                                          <div><span className="font-medium">PO Number:</span> {parsedData.header.PoNumber || parsedData.header.po_number}</div>
+                                          <div><span className="font-medium">Status:</span> {parsedData.header.Status || parsedData.header.status}</div>
+                                          <div><span className="font-medium">Created:</span> {parsedData.header.PoCreatedAt || parsedData.header.po_date}</div>
+                                          <div><span className="font-medium">Modified:</span> {parsedData.header.PoModifiedAt || parsedData.header.po_release_date}</div>
+                                          <div><span className="font-medium">Delivery Date:</span> {parsedData.header.ExpectedDeliveryDate || parsedData.header.expected_delivery_date}</div>
+                                          <div><span className="font-medium">Expiry Date:</span> {parsedData.header.PoExpiryDate || parsedData.header.po_expiry_date}</div>
+                                        </div>
+                                      </div>
+
+                                      {/* Vendor Information */}
+                                      <div className="space-y-2">
+                                        <h6 className="font-semibold text-gray-700 pb-2 border-b">Vendor Information</h6>
+                                        <div className="space-y-1">
+                                          <div><span className="font-medium">Vendor:</span> {parsedData.header.VendorName || parsedData.header.vendor_name}</div>
+                                          <div><span className="font-medium">Supplier Code:</span> {parsedData.header.SupplierCode}</div>
+                                          <div><span className="font-medium">Entity:</span> {parsedData.header.Entity}</div>
+                                        </div>
+                                      </div>
+
+                                      {/* Facility Information */}
+                                      <div className="space-y-2">
+                                        <h6 className="font-semibold text-gray-700 pb-2 border-b">Facility Information</h6>
+                                        <div className="space-y-1">
+                                          <div><span className="font-medium">Facility:</span> {parsedData.header.FacilityName}</div>
+                                          <div><span className="font-medium">Facility ID:</span> {parsedData.header.FacilityId}</div>
+                                          <div><span className="font-medium">City:</span> {parsedData.header.City}</div>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Summary Statistics */}
+                                    <div className="border-t border-gray-200 my-4"></div>
+                                    <div className="bg-gradient-to-r from-blue-50 to-green-50 p-3 rounded-lg">
+                                      <div className="grid grid-cols-3 gap-2">
+                                        <div className="text-center">
+                                          <h4 className="font-medium text-gray-600 mb-1 text-xs">Items</h4>
+                                          <p className="text-xl font-bold text-blue-600">{parsedData.lines.length}</p>
+                                        </div>
+                                        <div className="text-center border-l border-r border-gray-300 px-2">
+                                          <h4 className="font-medium text-gray-600 mb-1 text-xs">Quantity</h4>
+                                          <p className="text-xl font-bold text-green-600">
+                                            {parsedData.lines.reduce((sum: number, line: any) => sum + (parseInt(line.OrderedQty) || 0), 0).toLocaleString('en-IN')}
+                                          </p>
+                                        </div>
+                                        <div className="text-center">
+                                          <h4 className="font-medium text-gray-600 mb-1 text-xs">Amount</h4>
+                                          <p className="text-lg font-bold text-green-600">
+                                            ₹{parseFloat(parsedData.header.PoAmount || parsedData.header.grand_total || '0').toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
+
+                              {/* Single PO Line Items */}
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle className="text-base">Line Items ({parsedData.lines.length})</CardTitle>
+                                  <CardDescription>
+                                    Complete data preview with all fields
+                                  </CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-xs" style={{minWidth: '1200px'}}>
+                                      <thead className="bg-gray-50">
+                                        <tr>
+                                          <th className="text-left p-2 font-medium">#</th>
+                                          <th className="text-left p-2 font-medium">Item Code</th>
+                                          <th className="text-left p-2 font-medium">Description</th>
+                                          <th className="text-right p-2 font-medium">Qty</th>
+                                          <th className="text-left p-2 font-medium">UOM</th>
+                                          <th className="text-right p-2 font-medium">Unit Price</th>
+                                          <th className="text-right p-2 font-medium">MRP</th>
+                                          <th className="text-right p-2 font-medium">Tax Amount</th>
+                                          <th className="text-right p-2 font-medium">Total</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {parsedData.lines.slice(0, 10).map((line: any, index: number) => (
+                                          <tr key={index} className="border-t hover:bg-gray-50">
+                                            <td className="p-2 text-center font-medium">{index + 1}</td>
+                                            <td className="p-2 font-mono text-blue-600">{line.SkuCode || line.item_code}</td>
+                                            <td className="p-2">
+                                              <div className="max-w-[200px] truncate" title={line.SkuDescription || line.item_description}>
+                                                {line.SkuDescription || line.item_description}
+                                              </div>
+                                            </td>
+                                            <td className="p-2 text-right font-medium">{line.OrderedQty || line.quantity}</td>
+                                            <td className="p-2">Unit</td>
+                                            <td className="p-2 text-right">₹{parseFloat(line.UnitBasedCost || line.unit_base_cost || '0').toFixed(2)}</td>
+                                            <td className="p-2 text-right">₹{parseFloat(line.Mrp || line.mrp || '0').toFixed(2)}</td>
+                                            <td className="p-2 text-right">{(() => {
+                                              // For Blinkit data, show the exact tax_amount from tax_value column
+                                              if (line.tax_amount) {
+                                                const taxAmount = parseFloat(line.tax_amount || '0');
+                                                return taxAmount.toFixed(0);
+                                              }
+
+                                              // Fallback for other platforms - show calculated tax amount
+                                              const taxableValue = parseFloat(line.PoLineValueWithoutTax || line.taxable_value || '0');
+                                              const totalAmount = parseFloat(line.PoLineValueWithTax || line.total_value || '0');
+                                              const taxAmount = totalAmount - taxableValue;
+                                              return taxAmount.toFixed(0);
+                                            })()}</td>
+                                            <td className="p-2 text-right font-medium">₹{parseFloat(line.PoLineValueWithTax || line.total_value || '0').toFixed(2)}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                    {parsedData.lines.length > 10 && (
+                                      <div className="text-center text-gray-500 text-sm py-2">
+                                        Showing first 10 items of {parsedData.lines.length} total items
+                                      </div>
+                                    )}
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            </div>
+                          )}
+                        </div>
                       ) : (
                         <div className="space-y-4">
                           <h3 className="text-lg font-semibold">PO Details</h3>
@@ -1692,26 +1973,32 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                 {/* Order Details Section */}
                                 <div className="space-y-2">
                                   <h6 className="font-semibold text-gray-800 pb-2 border-b">Order Details</h6>
-                                  {parsedData.header.po_number && (
-                                    <div><span className="font-medium text-gray-600">PO Number:</span> <span className="ml-2">{parsedData.header.po_number}</span></div>
+                                  {(parsedData.header.po_number || parsedData.header.order_number || parsedData.header.purchase_order_number) && (
+                                    <div><span className="font-medium text-gray-600">PO Number:</span> <span className="ml-2 font-mono text-blue-600">{parsedData.header.po_number || parsedData.header.order_number || parsedData.header.purchase_order_number}</span></div>
                                   )}
-                                  {(parsedData.header.po_created_date || parsedData.header.po_date || parsedData.header.order_date) && (
-                                    <div><span className="font-medium text-gray-600">PO Created Date:</span> <span className="ml-2">
-                                      {(parsedData.header.po_created_date || parsedData.header.po_date || parsedData.header.order_date).toString().split('T')[0]}
+                                  {(parsedData.header.po_created_date || parsedData.header.po_date || parsedData.header.order_date || parsedData.header.created_at) && (
+                                    <div><span className="font-medium text-gray-600">PO Date:</span> <span className="ml-2">
+                                      {new Date(parsedData.header.po_created_date || parsedData.header.po_date || parsedData.header.order_date || parsedData.header.created_at).toLocaleDateString()}
                                     </span></div>
                                   )}
-                                  {parsedData.header.po_delivery_date && (
+                                  {(parsedData.header.po_delivery_date || parsedData.header.delivery_date || parsedData.header.expected_delivery_date) && (
                                     <div><span className="font-medium text-gray-600">Delivery Date:</span> <span className="ml-2">
-                                      {parsedData.header.po_delivery_date.toString().split('T')[0]}
+                                      {new Date(parsedData.header.po_delivery_date || parsedData.header.delivery_date || parsedData.header.expected_delivery_date).toLocaleDateString()}
                                     </span></div>
                                   )}
-                                  {parsedData.header.po_expiry_date && (
-                                    <div><span className="font-medium text-gray-600">Expiry Date:</span> <span className="ml-2">
-                                      {parsedData.header.po_expiry_date.toString().split('T')[0]}
+                                  {(parsedData.header.po_expiry_date || parsedData.header.expiry_date || parsedData.header.valid_till) && (
+                                    <div><span className="font-medium text-gray-600">Expiry Date:</span> <span className="ml-2 text-red-600 font-medium">
+                                      {new Date(parsedData.header.po_expiry_date || parsedData.header.expiry_date || parsedData.header.valid_till).toLocaleDateString()}
                                     </span></div>
                                   )}
-                                  {parsedData.header.credit_term && (
-                                    <div><span className="font-medium text-gray-600">Credit Term:</span> <span className="ml-2">{parsedData.header.credit_term}</span></div>
+                                  {(parsedData.header.credit_term || parsedData.header.payment_terms) && (
+                                    <div><span className="font-medium text-gray-600">Payment Terms:</span> <span className="ml-2">{parsedData.header.credit_term || parsedData.header.payment_terms}</span></div>
+                                  )}
+                                  {(parsedData.header.reference_number || parsedData.header.ref_no || parsedData.header.order_reference) && (
+                                    <div><span className="font-medium text-gray-600">Reference No:</span> <span className="ml-2">{parsedData.header.reference_number || parsedData.header.ref_no || parsedData.header.order_reference}</span></div>
+                                  )}
+                                  {(parsedData.header.currency || parsedData.header.currency_code) && (
+                                    <div><span className="font-medium text-gray-600">Currency:</span> <span className="ml-2">{parsedData.header.currency || parsedData.header.currency_code || 'INR'}</span></div>
                                   )}
                                   {parsedData.header.category && (
                                     <div><span className="font-medium text-gray-600">Category:</span> <span className="ml-2">{parsedData.header.category}</span></div>
@@ -1730,21 +2017,38 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                   )}
                                   <div><span className="font-medium text-gray-600">Status:</span> <span className="ml-2">{parsedData.header.status || 'Open'}</span></div>
 
-                                  {/* Totals Section - Better UI Design */}
+                                  {/* Enhanced Totals Section */}
                                   <div className="border-t border-gray-200 my-4"></div>
-                                  <div className="bg-gradient-to-r from-blue-50 to-green-50 p-3 rounded-lg">
-                                    <div className="grid grid-cols-3 gap-2">
-                                      <div className="text-center">
-                                        <h4 className="font-medium text-gray-600 mb-1 text-xs">Items</h4>
+                                  <div className="bg-gradient-to-r from-blue-50 to-green-50 p-4 rounded-lg border border-blue-200">
+                                    <h6 className="font-semibold text-gray-800 mb-3 text-center">Purchase Order Summary</h6>
+                                    <div className="grid grid-cols-4 gap-3">
+                                      <div className="text-center bg-white p-3 rounded-lg shadow-sm">
+                                        <h4 className="font-medium text-gray-600 mb-1 text-xs">Total Lines</h4>
                                         <p className="text-xl font-bold text-blue-600">{parsedData.lines ? parsedData.lines.length : 0}</p>
                                       </div>
-                                      <div className="text-center border-l border-r border-gray-300 px-2">
-                                        <h4 className="font-medium text-gray-600 mb-1 text-xs">Quantity</h4>
-                                        <p className="text-xl font-bold text-green-600">{parseFloat(parsedData.header.total_quantity || '0').toLocaleString('en-IN')}</p>
+                                      <div className="text-center bg-white p-3 rounded-lg shadow-sm">
+                                        <h4 className="font-medium text-gray-600 mb-1 text-xs">Total Quantity</h4>
+                                        <p className="text-xl font-bold text-green-600">
+                                          {(() => {
+                                            const headerQty = parseFloat(parsedData.header.total_quantity || '0');
+                                            const calculatedQty = parsedData.lines?.reduce((sum: number, line: any) => sum + (parseFloat(line.quantity || line.OrderedQty || '0')), 0) || 0;
+                                            return (headerQty > 0 ? headerQty : calculatedQty).toLocaleString('en-IN');
+                                          })()}
+                                        </p>
                                       </div>
-                                      <div className="text-center">
-                                        <h4 className="font-medium text-gray-600 mb-1 text-xs">Amount</h4>
-                                        <p className="text-lg font-bold text-green-600">₹{parseFloat(parsedData.header.grand_total || parsedData.header.total_amount || '0').toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                      <div className="text-center bg-white p-3 rounded-lg shadow-sm">
+                                        <h4 className="font-medium text-gray-600 mb-1 text-xs">Total Amount</h4>
+                                        <p className="text-lg font-bold text-green-600">
+                                          ₹{(() => {
+                                            const headerAmount = parseFloat(parsedData.header.grand_total || parsedData.header.total_amount || parsedData.header.po_amount || '0');
+                                            const calculatedAmount = parsedData.lines?.reduce((sum: number, line: any) => sum + (parseFloat(line.total_amount || line.PoLineValueWithTax || line.line_total || '0')), 0) || 0;
+                                            return (headerAmount > 0 ? headerAmount : calculatedAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                                          })()}
+                                        </p>
+                                      </div>
+                                      <div className="text-center bg-white p-3 rounded-lg shadow-sm">
+                                        <h4 className="font-medium text-gray-600 mb-1 text-xs">Status</h4>
+                                        <p className="text-sm font-bold text-orange-600">{parsedData.header.status || 'Open'}</p>
                                       </div>
                                     </div>
                                   </div>
@@ -1855,16 +2159,11 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                   <tr>
                                     <th className="text-left p-2 font-medium border-r min-w-[50px]">#</th>
                                     <th className="text-left p-2 font-medium border-r min-w-[120px]">Item Code</th>
-                                    <th className="text-left p-2 font-medium border-r min-w-[80px]">HSN</th>
                                     <th className="text-left p-2 font-medium border-r min-w-[200px]">Description</th>
                                     <th className="text-center p-2 font-medium border-r min-w-[60px]">Qty</th>
                                     <th className="text-left p-2 font-medium border-r min-w-[60px]">UOM</th>
                                     <th className="text-right p-2 font-medium border-r min-w-[100px]">Unit Price</th>
                                     <th className="text-right p-2 font-medium border-r min-w-[100px]">MRP</th>
-                                    <th className="text-right p-2 font-medium border-r min-w-[80px]">IGST %</th>
-                                    <th className="text-right p-2 font-medium border-r min-w-[80px]">CGST %</th>
-                                    <th className="text-right p-2 font-medium border-r min-w-[80px]">SGST %</th>
-                                    <th className="text-right p-2 font-medium border-r min-w-[80px]">CESS %</th>
                                     <th className="text-right p-2 font-medium border-r min-w-[100px]">Tax Amount</th>
                                     <th className="text-right p-2 font-medium min-w-[120px]">Total Amount</th>
                                   </tr>
@@ -1893,9 +2192,6 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                           line.item_code || line.sku || line.article_id || line.fsn_isbn || line.product_number,
                                           `ITEM-${index + 1}`
                                         )}
-                                      </td>
-                                      <td className="p-2 border-r">
-                                        {safeDisplay(line.hsn_code || line.hsn_sa_code, 'HSN-' + (index + 1))}
                                       </td>
                                       <td className="p-2 border-r">
                                         <div className="max-w-[200px] truncate" title={
@@ -1933,48 +2229,22 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                       </td>
                                       <td className="p-2 text-right border-r">
                                         {(() => {
-                                          const igst = line.igst_percent || line.igst_rate || line.igst || '0';
-                                          const numValue = parseFloat(String(igst).replace(/[^0-9.-]/g, ''));
-                                          return isNaN(numValue) ? '0%' : `${numValue}%`;
-                                        })()}
-                                      </td>
-                                      <td className="p-2 text-right border-r">
-                                        {(() => {
-                                          const cgst = line.cgst_percent || line.cgst_rate || line.cgst || '0';
-                                          const numValue = parseFloat(String(cgst).replace(/[^0-9.-]/g, ''));
-                                          return isNaN(numValue) ? '0%' : `${numValue}%`;
-                                        })()}
-                                      </td>
-                                      <td className="p-2 text-right border-r">
-                                        {(() => {
-                                          const sgst = line.sgst_percent || line.sgst_rate || line.sgst || '0';
-                                          const numValue = parseFloat(String(sgst).replace(/[^0-9.-]/g, ''));
-                                          return isNaN(numValue) ? '0%' : `${numValue}%`;
-                                        })()}
-                                      </td>
-                                      <td className="p-2 text-right border-r">
-                                        {(() => {
-                                          const cess = line.cess_percent || line.cess_rate || line.cess || '0';
-                                          const numValue = parseFloat(String(cess).replace(/[^0-9.-]/g, ''));
-                                          return isNaN(numValue) ? '0%' : `${numValue}%`;
-                                        })()}
-                                      </td>
-                                      <td className="p-2 text-right border-r">
-                                        {(() => {
-                                          // Priority: use tax_amount from Excel first, then calculate
-                                          const excelTax = line.tax_amount || line.total_tax_amount;
-                                          if (excelTax && parseFloat(String(excelTax)) > 0) {
-                                            return safeDisplay(excelTax, '₹0.00', 'currency');
+                                          // For Blinkit data, show the exact tax_amount from tax_value column
+                                          if (line.tax_amount) {
+                                            const taxAmount = parseFloat(line.tax_amount || '0');
+                                            return taxAmount.toFixed(0);
                                           }
 
-                                          const taxCalc = calculateTotalTax(line);
-                                          return safeDisplay(taxCalc.totalTax, '₹0.00', 'currency');
+                                          // Fallback for other platforms - show calculated tax amount
+                                          const taxableValue = parseFloat(line.taxable_value || line.basic_value || line.net_amount || '0');
+                                          const totalAmount = parseFloat(line.total_amount || line.line_total || line.grand_total || '0');
+                                          const taxAmount = totalAmount - taxableValue;
+                                          return taxAmount.toFixed(0);
                                         })()}
                                       </td>
                                       <td className="p-2 text-right font-medium text-green-600">
                                         {safeDisplay(
-                                          line.total_amount || line.total_value || line.base_amount ||
-                                          line.gross_amount || line.line_total,
+                                          line.total_amount || line.total_value,
                                           '₹0.00',
                                           'currency'
                                         )}
@@ -2156,21 +2426,72 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
             <div className="flex justify-center">
               <Button
                 onClick={() => {
-                  const uploadData = { poList: parsedData.poList };
+                  // Handle both single PO and multiple POs
+                  let uploadPromise;
 
-                  fetch('/api/swiggy/confirm-insert', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(uploadData),
-                  })
-                  .then(response => response.json())
+                  if (parsedData.poList) {
+                    // Multiple POs - import each one separately
+                    console.log(`🔄 Importing ${parsedData.poList.length} Swiggy POs...`);
+
+                    uploadPromise = Promise.all(
+                      parsedData.poList.map((po: any) =>
+                        fetch('/api/swiggy-pos', {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                          },
+                          body: JSON.stringify({
+                            header: po.header,
+                            lines: po.lines
+                          }),
+                        }).then(async (response) => {
+                          if (!response.ok) {
+                            const error = await response.json();
+                            throw new Error(`PO ${po.header.PoNumber}: ${error.message || error.error}`);
+                          }
+                          return response.json();
+                        })
+                      )
+                    );
+                  } else {
+                    // Single PO
+                    const uploadData = {
+                      header: parsedData.header,
+                      lines: parsedData.lines
+                    };
+
+                    uploadPromise = fetch('/api/swiggy-pos', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify(uploadData),
+                    })
+                  .then(async (response) => {
+                    if (!response.ok) {
+                      const error = await response.json();
+                      throw new Error(error.message || error.error || "Failed to import Swiggy PO");
+                    }
+                    return response.json();
+                  });
+                  }
+
+                  uploadPromise
                   .then(data => {
-                    toast({
-                      title: "Import Successful",
-                      description: `${parsedData.poList?.length || 1} Swiggy PO(s) imported to swiggy_po_header and swiggy_po_lines tables`,
-                    });
+                    if (parsedData.poList) {
+                      // Multiple POs success
+                      toast({
+                        title: "Import Successful",
+                        description: `${parsedData.poList.length} Swiggy POs imported successfully with ${parsedData.totalItems} total items`,
+                      });
+                    } else {
+                      // Single PO success
+                      toast({
+                        title: "Import Successful",
+                        description: `Swiggy PO ${parsedData.header?.PoNumber || parsedData.header?.po_number} imported with ${parsedData.lines?.length || 0} items`,
+                      });
+                    }
+                    queryClient.invalidateQueries({ queryKey: ["/api/swiggy-pos"] });
                     queryClient.invalidateQueries({ queryKey: ["/api/pos"] });
                     resetForm();
                     onComplete?.();
@@ -2178,7 +2499,7 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                   .catch(error => {
                     toast({
                       title: "Import Failed",
-                      description: error.message || 'Failed to import Swiggy POs',
+                      description: error.message || 'Failed to import Swiggy PO(s)',
                       variant: "destructive",
                     });
                   });
@@ -2187,19 +2508,64 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                 size="lg"
               >
                 <Database className="h-5 w-5 mr-2" />
-                📥 Import All Swiggy Data into Database
+                📥 {parsedData.poList ? `Import ${parsedData.poList.length} Swiggy POs to Database` : 'Import Swiggy PO to Database'}
               </Button>
             </div>
             <div className="mt-4 text-center">
               <p className="text-sm text-gray-600">
-                {parsedData.poList?.length ? (
+                {parsedData.poList ? (
                   <>
                     Total POs: <strong>{parsedData.poList.length}</strong> |
-                    Total Items: <strong>{parsedData.poList.reduce((acc: number, po: any) => acc + (po.lines?.length || 0), 0)}</strong>
+                    Total Items: <strong>{parsedData.totalItems}</strong> |
+                    Total Amount: <strong>₹{(() => {
+                      const amount = parseFloat(parsedData.totalAmount || '0');
+                      return isNaN(amount) ? '0' : amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    })()}</strong>
+                  </>
+                ) : parsedData.header && parsedData.lines ? (
+                  <>
+                    PO: <strong>{parsedData.header.PoNumber || parsedData.header.po_number}</strong> |
+                    Total Items: <strong>{parsedData.lines.length}</strong>
                   </>
                 ) : (
                   "Ready to import Swiggy PO data"
                 )}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Import Data into Database Button - Bottom of page for Blinkit POs */}
+      {currentStep === 'preview' && selectedPlatformData?.id === 'blinkit' && parsedData && parsedData.poList && (
+        <Card className="mt-6">
+          <CardContent className="pt-6">
+            <div className="flex justify-center">
+              <Button
+                onClick={() => {
+                  console.log(`🔄 Importing ${parsedData.poList.length} Blinkit POs using standard import...`);
+
+                  // Use the standard import mutation with poList for multiple POs
+                  importMutation.mutate({
+                    poList: parsedData.poList
+                  });
+                }}
+                disabled={importMutation.isPending}
+                className="bg-orange-600 hover:bg-orange-700 text-white px-8 py-3 text-lg"
+                size="lg"
+              >
+                <Database className="h-5 w-5 mr-2" />
+                📥 Import {parsedData.poList.length} Blinkit POs to Database
+              </Button>
+            </div>
+            <div className="mt-4 text-center">
+              <p className="text-sm text-gray-600">
+                Total POs: <strong>{parsedData.poList.length}</strong> |
+                Total Items: <strong>{parsedData.totalItems}</strong> |
+                Total Amount: <strong>₹{(() => {
+                  const amount = parseFloat(parsedData.totalAmount || '0');
+                  return isNaN(amount) ? '0' : amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                })()}</strong>
               </p>
             </div>
           </CardContent>
@@ -2253,6 +2619,60 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                   </>
                 ) : (
                   "Ready to import CityMall PO data"
+                )}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Import Data into Database Button - Bottom of page for Amazon POs */}
+      {currentStep === 'preview' && selectedPlatformData?.id === 'amazon' && parsedData && (
+        <Card className="mt-6">
+          <CardContent className="pt-6">
+            <div className="flex justify-center">
+              <Button
+                onClick={() => {
+                  console.log('🟢 Amazon Import Button Clicked');
+                  console.log('📋 Parsed Data:', parsedData);
+                  console.log('🏢 Selected Platform:', selectedPlatform);
+                  console.log('📊 Data Structure:', {
+                    hasHeader: !!parsedData?.header,
+                    hasLines: !!parsedData?.lines,
+                    linesCount: parsedData?.lines?.length || 0,
+                    headerKeys: parsedData?.header ? Object.keys(parsedData.header) : [],
+                    firstLineKeys: parsedData?.lines?.[0] ? Object.keys(parsedData.lines[0]) : []
+                  });
+                  handleImportData();
+                }}
+                disabled={importMutation.isPending}
+                size="lg"
+                className="bg-green-600 hover:bg-green-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 px-8 py-3"
+              >
+                {importMutation.isPending ? (
+                  <>
+                    <Database className="mr-2 h-5 w-5 animate-spin" />
+                    Importing Amazon Data...
+                  </>
+                ) : (
+                  <>
+                    <Database className="mr-2 h-5 w-5" />
+                    Import Data into Database
+                  </>
+                )}
+              </Button>
+            </div>
+            <div className="mt-4 text-center">
+              <p className="text-sm text-gray-600">
+                {parsedData.lines?.length ? (
+                  <>
+                    Ready to import <strong>{parsedData.lines.length}</strong> Amazon line items
+                    {parsedData.header?.total_amount && (
+                      <> | Total Amount: <strong>${Number(parsedData.header.total_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong></>
+                    )}
+                  </>
+                ) : (
+                  "Ready to import Amazon PO data"
                 )}
               </p>
             </div>

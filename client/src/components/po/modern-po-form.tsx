@@ -30,9 +30,6 @@ import { Progress } from "@/components/ui/progress";
 import type { PfMst, StatusItem } from "@shared/schema";
 
 const poFormSchema = z.object({
-  company: z.enum(["JIVO MART", "JIVO WELLNESS"], {
-    errorMap: () => ({ message: "Please select a company" })
-  }),
   platform: z.string().min(1, "Platform selection is required"),
   vendor_po_no: z.string()
     .min(3, "PO number must be at least 3 characters")
@@ -44,21 +41,9 @@ const poFormSchema = z.object({
       return !filenamePatterns.test(value);
     }, "PO number should not look like a filename. Use professional format like 'PO-YYYYMMDD-XXXX'"),
   distributor: z.string().optional(),
-  dispatch_from: z.string().optional(),
-  area: z.string().optional(),
-  region: z.string().min(1, "Region selection is required"),
-  state: z.string().min(1, "State selection is required"),
-  city: z.string().min(1, "City selection is required"),
-  po_date: z.string().min(1, "PO date is required")
-    .refine((date) => {
-      const poDate = new Date(date);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      return poDate >= today;
-    }, "PO date cannot be in the past"),
+  po_date: z.string().min(1, "PO date is required"),
   expiry_date: z.string().min(1, "Expiry date is required"),
   appointment_date: z.string().optional(),
-  comments: z.string().max(1000, "Comments cannot exceed 1000 characters").optional(),
   attachment: z.any().optional()
 }).superRefine((data, ctx) => {
   // Validate expiry date (now mandatory)
@@ -73,7 +58,7 @@ const poFormSchema = z.object({
       });
     }
   }
-  
+
   // Validate appointment date
   if (data.appointment_date && data.po_date) {
     const appointmentDate = new Date(data.appointment_date);
@@ -133,7 +118,6 @@ interface ModernPOFormProps {
 }
 
 export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPOFormProps = {}) {
-  const [selectedCompany, setSelectedCompany] = useState<"JIVO MART" | "JIVO WELLNESS">("JIVO MART");
 
   // Global error handler for uncaught errors in this component
   useEffect(() => {
@@ -175,7 +159,6 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
   const form = useForm<POFormData>({
     resolver: zodResolver(poFormSchema),
     defaultValues: {
-      company: "JIVO MART",
       po_date: new Date().toISOString().split('T')[0],
     },
     mode: "onChange"
@@ -192,91 +175,21 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
   // Fetch distributors
   // Note: distributors now handled by allDistributors query below
 
-  // Watch form values for cascading updates
-  const selectedRegion = form.watch("region");
-  const selectedState = form.watch("state");
+  // Watch form values
   const selectedDistributor = form.watch("distributor");
-
-  // Dynamic dropdown queries for cascading region → state → city
-  const { data: regions = [] } = useQuery<{ id: number; region_name: string }[]>({
-    queryKey: ["/api/regions"],
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-  });
-
-  // Find selected region ID
-  const selectedRegionId = useMemo(() => {
-    return regions.find(region => region.region_name === selectedRegion)?.id;
-  }, [regions, selectedRegion]);
-
-  // Get states based on selected region ID
-  const { data: regionStates = [] } = useQuery<{ id: number; state_name: string; region_id: number }[]>({
-    queryKey: [`/api/states/by-region/${selectedRegionId || 0}`],
-    enabled: Boolean(selectedRegionId),
-    staleTime: 5 * 60 * 1000,
-  });
-
-  // Legacy queries (keeping for backward compatibility)
-  const { data: states = [], isLoading: statesLoading, error: statesError, isSuccess: statesSuccess } = useQuery<{ id: number; statename: string }[]>({
-    queryKey: ["/api/states"],
-    staleTime: 0,
-    refetchOnMount: true
-  });
-
-  // Get districts/cities based on selected state (unified logic)
-  const selectedStateId = useMemo(() => {
-    // First try the new cascading dropdown data
-    const fromNewAPI = regionStates.find(state => state.state_name === selectedState)?.id;
-    if (fromNewAPI) return fromNewAPI;
-    
-    // Fallback to legacy state data
-    return states && Array.isArray(states) ? states.find(state => state && state.statename === selectedState)?.id : undefined;
-  }, [regionStates, selectedState, states]);
-
-  const { data: stateCities = [] } = useQuery<{ id: number; district_name: string; state_id: number }[]>({
-    queryKey: [`/api/districts/by-state/${selectedStateId || 0}`],
-    enabled: Boolean(selectedStateId),
-    staleTime: 5 * 60 * 1000,
-  });
 
   // Manual refetch function for testing (if needed)
 
-  // Debug logging
-  console.log("States React Query status:", {
-    data: states,
-    length: states.length,
-    isLoading: statesLoading,
-    error: statesError,
-    isSuccess: statesSuccess
-  });
-
-  // Alert for debugging
-  if (statesSuccess && states.length > 0) {
-    console.log("✅ States loaded successfully:", states.map(s => s.statename).join(', '));
-  } else if (statesLoading) {
-    console.log("⏳ Loading states...");
-  } else if (statesError) {
-    console.log("❌ Error loading states:", statesError);
-  } else {
-    console.log("❓ States array is empty but no error or loading state");
-  }
-
-  // selectedStateId is now defined above with unified logic
-
-  const { data: districts = [] } = useQuery<{ id: number; district: string; state_id: number }[]>({
-    queryKey: [`/api/districts/${selectedStateId || 0}`],
-    enabled: true, // Always enabled to maintain consistent hook calls
-    staleTime: selectedStateId ? 0 : Infinity, // Only fetch if state is actually selected
-    refetchOnWindowFocus: false
-  });
 
   const { data: allDistributors = [] } = useQuery<{ id: number; distributor_name: string }[]>({
-    queryKey: ["/api/distributors"]
+    queryKey: ["/api/distributors"],
+    staleTime: 0, // Always consider data stale
+    gcTime: 0,    // Don't cache (gcTime is the new name for cacheTime in React Query v5)
+    refetchOnMount: true // Always refetch when component mounts
   });
 
-  const { data: dispatchLocations = [] } = useQuery<{ id: number; name: string }[]>({
-    queryKey: ["/api/dispatch-locations"]
-  });
-
+  // Log distributors for debugging
+  console.log('📋 All distributors loaded:', allDistributors);
 
   const { data: itemStatuses = [] } = useQuery<StatusItem[]>({
     queryKey: ["/api/status-items"]
@@ -339,6 +252,16 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
     
     console.log("📝 EditPO data received:", po);
     console.log("🔑 EditPO keys:", Object.keys(po));
+    console.log("🏢 Platform data from API:", po.platform);
+    console.log("🏢 Platform ID:", po.platform?.id);
+    console.log("🏢 Platform Name:", po.platform?.pf_name);
+    console.log("🏢 Platform ID as string:", po.platform?.id?.toString());
+    console.log("🏢 Will set platform field to:", po.platform?.id?.toString() || "EMPTY");
+    console.log("🚚 Distributor - serving_distributor:", po.serving_distributor);
+    console.log("🚚 Distributor - distributor object:", po.distributor);
+    console.log("🚚 Distributor - distributor.id:", po.distributor?.id);
+    console.log("🚚 Distributor - distributor.distributor_name:", po.distributor?.distributor_name);
+    console.log("🚚 Will set distributor field to:", po.distributor?.distributor_name || po.serving_distributor || "EMPTY");
     console.log("🏙️ City value from API:", po.city);
     console.log("🗺️ State value from API:", po.state);
     console.log("📦 Order items from API (order_items):", po.order_items);
@@ -355,20 +278,17 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
     
       return {
       formData: {
-        company: po.company || "JIVO MART",
         platform: po.platform?.id?.toString() || "",
-        vendor_po_no: po.po_number || "",
-        distributor: po.serving_distributor || "",
-        dispatch_from: po.dispatch_from || "",
-        area: po.area || "",
-        region: po.region || "",
-        // Only populate state and city if they have actual values (not null/empty)
-        state: po.state && po.state.trim() !== '' ? po.state : "",
-        city: po.city && po.city.trim() !== '' ? po.city : "",
-        po_date: po.order_date ? new Date(po.order_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        vendor_po_no: po.po_number || po.vendor_po_number || "",
+        // For Amazon orders (platform ID 6), always set distributor to RK WORLD
+        // Otherwise: Priority: distributor.distributor_name (from distributors table) > serving_distributor (raw string from platform) > empty
+        // Note: The Select component uses distributor_name as value, not ID
+        distributor: (po.platform?.id === 6 || po.platform?.id === "6" || po.platform?.id?.toString() === "6")
+          ? "RK WORLD"
+          : (po.distributor?.distributor_name || po.serving_distributor || ""),
+        po_date: po.order_date || po.po_date ? new Date(po.order_date || po.po_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         expiry_date: po.expiry_date ? new Date(po.expiry_date).toISOString().split('T')[0] : "",
-        appointment_date: po.appointment_date ? new Date(po.appointment_date).toISOString().split('T')[0] : "",
-        comments: po.comments || ""
+        appointment_date: po.appointment_date ? new Date(po.appointment_date).toISOString().split('T')[0] : ""
       },
       lineItems: po.orderItems && po.orderItems.length > 0 
         ? po.orderItems.map((item: any, index: number) => ({
@@ -379,7 +299,7 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
             sap_code: (typeof item.sap_code === 'number' || !isNaN(Number(item.sap_code))) ? "" : (item.sap_code || ""),
             uom: item.uom || "PCS",
             quantity: item.quantity || 1,
-            basic_amount: parseFloat(item.basic_rate || "0"),
+            basic_amount: parseFloat(item.basic_amount || item.basic_rate || item.landing_rate || "0"),
             tax_percent: (() => {
               // Use the corrected tax_percent from API (which handles decimal vs percentage conversion)
               let taxPercent = 0;
@@ -427,12 +347,23 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
     try {
       if (populatedData) {
         console.log("🔄 Resetting form with data:", populatedData.formData);
-        console.log("🏙️ City value being set:", populatedData.formData.city);
+        console.log("🔄 Distributor value being set:", populatedData.formData.distributor);
+        console.log("🔄 All distributors available:", allDistributors.map(d => d.distributor_name));
+
+        // Check if distributor value exists in the distributors list
+        const distMatch = allDistributors.find(d => d.distributor_name === populatedData.formData.distributor);
+        if (populatedData.formData.distributor && !distMatch) {
+          console.warn(`⚠️ Distributor "${populatedData.formData.distributor}" not found in distributors list!`);
+        } else if (distMatch) {
+          console.log(`✅ Distributor "${populatedData.formData.distributor}" found in list (ID: ${distMatch.id})`);
+        }
+
         setFormState(prev => ({ ...prev, isInitialPopulation: true }));
-        
+
         // Safely reset form with error handling
         try {
           form.reset(populatedData.formData);
+          console.log("✅ Form reset successful. Current distributor value:", form.getValues("distributor"));
         } catch (formResetError) {
           console.error("❌ Error resetting form:", formResetError);
           toast({
@@ -442,23 +373,14 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
           });
           return;
         }
-        
+
         if (populatedData.lineItems && populatedData.lineItems.length > 0) {
           setLineItems(populatedData.lineItems);
         }
-        
-        // Reset flag after a longer delay to ensure all watchers have completed
+
+        // Reset flag after a delay
         setTimeout(() => {
-          try {
-            // Ensure city value is preserved after all watchers have fired
-            if (populatedData.formData.city) {
-              form.setValue("city", populatedData.formData.city);
-            }
-            setFormState(prev => ({ ...prev, isInitialPopulation: false }));
-            console.log("🔍 City value after form reset:", form.getValues("city"));
-          } catch (setValueError) {
-            console.error("❌ Error setting city value:", setValueError);
-          }
+          setFormState(prev => ({ ...prev, isInitialPopulation: false }));
         }, 500);
       }
     } catch (error) {
@@ -535,24 +457,23 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
     // Reset form with animation
     setTimeout(() => {
       form.reset({
-        company: selectedCompany,
         po_date: new Date().toISOString().split('T')[0],
       });
       setLineItems([]);
       setAttachedFile(null);
       setPreviousPlatformId("");
       setFormProgress(0);
-      
+
       toast({
         title: "Form Reset",
         description: "All fields have been cleared and reset to defaults",
         duration: 2000,
       });
-      
+
       setFormState(prev => ({ ...prev, isResetting: false }));
       setShowResetConfirmDialog(false);
     }, 300);
-  }, [form, selectedCompany, lineItems.length, toast]);
+  }, [form, lineItems.length, toast]);
 
   // Progress calculation effect - temporarily disabled to isolate runtime error
   // useEffect(() => {
@@ -827,71 +748,6 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 5000)
   });
 
-  // Region options - now using dynamic data
-  const getAvailableRegions = () => {
-    return regions.length > 0 ? regions.map(r => r.region_name) : ["NORTH INDIA", "SOUTH INDIA", "WEST INDIA", "EAST INDIA", "CENTRAL INDIA"];
-  };
-
-  // selectedState is already defined above  
-
-  // Cascading location logic - clear dependent fields when parent changes (but not during initial population)
-  useEffect(() => {
-    if (selectedRegion && !formState.isInitialPopulation && !editMode) {
-      // Clear state and city when region changes
-      form.setValue("state", "");
-      form.setValue("city", "");
-    }
-  }, [selectedRegion, form, formState.isInitialPopulation, editMode]);
-
-  useEffect(() => {
-    if (selectedState && !formState.isInitialPopulation && !editMode) {
-      // Clear city when state changes (district-based cities) - but not in edit mode
-      form.setValue("city", "");
-      // Note: area is now a text field, no need to clear it
-    }
-  }, [selectedState, form, formState.isInitialPopulation, editMode]);
-
-  // Distributor-Dispatch From locking logic
-  useEffect(() => {
-    if (selectedDistributor && selectedDistributor !== "none") {
-      // Clear dispatch_from when distributor is selected
-      const currentDispatchFrom = form.getValues("dispatch_from");
-      if (currentDispatchFrom && currentDispatchFrom !== "none") {
-        form.setValue("dispatch_from", "none");
-      }
-    }
-  }, [selectedDistributor, form]);
-
-  // Get available options based on dynamic data
-  const getAvailableStates = () => {
-    // Use cascading states if region is selected, otherwise fall back to all states
-    if (selectedRegion && regionStates.length > 0) {
-      const cascadingStateOptions = regionStates.map(state => state.state_name);
-      console.log("getAvailableStates (cascading):", cascadingStateOptions);
-      return cascadingStateOptions;
-    }
-    
-    // Fallback to legacy all states
-    const allStateOptions = states.map(state => state.statename);
-    console.log("getAvailableStates (legacy):", allStateOptions);
-    return allStateOptions;
-  };
-  
-  const getAvailableCities = () => {
-    // Use cascading cities if available, otherwise fall back to districts
-    if (stateCities.length > 0) {
-      const cascadingCityOptions = stateCities.map(city => city.district_name);
-      console.log("getAvailableCities (cascading):", cascadingCityOptions);
-      return cascadingCityOptions;
-    }
-    
-    // Fallback to legacy districts
-    const legacyCityOptions = districts.map(district => district.district);
-    console.log("getAvailableCities (legacy):", legacyCityOptions);
-    return legacyCityOptions;
-  };
-
-
   const addLineItem = useCallback(() => {
     if (!selectedPlatformId) {
       toast({
@@ -1163,36 +1019,15 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
       formData.append('attachment', attachedFile);
     }
 
-    // Get state_id and district_id from selected names (with safety checks)
-    const selectedStateRecord = states && Array.isArray(states) ? states.find(state => state && state.statename === data.state) : undefined;
-    const selectedDistrictRecord = districts && Array.isArray(districts) ? districts.find(district => district && district.district === data.city) : undefined;
-    
-    console.log("🔍 Debug PO submission:");
-    console.log("Selected state:", data.state);
-    console.log("Found state record:", selectedStateRecord);
-    console.log("Selected city:", data.city);
-    console.log("Found district record:", selectedDistrictRecord);
-    console.log("Available states:", states.length);
-    console.log("Available districts:", districts.length);
-
     // Structure data according to new PO Master API schema
     const masterData = {
       po_number: data.vendor_po_no,
-      company: selectedCompany,
       platform_id: parseInt(data.platform),
       serving_distributor: data.distributor === "none" ? undefined : data.distributor,
-      dispatch_from: data.dispatch_from === "none" ? undefined : data.dispatch_from,
       po_date: data.po_date,
       expiry_date: data.expiry_date || undefined,
       appointment_date: data.appointment_date || undefined,
-      region: data.region,
-      state: data.state,
-      city: data.city,
-      area: data.area,
-      state_id: selectedStateRecord?.id || null,
-      district_id: selectedDistrictRecord?.id || null,
       status: "OPEN",
-      comments: data.comments,
       attachment: attachedFile?.name
     };
 
@@ -1232,7 +1067,7 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
       master: masterData,
       lines: linesData
     });
-  }, [validateFormSubmission, attachedFile, selectedCompany, createPOMutation]);
+  }, [validateFormSubmission, attachedFile, createPOMutation]);
 
 
   // Handle redirect when edit query fails (must be outside conditional to follow hooks rules)
@@ -1430,13 +1265,6 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
                 </span>
               </div>
             </div>
-            {/* Company Badge */}
-            <div className="flex flex-col items-center space-y-2">
-              <p className="text-xs text-gray-500 uppercase tracking-wide">Active Company</p>
-              <Badge variant="secondary" className="bg-blue-100 text-blue-800 font-semibold px-3 py-1">
-                {selectedCompany}
-              </Badge>
-            </div>
             {/* Enhanced Status Indicators */}
             <div className="flex items-center space-x-3">
               {formState.isSubmitting && (
@@ -1459,70 +1287,6 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
           </div>
         </div>
       </div>
-
-      {/* Enhanced Company Selection */}
-      <Card className="shadow-lg border-blue-100 transition-all duration-300 hover:shadow-xl">
-        <CardHeader className="pb-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-t-lg border-b">
-          <div className="flex items-center space-x-3">
-            <Building2 className="h-5 w-5 text-blue-600" />
-            <CardTitle className="text-lg font-semibold text-gray-800">
-              Company Selection
-            </CardTitle>
-            {!formState.isResetting && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => handleFormReset()}
-                className="ml-auto text-gray-500 hover:text-orange-600 hover:bg-gray-100 transition-all duration-200"
-                title="Reset form"
-              >
-                <RefreshCw className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="pt-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Button
-              type="button"
-              variant={selectedCompany === "JIVO MART" ? "default" : "outline"}
-              onClick={() => {
-                setSelectedCompany("JIVO MART");
-                form.setValue("company", "JIVO MART");
-              }}
-              disabled={formState.isSubmitting || formState.isResetting}
-              className={cn(
-                "h-12 font-semibold transition-all duration-300 transform hover:scale-105",
-                selectedCompany === "JIVO MART" 
-                  ? "bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-lg" 
-                  : "hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700"
-              )}
-            >
-              <Package className="h-4 w-4 mr-2" />
-              JIVO MART
-            </Button>
-            <Button
-              type="button"
-              variant={selectedCompany === "JIVO WELLNESS" ? "default" : "outline"}
-              onClick={() => {
-                setSelectedCompany("JIVO WELLNESS");
-                form.setValue("company", "JIVO WELLNESS");
-              }}
-              disabled={formState.isSubmitting || formState.isResetting}
-              className={cn(
-                "h-12 font-semibold transition-all duration-300 transform hover:scale-105",
-                selectedCompany === "JIVO WELLNESS" 
-                  ? "bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 shadow-lg" 
-                  : "hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700"
-              )}
-            >
-              <Package className="h-4 w-4 mr-2" />
-              JIVO WELLNESS
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Enhanced Purchase Order Management */}
       <Card className="shadow-xl border-blue-100 transition-all duration-300 hover:shadow-2xl overflow-hidden">
@@ -1570,18 +1334,18 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
                         disabled={formState.isSubmitting || formState.isResetting}
                       >
                         <SelectTrigger className={cn(
-                          "h-12 bg-white border-2 transition-all duration-200 text-base",
-                          fieldState.error 
-                            ? "border-orange-300 focus:border-orange-400 focus:ring-orange-100" 
-                            : "border-gray-300 hover:border-blue-400 focus:border-blue-500 focus:ring-blue-200",
+                          "h-12 border-2 transition-all duration-200 text-base",
+                          fieldState.error
+                            ? "bg-white border-orange-300 focus:border-orange-400 focus:ring-orange-100"
+                            : "bg-white border-gray-300 hover:border-blue-400 focus:border-blue-500 focus:ring-blue-200",
                           field.value && !fieldState.error && "border-green-300 bg-green-50/30"
                         )}>
                           <SelectValue placeholder="Select your e-commerce platform" />
                         </SelectTrigger>
                         <SelectContent className="max-h-60">
                           {platforms.map((platform) => (
-                            <SelectItem 
-                              key={platform.id} 
+                            <SelectItem
+                              key={platform.id}
                               value={platform.id.toString()}
                               className="py-3 px-4 hover:bg-blue-50"
                             >
@@ -1594,9 +1358,9 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
                         </SelectContent>
                       </Select>
                       {fieldState.error && (
-                        <p 
-                          id="platform-error" 
-                          className="mt-1 text-sm text-orange-600 flex items-center" 
+                        <p
+                          id="platform-error"
+                          className="mt-1 text-sm text-orange-600 flex items-center"
                           role="alert"
                           aria-live="polite"
                         >
@@ -1613,7 +1377,7 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
               <div className="space-y-3 relative">
                 <Label htmlFor="vendor_po_no" className="text-sm font-semibold text-gray-800 flex items-center">
                   <FileText className="h-4 w-4 mr-1 text-blue-600" />
-                  VENDOR PO NUMBER *
+                  PO NUMBER *
                 </Label>
                 <Controller
                   name="vendor_po_no"
@@ -1626,10 +1390,10 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
                         placeholder={selectedPlatformId ? "e.g., BLI-20250821-1234" : "Select platform first"}
                         className={cn(
                           "h-12 transition-all duration-200 text-base pl-4 pr-12 border-2",
-                          !selectedPlatformId 
-                            ? "bg-gray-100 border-gray-200 cursor-not-allowed text-gray-500" 
-                            : fieldState.error 
-                            ? "border-orange-300 focus:border-orange-400 focus:ring-orange-100 bg-orange-50/30" 
+                          !selectedPlatformId
+                            ? "bg-gray-100 border-gray-200 cursor-not-allowed text-gray-500"
+                            : fieldState.error
+                            ? "border-orange-300 focus:border-orange-400 focus:ring-orange-100 bg-orange-50/30"
                             : field.value && !fieldState.error
                             ? "border-green-300 focus:border-green-500 focus:ring-green-200 bg-green-50/30"
                             : "bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-200 hover:border-blue-400"
@@ -1648,9 +1412,9 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
                         {selectedPlatformId ? 'Enter PO number manually' : 'Select a platform first'}
                       </p>
                       {fieldState.error && (
-                        <p 
-                          id="po-number-error" 
-                          className="mt-1 text-sm text-orange-600 flex items-center" 
+                        <p
+                          id="po-number-error"
+                          className="mt-1 text-sm text-orange-600 flex items-center"
                           role="alert"
                           aria-live="polite"
                         >
@@ -1664,164 +1428,77 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="distributor" className="text-xs font-medium text-gray-700">
+                <Label htmlFor="distributor" className="text-xs font-medium text-gray-700 flex items-center">
                   DISTRIBUTOR
-                </Label>
-                <Select
-                  value={form.watch("distributor")}
-                  onValueChange={(value) => form.setValue("distributor", value)}
-                  disabled={!selectedPlatformId}
-                >
-                  <SelectTrigger className={cn("h-10", selectedPlatformId ? "bg-white" : "bg-gray-100")}>
-                    <SelectValue placeholder={selectedPlatformId ? "SELECT DISTRIBUTOR" : "SELECT PLATFORM FIRST"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">-- No Distributor --</SelectItem>
-                    {allDistributors.map((distributor) => (
-                      <SelectItem key={distributor.id} value={distributor.distributor_name}>
-                        {distributor.distributor_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Dispatch From Field - Locked when distributor is selected */}
-              <div className="space-y-2">
-                <Label htmlFor="dispatch_from" className="text-xs font-medium text-gray-700 flex items-center">
-                  DISPATCH FROM
-                  {selectedDistributor && selectedDistributor !== "none" && (
-                    <span className="ml-2 px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
-                      Locked - Distributor Selected
+                  {(selectedPlatformId === "6" || String(selectedPlatformId) === "6") && (
+                    <span className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+                      Auto-Selected for Amazon
                     </span>
                   )}
                 </Label>
+                {(() => {
+                  const currentDistValue = form.watch("distributor");
+                  const matchingDist = allDistributors.find(d => d.distributor_name === currentDistValue);
+                  console.log("🔍 Distributor Debug:", {
+                    currentValue: currentDistValue,
+                    allDistributors: allDistributors.map(d => d.distributor_name),
+                    isMatch: !!matchingDist
+                  });
+                  return null;
+                })()}
                 <Select
-                  value={form.watch("dispatch_from")}
-                  onValueChange={(value) => form.setValue("dispatch_from", value)}
-                  disabled={!selectedPlatformId || Boolean(selectedDistributor && selectedDistributor !== "none")}
+                  value={form.watch("distributor")}
+                  onValueChange={(value) => form.setValue("distributor", value)}
+                  disabled={!selectedPlatformId || selectedPlatformId === "6" || String(selectedPlatformId) === "6"}
                 >
                   <SelectTrigger className={cn(
-                    "h-10", 
-                    !selectedPlatformId || (selectedDistributor && selectedDistributor !== "none")
-                      ? "bg-gray-100 cursor-not-allowed" 
+                    "h-10",
+                    !selectedPlatformId
+                      ? "bg-gray-100"
+                      : (selectedPlatformId === "6" || String(selectedPlatformId) === "6")
+                      ? "bg-blue-50 cursor-not-allowed border-blue-200"
                       : "bg-white"
                   )}>
                     <SelectValue placeholder={
-                      !selectedPlatformId 
-                        ? "SELECT PLATFORM FIRST" 
-                        : (selectedDistributor && selectedDistributor !== "none")
-                        ? "LOCKED - REMOVE DISTRIBUTOR TO EDIT"
-                        : "SELECT DISPATCH FROM"
+                      !selectedPlatformId
+                        ? "SELECT PLATFORM FIRST"
+                        : (selectedPlatformId === "6" || String(selectedPlatformId) === "6")
+                        ? "RK WORLD (Auto-Selected)"
+                        : "SELECT DISTRIBUTOR"
                     } />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">-- No Dispatch Location --</SelectItem>
-                    {dispatchLocations.map((location) => (
-                      <SelectItem key={location.id} value={location.name}>
-                        {location.name}
-                      </SelectItem>
-                    ))}
+                    {(selectedPlatformId === "6" || String(selectedPlatformId) === "6") ? (
+                      // Only show RK WORLD for Amazon
+                      allDistributors
+                        .filter((distributor) => distributor.distributor_name === "RK WORLD")
+                        .map((distributor) => (
+                          <SelectItem key={distributor.id} value={distributor.distributor_name}>
+                            {distributor.distributor_name}
+                          </SelectItem>
+                        ))
+                    ) : (
+                      // Show all distributors for other platforms
+                      <>
+                        <SelectItem value="none">-- No Distributor --</SelectItem>
+                        {allDistributors.map((distributor) => (
+                          <SelectItem key={distributor.id} value={distributor.distributor_name}>
+                            {distributor.distributor_name}
+                          </SelectItem>
+                        ))}
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
-                {selectedDistributor && selectedDistributor !== "none" && (
-                  <p className="text-xs text-amber-600 flex items-center mt-1">
+                {(selectedPlatformId === "6" || String(selectedPlatformId) === "6") && (
+                  <p className="text-xs text-blue-600 flex items-center mt-1">
                     <AlertCircle className="h-3 w-3 mr-1" />
-                    Dispatch From is locked when a distributor is selected. Remove distributor to edit.
+                    RK WORLD is the designated distributor for all Amazon orders
                   </p>
                 )}
               </div>
 
-              {/* Row 2 */}
-              <div className="space-y-2">
-                <Label htmlFor="area" className="text-xs font-medium text-gray-700">
-                  AREA
-                </Label>
-                <Input
-                  id="area"
-                  {...form.register("area")}
-                  placeholder={!selectedPlatformId ? "SELECT PLATFORM FIRST" : "Enter area name"}
-                  className="h-10"
-                  disabled={!selectedPlatformId}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="region" className="text-xs font-medium text-gray-700">
-                  REGION *
-                </Label>
-                <Select
-                  value={form.watch("region")}
-                  onValueChange={(value) => form.setValue("region", value)}
-                  disabled={!selectedPlatformId}
-                >
-                  <SelectTrigger className={cn("h-10", selectedPlatformId ? "bg-white" : "bg-gray-100")}>
-                    <SelectValue placeholder={selectedPlatformId ? "SELECT REGION" : "SELECT PLATFORM FIRST"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {getAvailableRegions().map((region: string) => (
-                      <SelectItem key={region} value={region}>
-                        {region}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="state" className="text-xs font-medium text-gray-700">
-                  STATE *
-                </Label>
-                <Select
-                  value={form.watch("state")}
-                  onValueChange={(value) => form.setValue("state", value)}
-                  disabled={!selectedPlatformId}
-                >
-                  <SelectTrigger className={cn("h-10", selectedPlatformId ? "bg-white" : "bg-gray-100")}>
-                    <SelectValue placeholder={!selectedPlatformId ? "SELECT PLATFORM FIRST" : "SELECT STATE"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {getAvailableStates().map((state: string) => (
-                      <SelectItem key={state} value={state}>
-                        {state}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Row 3 */}
-              <div className="space-y-2">
-                <Label htmlFor="city" className="text-xs font-medium text-gray-700">
-                  CITY *
-                </Label>
-                <Select
-                  value={form.watch("city")}
-                  onValueChange={(value) => form.setValue("city", value)}
-                  disabled={!selectedState || !selectedPlatformId}
-                >
-                  <SelectTrigger className={cn("h-10", selectedPlatformId ? "bg-white" : "bg-gray-100")}>
-                    <SelectValue placeholder={!selectedPlatformId ? "SELECT PLATFORM FIRST" : selectedState ? "SELECT CITY" : "SELECT STATE FIRST"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {/* Show current city value even if districts haven't loaded yet */}
-                    {form.watch("city") && !getAvailableCities().includes(form.watch("city")) && (
-                      <SelectItem key={form.watch("city")} value={form.watch("city")}>
-                        {form.watch("city")}
-                      </SelectItem>
-                    )}
-                    {getAvailableCities().map((city: string) => (
-                      <SelectItem key={city} value={city}>
-                        {city}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-
-
-              {/* Row 4 */}
+              {/* Date Fields */}
               <div className="space-y-2">
                 <Label htmlFor="po_date" className="text-xs font-medium text-gray-700">
                   PO DATE *
@@ -2633,10 +2310,6 @@ export function ModernPOForm({ onSuccess, editMode = false, editPoId }: ModernPO
                 <div>
                   <span className="text-gray-600">PO Number:</span>
                   <span className="font-medium ml-2">{form.getValues('vendor_po_no')}</span>
-                </div>
-                <div>
-                  <span className="text-gray-600">Company:</span>
-                  <span className="font-medium ml-2">{selectedCompany}</span>
                 </div>
                 <div>
                   <span className="text-gray-600">Total Items:</span>

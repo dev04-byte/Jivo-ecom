@@ -263,9 +263,6 @@ export function POListView() {
             return 'Invalid Date';
           }
         })() : 'Not set',
-        'City': po.city,
-        'State': po.state,
-        'Location': `${po.city}, ${po.state}`,
         'Distributor': po.serving_distributor || 'Not assigned',
         'Total Items': po.orderItems.length,
         'Total Quantity': totalQuantity,
@@ -356,13 +353,13 @@ export function POListView() {
         const poNumber = po.po_number || "";
         const platformName = po.platform?.pf_name || "";
         const status = po.status || "";
-        const location = `${po.city || ""}, ${po.state || ""}`;
+        //const location = `${po.city || ""}, ${po.state || ""}`;
         
         matchesSearch = (
           (typeof poNumber === 'string' && poNumber.toLowerCase().includes(searchTermLower)) ||
           (typeof platformName === 'string' && platformName.toLowerCase().includes(searchTermLower)) ||
-          (typeof status === 'string' && status.toLowerCase().includes(searchTermLower)) ||
-          (typeof location === 'string' && location.toLowerCase().includes(searchTermLower))
+          (typeof status === 'string' && status.toLowerCase().includes(searchTermLower)) 
+          //(typeof location === 'string' && location.toLowerCase().includes(searchTermLower))
         );
       } catch (error) {
         console.error('Error in search filter:', error, { po, searchTerm });
@@ -824,10 +821,10 @@ export function POListView() {
                         })() : 'Not set'}
                       </p>
                     </div>
-                    <div className="space-y-1">
+                    {/*<div className="space-y-1">
                       <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Location</p>
                       <p className="text-sm font-semibold text-gray-900 dark:text-white">{po.city}, {po.state}</p>
-                    </div>
+                    </div>*/}
                     <div className="space-y-1">
                       <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Distributor</p>
                       <p className="text-sm font-semibold text-gray-900 dark:text-white">

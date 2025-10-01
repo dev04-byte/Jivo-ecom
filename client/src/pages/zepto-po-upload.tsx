@@ -332,44 +332,115 @@ export default function ZeptoPoUpload() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Summary Information */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="p-3 bg-blue-50 rounded-lg">
-                    <p className="text-sm font-medium text-blue-800">
-                      {parsedData.poList ? "Total POs" : "PO Number"}
-                    </p>
-                    <p className="text-lg font-bold text-blue-900">
-                      {parsedData.poList ? parsedData.poList.length : (parsedData.header?.po_number || "N/A")}
-                    </p>
+                {/* Enhanced Summary Totals */}
+                {parsedData.poList ? (
+                  /* Multiple POs Summary */
+                  <div className="space-y-4">
+                    <h4 className="font-medium text-lg">Found {parsedData.poList.length} Zepto Purchase Orders</h4>
+
+                    <div className="grid grid-cols-4 gap-4">
+                      <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                        <div className="text-purple-600 font-medium text-sm mb-1">Total POs</div>
+                        <div className="text-2xl font-bold text-purple-700">{parsedData.poList.length}</div>
+                      </div>
+
+                      <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                        <div className="text-blue-600 font-medium text-sm mb-1">Total Line Items</div>
+                        <div className="text-2xl font-bold text-blue-700">
+                          {parsedData.poList.reduce((sum: number, po: any) => sum + (po.lines?.length || 0), 0)}
+                        </div>
+                      </div>
+
+                      <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                        <div className="text-green-600 font-medium text-sm mb-1">Total Quantity</div>
+                        <div className="text-2xl font-bold text-green-700">
+                          {parsedData.poList.reduce((sum: number, po: any) => {
+                            return sum + (po.lines?.reduce((lineSum: number, line: any) => lineSum + (parseInt(line.po_qty) || 0), 0) || 0);
+                          }, 0).toLocaleString('en-IN')}
+                        </div>
+                      </div>
+
+                      <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-200">
+                        <div className="text-emerald-600 font-medium text-sm mb-1">Total Amount</div>
+                        <div className="text-2xl font-bold text-emerald-700">
+                          ₹{(() => {
+                            const totalAmount = parsedData.poList.reduce((sum: number, po: any) => {
+                              const poAmount = parseFloat(po.header?.total_amount || po.header?.po_amount || '0');
+                              return sum + poAmount;
+                            }, 0);
+                            return totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                          })()}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="p-3 bg-green-50 rounded-lg">
-                    <p className="text-sm font-medium text-green-800">Total Items</p>
-                    <p className="text-lg font-bold text-green-900">
-                      {parsedData.poList
-                        ? parsedData.poList.reduce((sum, po) => sum + (po.lines?.length || 0), 0)
-                        : (parsedData.totalItems || parsedData.lines?.length || 0)
-                      }
-                    </p>
+                ) : (
+                  /* Single PO Summary */
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-medium text-lg">PO: {parsedData.header?.po_number || "N/A"}</h4>
+                      <div className="text-sm text-gray-600 bg-blue-100 px-3 py-1 rounded-full">
+                        {parsedData.lines?.length || 0} line items
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg border mb-4">
+                      <div>
+                        <span className="text-sm text-gray-600 block mb-1">PO Number</span>
+                        <div className="font-semibold text-blue-600">
+                          {parsedData.header?.po_number || 'N/A'}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-sm text-gray-600 block mb-1">PO Date</span>
+                        <div className="font-semibold">
+                          {parsedData.header?.po_date || 'N/A'}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-sm text-gray-600 block mb-1">Vendor</span>
+                        <div className="font-semibold">
+                          {parsedData.header?.vendor_name || 'N/A'}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-sm text-gray-600 block mb-1">Status</span>
+                        <div className="font-semibold text-green-600">
+                          {parsedData.header?.status || 'Open'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Summary Totals Cards for Single PO */}
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                        <div className="text-blue-600 font-medium text-sm mb-1">Total Line Items</div>
+                        <div className="text-2xl font-bold text-blue-700">{parsedData.lines?.length || 0}</div>
+                      </div>
+
+                      <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                        <div className="text-green-600 font-medium text-sm mb-1">Total Quantity</div>
+                        <div className="text-2xl font-bold text-green-700">
+                          {parsedData.lines?.reduce((sum: number, line: any) => sum + (parseInt(line.po_qty) || 0), 0).toLocaleString('en-IN') || 0}
+                        </div>
+                      </div>
+
+                      <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                        <div className="text-purple-600 font-medium text-sm mb-1">Total Amount</div>
+                        <div className="text-2xl font-bold text-purple-700">
+                          ₹{(() => {
+                            if (parsedData.header?.total_amount || parsedData.header?.po_amount) {
+                              const amount = parseFloat(parsedData.header.total_amount || parsedData.header.po_amount);
+                              return amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                            }
+                            const calculatedTotal = parsedData.lines?.reduce((sum: number, line: any) => sum + (parseFloat(line.total_value) || 0), 0) || 0;
+                            return calculatedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                          })()}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="p-3 bg-purple-50 rounded-lg">
-                    <p className="text-sm font-medium text-purple-800">Total Quantity</p>
-                    <p className="text-lg font-bold text-purple-900">
-                      {parsedData.poList
-                        ? parsedData.poList.reduce((sum, po) => sum + po.header.total_quantity, 0)
-                        : (parsedData.totalQuantity || parsedData.header?.total_quantity || 0)
-                      }
-                    </p>
-                  </div>
-                  <div className="p-3 bg-yellow-50 rounded-lg">
-                    <p className="text-sm font-medium text-yellow-800">Total Amount</p>
-                    <p className="text-lg font-bold text-yellow-900">
-                      ₹{parsedData.poList
-                        ? parsedData.poList.reduce((sum, po) => sum + parseFloat(po.header.total_amount || '0'), 0).toFixed(2)
-                        : (parsedData.totalAmount || parsedData.header?.total_amount || "0")
-                      }
-                    </p>
-                  </div>
-                </div>
+                )}
 
                 {/* PO Header Preview */}
                 <div className="space-y-2">
