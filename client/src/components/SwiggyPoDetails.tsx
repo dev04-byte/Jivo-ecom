@@ -227,51 +227,53 @@ export function SwiggyPoDetails({ po, open, onOpenChange }: SwiggyPoDetailsProps
             <Table>
               <TableHeader className="sticky top-0 bg-white border-b border-slate-200 z-10">
                 <TableRow>
-                  <TableHead className="w-12 min-w-[50px]">Line #</TableHead>
+                  <TableHead className="w-12 min-w-[50px]">#</TableHead>
                   <TableHead className="min-w-[120px]">Item Code</TableHead>
-                  <TableHead className="min-w-[100px]">HSN Code</TableHead>
-                  <TableHead className="min-w-[120px]">Product UPC</TableHead>
-                  <TableHead className="min-w-[250px]">Product Description</TableHead>
-                  <TableHead className="text-right min-w-[60px]">UOM</TableHead>
-                  <TableHead className="text-right min-w-[80px]">Qty</TableHead>
+                  <TableHead className="min-w-[250px]">Description</TableHead>
+                  <TableHead className="min-w-[150px]">Category</TableHead>
+                  <TableHead className="min-w-[100px]">Brand</TableHead>
+                  <TableHead className="text-right min-w-[60px]">Qty</TableHead>
+                  <TableHead className="text-right min-w-[80px]">UOM</TableHead>
+                  <TableHead className="text-right min-w-[100px]">Unit Price</TableHead>
                   <TableHead className="text-right min-w-[100px]">MRP</TableHead>
-                  <TableHead className="text-right min-w-[120px]">Basic Cost</TableHead>
-                  <TableHead className="text-right min-w-[100px]">Tax</TableHead>
-                  <TableHead className="text-right min-w-[120px]">Amount</TableHead>
+                  <TableHead className="text-right min-w-[120px]">Tax Amount</TableHead>
+                  <TableHead className="text-right min-w-[120px]">Total Amount</TableHead>
+                  <TableHead className="text-right min-w-[80px]">Received</TableHead>
+                  <TableHead className="text-right min-w-[80px]">Balanced</TableHead>
+                  <TableHead className="text-right min-w-[80px]">Ageing</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {po.poLines.map((line) => (
                   <TableRow key={line.id} className="hover:bg-slate-50">
-                    <TableCell>{line.line_number}</TableCell>
-                    <TableCell className="font-mono text-xs">{line.item_code}</TableCell>
-                    <TableCell>
-                      {line.hsn_code ? (
-                        <Badge variant="outline" className="text-xs">
-                          {line.hsn_code}
-                        </Badge>
-                      ) : (
-                        <span className="text-gray-400 text-xs">Via Platform</span>
-                      )}
-                    </TableCell>
+                    <TableCell className="font-semibold">{line.line_number}</TableCell>
                     <TableCell className="font-mono text-xs">{line.item_code}</TableCell>
                     <TableCell title={line.item_description} className="max-w-[250px]">
                       <div className="truncate">{line.item_description}</div>
                     </TableCell>
-                    <TableCell className="text-right">Unit</TableCell>
+                    <TableCell className="text-xs text-gray-600">
+                      {line.category_id || 'N/A'}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {line.brand_name || 'N/A'}
+                    </TableCell>
                     <TableCell className="text-right font-medium">{line.quantity || 0}</TableCell>
+                    <TableCell className="text-right">Unit</TableCell>
+                    <TableCell className="text-right">
+                      {line.unit_base_cost ? `₹${(typeof line.unit_base_cost === 'string' ? parseFloat(line.unit_base_cost) : line.unit_base_cost).toFixed(2)}` : '₹0.00'}
+                    </TableCell>
                     <TableCell className="text-right font-medium">
                       {line.mrp ? `₹${(typeof line.mrp === 'string' ? parseFloat(line.mrp) : line.mrp).toFixed(2)}` : '₹0.00'}
                     </TableCell>
                     <TableCell className="text-right">
-                      {line.unit_base_cost ? `₹${(typeof line.unit_base_cost === 'string' ? parseFloat(line.unit_base_cost) : line.unit_base_cost).toFixed(2)}` : '₹0.00'}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {line.tax_amount ? `₹${(typeof line.tax_amount === 'string' ? parseFloat(line.tax_amount) : line.tax_amount).toFixed(2)}` : '₹0.00'}
+                      {line.total_tax_amount ? `₹${(typeof line.total_tax_amount === 'string' ? parseFloat(line.total_tax_amount) : line.total_tax_amount).toFixed(2)}` : '₹0.00'}
                     </TableCell>
                     <TableCell className="text-right font-medium bg-green-50">
                       {line.line_total ? `₹${(typeof line.line_total === 'string' ? parseFloat(line.line_total) : line.line_total).toFixed(2)}` : '₹0.00'}
                     </TableCell>
+                    <TableCell className="text-right text-xs">{line.received_qty || 0}</TableCell>
+                    <TableCell className="text-right text-xs">{line.balanced_qty || 0}</TableCell>
+                    <TableCell className="text-right text-xs">{line.po_ageing || 0}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
