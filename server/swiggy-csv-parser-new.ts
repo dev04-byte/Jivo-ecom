@@ -162,8 +162,20 @@ function parseSingleSwiggyPO(records: any[], uploadedBy: string): ParsedSwiggyPO
       const unitBaseCost = safeParseFloat(row.UnitBasedCost || row.UnitBaseCost);
       const tax = safeParseFloat(row.Tax);
       const poLineValueWithoutTax = safeParseFloat(row.PoLineValueWithoutTax || row.WithoutTax);
-      const poLineValueWithTax = safeParseFloat(row.PoLineValueWithTax);
+      let poLineValueWithTax = safeParseFloat(row.PoLineValueWithTax);
       const poAgeing = safeParseInt(row.PoAgeing);
+
+      // Calculate line total if not provided or is zero
+      if (poLineValueWithTax === 0 || !poLineValueWithTax) {
+        if (poLineValueWithoutTax > 0 && tax > 0) {
+          // Calculate from taxable value + tax amount
+          poLineValueWithTax = poLineValueWithoutTax + tax;
+        } else if (unitBaseCost > 0 && orderedQty > 0) {
+          // Calculate from unit cost * quantity + tax
+          const baseAmount = unitBaseCost * orderedQty;
+          poLineValueWithTax = baseAmount + tax;
+        }
+      }
 
       // Map CSV fields to database schema fields
       const line: any = {
@@ -173,7 +185,7 @@ function parseSingleSwiggyPO(records: any[], uploadedBy: string): ParsedSwiggyPO
         quantity: orderedQty,
         mrp: mrp,
         unit_base_cost: unitBaseCost,
-        taxable_value: poLineValueWithoutTax,
+        taxable_value: poLineValueWithoutTax > 0 ? poLineValueWithoutTax : (unitBaseCost * orderedQty),
         cgst_rate: tax / 2,
         cgst_amount: (poLineValueWithoutTax * (tax / 2)) / 100,
         sgst_rate: tax / 2,
@@ -315,6 +327,8 @@ function parseSwiggyDate(dateStr: string | undefined): Date | null {
 
       const [month, day, year] = datePart.split('/');
 
+      console.log(`🔍 Parsing date parts: month=${month}, day=${day}, year=${year}, time=${timePart}`);
+
       if (year && month && day) {
         let date;
 
@@ -334,9 +348,12 @@ function parseSwiggyDate(dateStr: string | undefined): Date | null {
           date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
         }
 
+        console.log(`📅 Created Date object from "${cleanDateStr}":`, date.toISOString(), `Display:`, date.toString());
+
         if (!isNaN(date.getTime())) {
-          console.log(`📅 Parsed Swiggy date "${cleanDateStr}" as:`, date.toISOString().split('T')[0]);
           return date;
+        } else {
+          console.warn(`⚠️ Date is invalid:`, date);
         }
       }
     }
