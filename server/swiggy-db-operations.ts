@@ -113,12 +113,21 @@ export const insertSwiggyPoToDatabase = async (data: SwiggyPoData): Promise<{ su
     // Prepare header data with correct mapping from parsed header using safe conversions
     const headerData = {
       po_number: safeString(poNumberToCheck),
+      entity: data.header.entity ? safeString(data.header.entity) : null,
+      facility_id: data.header.facility_id ? safeString(data.header.facility_id) : null,
+      facility_name: facilityName ? safeString(facilityName) : null,
+      city: data.header.city ? safeString(data.header.city) : null,
       po_date: safeDate(poCreatedAt),
+      po_modified_at: safeDate(data.header.po_modified_at || data.header.PoModifiedAt),
       po_release_date: safeDate(data.header.po_release_date || data.header.PoModifiedAt),
       expected_delivery_date: safeDate(expectedDeliveryDate),
       po_expiry_date: safeDate(poExpiryDate),
+      supplier_code: supplierCode ? safeString(supplierCode) : null,
       vendor_name: vendorName ? safeString(vendorName) : null,
+      po_amount: safeDecimal(poAmount),
       payment_terms: (data.header.payment_terms || data.header.credit_term) ? safeString(data.header.payment_terms || data.header.credit_term) : null,
+      otb_reference_number: data.header.otb_reference_number ? safeString(data.header.otb_reference_number) : null,
+      internal_external_po: data.header.internal_external_po ? safeString(data.header.internal_external_po) : null,
       total_items: data.lines?.length || 0,
       total_quantity: data.lines?.reduce((sum: number, line: any) => sum + safeNumber(line.quantity || line.OrderedQty), 0) || 0,
       total_taxable_value: safeDecimal(data.header.total_taxable_value || data.header.PoLineValueWithoutTax),
@@ -200,7 +209,12 @@ export const insertSwiggyPoToDatabase = async (data: SwiggyPoData): Promise<{ su
             line_number: line.line_number || (index + 1),
             item_code: safeString(line.item_code || line.SkuCode),
             item_description: safeString(line.item_description || line.product_description || line.SkuDescription),
+            category_id: line.category_id || line.CategoryId ? safeString(line.category_id || line.CategoryId) : null,
+            brand_name: line.brand_name || line.BrandName ? safeString(line.brand_name || line.BrandName) : null,
+            hsn_code: line.hsn_code ? safeString(line.hsn_code) : null,
             quantity: quantity,
+            received_qty: safeNumber(line.received_qty || line.ReceivedQty),
+            balanced_qty: safeNumber(line.balanced_qty || line.BalancedQty),
             mrp: safeDecimal(line.mrp || line.Mrp),
             unit_base_cost: safeDecimal(unitCost),
             taxable_value: safeDecimal(taxableValue),
@@ -216,7 +230,13 @@ export const insertSwiggyPoToDatabase = async (data: SwiggyPoData): Promise<{ su
             additional_cess: null,
             // Use correct tax calculation instead of separate tax components
             total_tax_amount: safeDecimal(correctTaxAmount),
-            line_total: safeDecimal(lineTotal)
+            line_total: safeDecimal(lineTotal),
+            expected_delivery_date: safeDate(line.expected_delivery_date || line.ExpectedDeliveryDate),
+            po_expiry_date: safeDate(line.po_expiry_date || line.PoExpiryDate),
+            otb_reference_number: line.otb_reference_number || line.OtbReferenceNumber ? safeString(line.otb_reference_number || line.OtbReferenceNumber) : null,
+            internal_external_po: line.internal_external_po || line.InternalExternalPo ? safeString(line.internal_external_po || line.InternalExternalPo) : null,
+            po_ageing: safeNumber(line.po_ageing || line.PoAgeing),
+            reference_po_number: line.reference_po_number || line.ReferencePoNumber ? safeString(line.reference_po_number || line.ReferencePoNumber) : null
           };
         });
 

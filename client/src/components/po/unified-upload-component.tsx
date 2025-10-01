@@ -1486,45 +1486,93 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                           </CardHeader>
                           <CardContent>
                             <div className="space-y-4">
-                              {/* Essential PO Information Only */}
-                              <div className="bg-gray-50 p-4 rounded-lg">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                                  <div className="space-y-2">
-                                    <div><span className="font-medium">PO Number:</span> {safeDisplay(po.header?.po_number, 'Not specified')}</div>
-                                    <div><span className="font-medium">Order Date:</span> {po.header?.po_date ? new Date(po.header.po_date).toLocaleDateString() : 'Not specified'}</div>
-                                    {po.header?.po_delivery_date && (
-                                      <div><span className="font-medium">Delivery Date:</span> {new Date(po.header.po_delivery_date).toLocaleDateString()}</div>
-                                    )}
+                              {/* Complete PO Header Information */}
+                              <div className="bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-lg border">
+                                {selectedPlatformData?.id === 'swiggy' ? (
+                                  /* Swiggy - Show ALL CSV header fields */
+                                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 text-xs">
+                                    <div><span className="font-medium text-gray-600">PO Number:</span> <div className="font-semibold text-blue-600">{safeDisplay(po.header?.po_number, 'N/A')}</div></div>
+                                    <div><span className="font-medium text-gray-600">Entity:</span> <div>{safeDisplay(po.header?.entity, 'N/A')}</div></div>
+                                    <div><span className="font-medium text-gray-600">Facility ID:</span> <div>{safeDisplay(po.header?.facility_id, 'N/A')}</div></div>
+                                    <div><span className="font-medium text-gray-600">Facility Name:</span> <div>{safeDisplay(po.header?.facility_name, 'N/A')}</div></div>
+                                    <div><span className="font-medium text-gray-600">City:</span> <div>{safeDisplay(po.header?.city, 'N/A')}</div></div>
+                                    <div><span className="font-medium text-gray-600">PO Created At:</span> <div>{po.header?.po_date ? new Date(po.header.po_date).toLocaleString('en-IN') : 'N/A'}</div></div>
+                                    <div><span className="font-medium text-gray-600">PO Modified At:</span> <div>{po.header?.po_modified_at ? new Date(po.header.po_modified_at).toLocaleString('en-IN') : 'N/A'}</div></div>
+                                    <div><span className="font-medium text-gray-600">Status:</span> <div>{safeDisplay(po.header?.status, 'N/A')}</div></div>
+                                    <div><span className="font-medium text-gray-600">Supplier Code:</span> <div>{safeDisplay(po.header?.supplier_code, 'N/A')}</div></div>
+                                    <div><span className="font-medium text-gray-600">Vendor Name:</span> <div>{safeDisplay(po.header?.vendor_name, 'N/A')}</div></div>
+                                    <div><span className="font-medium text-gray-600">PO Amount:</span> <div className="font-semibold text-green-600">{po.header?.po_amount ? `₹${parseFloat(po.header.po_amount).toLocaleString('en-IN', {minimumFractionDigits: 2})}` : 'N/A'}</div></div>
+                                    <div><span className="font-medium text-gray-600">Expected Delivery:</span> <div>{po.header?.expected_delivery_date ? new Date(po.header.expected_delivery_date).toLocaleDateString('en-IN') : 'N/A'}</div></div>
+                                    <div><span className="font-medium text-gray-600">PO Expiry:</span> <div>{po.header?.po_expiry_date ? new Date(po.header.po_expiry_date).toLocaleDateString('en-IN') : 'N/A'}</div></div>
+                                    <div><span className="font-medium text-gray-600">OTB Reference:</span> <div className="text-xs break-all">{safeDisplay(po.header?.otb_reference_number, 'N/A')}</div></div>
+                                    <div><span className="font-medium text-gray-600">Internal/External:</span> <div>{safeDisplay(po.header?.internal_external_po, 'N/A')}</div></div>
+                                    <div><span className="font-medium text-gray-600">Payment Terms:</span> <div className="text-xs">{safeDisplay(po.header?.payment_terms, 'N/A')}</div></div>
                                   </div>
-                                  <div className="space-y-2">
-                                    {po.header?.vendor_name && (
-                                      <div><span className="font-medium">Vendor:</span> {po.header.vendor_name}</div>
-                                    )}
-                                    {po.header?.vendor_code && (
-                                      <div><span className="font-medium">Vendor Code:</span> {po.header.vendor_code}</div>
-                                    )}
+                                ) : (
+                                  /* Other platforms - Show essential info only */
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                                    <div className="space-y-2">
+                                      <div><span className="font-medium">PO Number:</span> {safeDisplay(po.header?.po_number, 'Not specified')}</div>
+                                      <div><span className="font-medium">Order Date:</span> {po.header?.po_date ? new Date(po.header.po_date).toLocaleDateString() : 'Not specified'}</div>
+                                      {po.header?.po_delivery_date && (
+                                        <div><span className="font-medium">Delivery Date:</span> {new Date(po.header.po_delivery_date).toLocaleDateString()}</div>
+                                      )}
+                                    </div>
+                                    <div className="space-y-2">
+                                      {po.header?.vendor_name && (
+                                        <div><span className="font-medium">Vendor:</span> {po.header.vendor_name}</div>
+                                      )}
+                                      {po.header?.vendor_code && (
+                                        <div><span className="font-medium">Vendor Code:</span> {po.header.vendor_code}</div>
+                                      )}
+                                    </div>
                                   </div>
-                                </div>
+                                )}
                               </div>
 
 
                               {/* Complete Line Items Table with All Data */}
                               {po.lines && po.lines.length > 0 && (
                                 <div className="mt-4">
-                                  <h5 className="font-medium text-gray-700 mb-2">Complete Line Items Data</h5>
+                                  <h5 className="font-medium text-gray-700 mb-2">Complete Line Items Data - All CSV Fields</h5>
                                   <div className="overflow-x-auto overflow-y-auto border rounded-lg max-h-[60vh] bg-white shadow-sm custom-scrollbar table-container">
-                                    <table className="w-full text-xs border-collapse" style={{minWidth: '1500px'}}>
+                                    <table className="w-full text-xs border-collapse" style={{minWidth: selectedPlatformData?.id === 'swiggy' ? '2500px' : '1500px'}}>
                                       <thead className="bg-gray-50 sticky top-0 z-10 border-b">
                                         <tr>
                                           <th className="text-left p-2 font-medium border-r min-w-[50px]">#</th>
                                           <th className="text-left p-2 font-medium border-r min-w-[120px]">Item Code</th>
-                                          <th className="text-left p-2 font-medium border-r min-w-[200px]">Description</th>
-                                          <th className="text-center p-2 font-medium border-r min-w-[60px]">Qty</th>
+                                          <th className="text-left p-2 font-medium border-r min-w-[250px]">Description</th>
+                                          {selectedPlatformData?.id === 'swiggy' && (
+                                            <>
+                                              <th className="text-left p-2 font-medium border-r min-w-[150px]">Category</th>
+                                              <th className="text-left p-2 font-medium border-r min-w-[100px]">Brand</th>
+                                            </>
+                                          )}
+                                          <th className="text-center p-2 font-medium border-r min-w-[80px]">Ordered Qty</th>
+                                          {selectedPlatformData?.id === 'swiggy' && (
+                                            <>
+                                              <th className="text-right p-2 font-medium border-r min-w-[100px]">Received Qty</th>
+                                              <th className="text-right p-2 font-medium border-r min-w-[100px]">Balanced Qty</th>
+                                            </>
+                                          )}
                                           <th className="text-left p-2 font-medium border-r min-w-[60px]">UOM</th>
                                           <th className="text-right p-2 font-medium border-r min-w-[100px]">Unit Price</th>
                                           <th className="text-right p-2 font-medium border-r min-w-[100px]">MRP</th>
+                                          {selectedPlatformData?.id === 'swiggy' && (
+                                            <th className="text-right p-2 font-medium border-r min-w-[120px]">Taxable Value</th>
+                                          )}
                                           <th className="text-right p-2 font-medium border-r min-w-[100px]">Tax Amount</th>
-                                          <th className="text-right p-2 font-medium min-w-[120px]">Total Amount</th>
+                                          <th className="text-right p-2 font-medium border-r min-w-[120px]">Total Amount</th>
+                                          {selectedPlatformData?.id === 'swiggy' && (
+                                            <>
+                                              <th className="text-left p-2 font-medium border-r min-w-[130px]">Expected Delivery</th>
+                                              <th className="text-left p-2 font-medium border-r min-w-[120px]">PO Expiry</th>
+                                              <th className="text-left p-2 font-medium border-r min-w-[180px]">OTB Reference</th>
+                                              <th className="text-left p-2 font-medium border-r min-w-[120px]">Internal/External</th>
+                                              <th className="text-right p-2 font-medium border-r min-w-[80px]">Ageing</th>
+                                              <th className="text-left p-2 font-medium min-w-[120px]">Reference PO</th>
+                                            </>
+                                          )}
                                         </tr>
                                       </thead>
                                       <tbody>
@@ -1538,7 +1586,7 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                               )}
                                             </td>
                                             <td className="p-2 border-r">
-                                              <div className="max-w-[200px] truncate" title={
+                                              <div className={selectedPlatformData?.id === 'swiggy' ? 'whitespace-normal break-words' : 'max-w-[200px] truncate'} title={
                                                 line.product_description || line.item_description ||
                                                 line.sku_desc || line.article_name || line.title
                                               }>
@@ -1549,9 +1597,21 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                                 )}
                                               </div>
                                             </td>
+                                            {selectedPlatformData?.id === 'swiggy' && (
+                                              <>
+                                                <td className="p-2 border-r text-xs">{line.category_id || 'N/A'}</td>
+                                                <td className="p-2 border-r text-xs">{line.brand_name || 'N/A'}</td>
+                                              </>
+                                            )}
                                             <td className="p-2 text-center font-medium border-r">
                                               {line.quantity || line.po_qty || 0}
                                             </td>
+                                            {selectedPlatformData?.id === 'swiggy' && (
+                                              <>
+                                                <td className="p-2 text-right border-r">{line.received_qty || 0}</td>
+                                                <td className="p-2 text-right border-r">{line.balanced_qty || 0}</td>
+                                              </>
+                                            )}
                                             <td className="p-2 border-r">
                                               {line.uom || line.grammage || 'Unit'}
                                             </td>
@@ -1563,41 +1623,65 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                                 'currency'
                                               )}
                                             </td>
-                                            <td className="p-2 text-right border-r">
+                                            <td className="p-2 text-right border-r font-medium text-green-700">
                                               {safeDisplay(
                                                 line.mrp || line.supplier_mrp,
                                                 '₹0.00',
                                                 'currency'
                                               )}
                                             </td>
-                                            <td className="p-2 text-right border-r">
+                                            {selectedPlatformData?.id === 'swiggy' && (
+                                              <td className="p-2 text-right border-r">
+                                                {safeDisplay(line.taxable_value, '₹0.00', 'currency')}
+                                              </td>
+                                            )}
+                                            <td className="p-2 text-right border-r text-orange-600">
                                               {(() => {
-                                                // For Blinkit data, show the exact tax_amount from tax_value column
-                                                if (line.tax_amount) {
-                                                  const taxAmount = parseFloat(line.tax_amount || '0');
-                                                  return taxAmount.toFixed(0);
+                                                // For Swiggy and Blinkit, use total_tax_amount directly
+                                                if (line.total_tax_amount || line.tax_amount) {
+                                                  const taxAmount = parseFloat(line.total_tax_amount || line.tax_amount || '0');
+                                                  return '₹' + taxAmount.toFixed(2);
                                                 }
 
                                                 // Fallback for other platforms - show calculated tax amount
                                                 const taxableValue = parseFloat(line.taxable_value || line.PoLineValueWithoutTax || line.basic_value || '0');
                                                 const totalAmount = parseFloat(line.line_total || line.PoLineValueWithTax || line.total_amount || '0');
                                                 const taxAmount = totalAmount - taxableValue;
-                                                return taxAmount.toFixed(0);
+                                                return '₹' + taxAmount.toFixed(2);
                                               })()}
                                             </td>
-                                            <td className="p-2 text-right font-medium text-green-600">
+                                            <td className="p-2 text-right font-semibold text-green-700 bg-green-50 border-r">
                                               {safeDisplay(
-                                                line.total_amount || line.total_value,
+                                                line.line_total || line.total_amount || line.total_value,
                                                 '₹0.00',
                                                 'currency'
                                               )}
                                             </td>
+                                            {selectedPlatformData?.id === 'swiggy' && (
+                                              <>
+                                                <td className="p-2 border-r text-xs">
+                                                  {line.expected_delivery_date ? new Date(line.expected_delivery_date).toLocaleDateString('en-IN') : 'N/A'}
+                                                </td>
+                                                <td className="p-2 border-r text-xs">
+                                                  {line.po_expiry_date ? new Date(line.po_expiry_date).toLocaleDateString('en-IN') : 'N/A'}
+                                                </td>
+                                                <td className="p-2 border-r text-xs">{line.otb_reference_number || 'N/A'}</td>
+                                                <td className="p-2 border-r text-xs">{line.internal_external_po || 'N/A'}</td>
+                                                <td className="p-2 text-right border-r">{line.po_ageing || 0}</td>
+                                                <td className="p-2 text-xs">{line.reference_po_number || 'N/A'}</td>
+                                              </>
+                                            )}
                                           </tr>
                                         ))}
                                       </tbody>
                                     </table>
 
                                   </div>
+                                  {selectedPlatformData?.id === 'swiggy' && (
+                                    <div className="mt-2 text-xs text-gray-500 italic">
+                                      💡 Scroll horizontally to view all CSV fields. All 19 columns from your Swiggy CSV are displayed.
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>

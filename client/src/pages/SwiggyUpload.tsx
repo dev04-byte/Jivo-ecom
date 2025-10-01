@@ -510,39 +510,81 @@ export default function SwiggyUpload() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg border mb-4">
-                      <div>
-                        <span className="text-sm text-gray-600 block mb-1">PO Number</span>
-                        <div className="font-semibold text-blue-600">
-                          {previewData.header?.po_number || 'N/A'}
+                    {/* Complete PO Header Information - All CSV Fields */}
+                    <div className="mb-6 border rounded-lg bg-white p-4">
+                      <h5 className="font-semibold text-lg mb-4 text-gray-800">Complete PO Header Information - All CSV Fields</h5>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">PO Number</span>
+                          <div className="font-semibold text-blue-600">{previewData.header?.po_number || 'N/A'}</div>
                         </div>
-                      </div>
-                      <div>
-                        <span className="text-sm text-gray-600 block mb-1">PO Date</span>
-                        <div className="font-semibold">
-                          {(() => {
-                            if (!previewData.header?.po_date) return 'N/A';
-                            try {
-                              const date = new Date(previewData.header.po_date);
-                              if (isNaN(date.getTime())) return 'Invalid Date';
-                              return date.toLocaleDateString('en-IN');
-                            } catch (e) {
-                              console.error('Error parsing date:', previewData.header.po_date, e);
-                              return 'Error';
-                            }
-                          })()}
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">Entity</span>
+                          <div className="font-medium text-gray-700">{previewData.header?.entity || 'N/A'}</div>
                         </div>
-                      </div>
-                      <div>
-                        <span className="text-sm text-gray-600 block mb-1">Vendor</span>
-                        <div className="font-semibold">
-                          {previewData.header?.vendor_name || 'N/A'}
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">Facility ID</span>
+                          <div className="font-medium text-gray-700">{previewData.header?.facility_id || 'N/A'}</div>
                         </div>
-                      </div>
-                      <div>
-                        <span className="text-sm text-gray-600 block mb-1">Total Amount</span>
-                        <div className="font-semibold text-green-600">
-                          ₹{previewData.header?.grand_total?.toLocaleString() || 'N/A'}
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">Facility Name</span>
+                          <div className="font-medium text-gray-700">{previewData.header?.facility_name || 'N/A'}</div>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">City</span>
+                          <div className="font-medium text-gray-700">{previewData.header?.city || 'N/A'}</div>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">PO Created At</span>
+                          <div className="font-medium text-gray-700">
+                            {previewData.header?.po_date ? new Date(previewData.header.po_date).toLocaleString('en-IN') : 'N/A'}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">PO Modified At</span>
+                          <div className="font-medium text-gray-700">
+                            {previewData.header?.po_modified_at ? new Date(previewData.header.po_modified_at).toLocaleString('en-IN') : 'N/A'}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">Status</span>
+                          <div className="font-medium text-gray-700">{previewData.header?.status || 'N/A'}</div>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">Supplier Code</span>
+                          <div className="font-medium text-gray-700">{previewData.header?.supplier_code || 'N/A'}</div>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">Vendor Name</span>
+                          <div className="font-medium text-gray-700">{previewData.header?.vendor_name || 'N/A'}</div>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">PO Amount</span>
+                          <div className="font-semibold text-green-600">₹{parseFloat(previewData.header?.po_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">Expected Delivery</span>
+                          <div className="font-medium text-gray-700">
+                            {previewData.header?.expected_delivery_date ? new Date(previewData.header.expected_delivery_date).toLocaleDateString('en-IN') : 'N/A'}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">PO Expiry Date</span>
+                          <div className="font-medium text-gray-700">
+                            {previewData.header?.po_expiry_date ? new Date(previewData.header.po_expiry_date).toLocaleDateString('en-IN') : 'N/A'}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">OTB Reference</span>
+                          <div className="font-medium text-gray-700 text-xs">{previewData.header?.otb_reference_number || 'N/A'}</div>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">Internal/External</span>
+                          <div className="font-medium text-gray-700">{previewData.header?.internal_external_po || 'N/A'}</div>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">Payment Terms</span>
+                          <div className="font-medium text-gray-700">{previewData.header?.payment_terms || 'N/A'}</div>
                         </div>
                       </div>
                     </div>
@@ -579,46 +621,71 @@ export default function SwiggyUpload() {
                       </div>
                     </div>
 
-                    {/* Line Items Preview Table */}
+                    {/* Complete Line Items Table with ALL CSV Fields */}
                     {previewData.lines && previewData.lines.length > 0 && (
                       <div className="mt-4">
-                        <h5 className="font-medium mb-2">Line Items Preview (showing first 5)</h5>
+                        <h5 className="font-medium mb-2">Complete Line Items Data - All CSV Fields (showing first 10)</h5>
                         <div className="border rounded-lg overflow-hidden">
-                          <div className="bg-gray-50 px-4 py-2 border-b">
-                            <div className="grid grid-cols-5 gap-4 text-sm font-medium text-gray-700">
-                              <div>Item Code</div>
-                              <div>Description</div>
-                              <div>Quantity</div>
-                              <div>Unit Price</div>
-                              <div>Total</div>
+                          <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                            <table className="min-w-full text-sm">
+                              <thead className="bg-gray-100 sticky top-0 border-b-2 border-gray-300">
+                                <tr>
+                                  <th className="px-3 py-2 text-left font-semibold text-gray-700 min-w-[80px]">Line #</th>
+                                  <th className="px-3 py-2 text-left font-semibold text-gray-700 min-w-[120px]">Item Code</th>
+                                  <th className="px-3 py-2 text-left font-semibold text-gray-700 min-w-[250px]">Description</th>
+                                  <th className="px-3 py-2 text-left font-semibold text-gray-700 min-w-[150px]">Category</th>
+                                  <th className="px-3 py-2 text-left font-semibold text-gray-700 min-w-[100px]">Brand</th>
+                                  <th className="px-3 py-2 text-right font-semibold text-gray-700 min-w-[80px]">Ordered Qty</th>
+                                  <th className="px-3 py-2 text-right font-semibold text-gray-700 min-w-[100px]">Received Qty</th>
+                                  <th className="px-3 py-2 text-right font-semibold text-gray-700 min-w-[100px]">Balanced Qty</th>
+                                  <th className="px-3 py-2 text-right font-semibold text-gray-700 min-w-[100px]">MRP</th>
+                                  <th className="px-3 py-2 text-right font-semibold text-gray-700 min-w-[120px]">Unit Base Cost</th>
+                                  <th className="px-3 py-2 text-right font-semibold text-gray-700 min-w-[120px]">Taxable Value</th>
+                                  <th className="px-3 py-2 text-right font-semibold text-gray-700 min-w-[100px]">Tax Amount</th>
+                                  <th className="px-3 py-2 text-right font-semibold text-gray-700 min-w-[120px]">Line Total</th>
+                                  <th className="px-3 py-2 text-left font-semibold text-gray-700 min-w-[120px]">Expected Delivery</th>
+                                  <th className="px-3 py-2 text-left font-semibold text-gray-700 min-w-[120px]">PO Expiry</th>
+                                  <th className="px-3 py-2 text-left font-semibold text-gray-700 min-w-[150px]">OTB Reference</th>
+                                  <th className="px-3 py-2 text-left font-semibold text-gray-700 min-w-[120px]">Internal/External</th>
+                                  <th className="px-3 py-2 text-right font-semibold text-gray-700 min-w-[80px]">PO Ageing</th>
+                                  <th className="px-3 py-2 text-left font-semibold text-gray-700 min-w-[120px]">Reference PO</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {previewData.lines.slice(0, 10).map((line: any, index: number) => (
+                                  <tr key={index} className="border-b border-gray-100 hover:bg-blue-50">
+                                    <td className="px-3 py-2 font-semibold text-gray-800">{line.line_number || index + 1}</td>
+                                    <td className="px-3 py-2 font-mono text-xs text-blue-600">{line.item_code || 'N/A'}</td>
+                                    <td className="px-3 py-2 text-gray-700">{line.item_description || 'N/A'}</td>
+                                    <td className="px-3 py-2 text-xs text-gray-600">{line.category_id || 'N/A'}</td>
+                                    <td className="px-3 py-2 text-xs text-gray-600">{line.brand_name || 'N/A'}</td>
+                                    <td className="px-3 py-2 text-right font-medium">{line.quantity || 0}</td>
+                                    <td className="px-3 py-2 text-right text-gray-600">{line.received_qty || 0}</td>
+                                    <td className="px-3 py-2 text-right text-gray-600">{line.balanced_qty || 0}</td>
+                                    <td className="px-3 py-2 text-right font-medium text-green-700">₹{parseFloat(line.mrp || 0).toFixed(2)}</td>
+                                    <td className="px-3 py-2 text-right text-gray-600">₹{parseFloat(line.unit_base_cost || 0).toFixed(2)}</td>
+                                    <td className="px-3 py-2 text-right text-gray-600">₹{parseFloat(line.taxable_value || 0).toFixed(2)}</td>
+                                    <td className="px-3 py-2 text-right text-orange-600">₹{parseFloat(line.total_tax_amount || 0).toFixed(2)}</td>
+                                    <td className="px-3 py-2 text-right font-semibold text-green-700 bg-green-50">₹{parseFloat(line.line_total || 0).toFixed(2)}</td>
+                                    <td className="px-3 py-2 text-xs text-gray-600">{line.expected_delivery_date ? new Date(line.expected_delivery_date).toLocaleDateString('en-IN') : 'N/A'}</td>
+                                    <td className="px-3 py-2 text-xs text-gray-600">{line.po_expiry_date ? new Date(line.po_expiry_date).toLocaleDateString('en-IN') : 'N/A'}</td>
+                                    <td className="px-3 py-2 text-xs text-gray-600">{line.otb_reference_number || 'N/A'}</td>
+                                    <td className="px-3 py-2 text-xs text-gray-600">{line.internal_external_po || 'N/A'}</td>
+                                    <td className="px-3 py-2 text-right text-gray-600">{line.po_ageing || 0}</td>
+                                    <td className="px-3 py-2 text-xs text-gray-600">{line.reference_po_number || 'N/A'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          {previewData.lines.length > 10 && (
+                            <div className="text-center text-sm text-gray-500 py-3 bg-gray-50 border-t">
+                              ... and {previewData.lines.length - 10} more line items
                             </div>
-                          </div>
-                          <div className="max-h-40 overflow-y-auto">
-                            {previewData.lines.slice(0, 5).map((line: any, index: number) => (
-                              <div key={index} className="grid grid-cols-5 gap-4 px-4 py-2 border-b border-gray-100 text-sm">
-                                <div className="font-medium text-blue-600">
-                                  {line.item_code || 'N/A'}
-                                </div>
-                                <div className="text-gray-600 truncate">
-                                  {line.item_description || 'N/A'}
-                                </div>
-                                <div className="text-gray-600">
-                                  {line.quantity || 0}
-                                </div>
-                                <div className="text-gray-600">
-                                  ₹{line.unit_price?.toLocaleString() || '0'}
-                                </div>
-                                <div className="text-gray-600 font-medium">
-                                  ₹{line.total_amount?.toLocaleString() || '0'}
-                                </div>
-                              </div>
-                            ))}
-                            {previewData.lines.length > 5 && (
-                              <div className="text-center text-sm text-gray-500 py-2 bg-gray-50">
-                                ... and {previewData.lines.length - 5} more items
-                              </div>
-                            )}
-                          </div>
+                          )}
+                        </div>
+                        <div className="mt-2 text-xs text-gray-500 italic">
+                          💡 Scroll horizontally to view all fields. All CSV columns are displayed above.
                         </div>
                       </div>
                     )}

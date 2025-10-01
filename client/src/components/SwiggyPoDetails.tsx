@@ -12,14 +12,16 @@ interface SwiggyPo {
   facility_name?: string | null;
   city?: string | null;
   po_date: string | null;
-  po_release_date: string | null;
   po_modified_at?: string | null;
+  po_release_date: string | null;
   expected_delivery_date: string | null;
   po_expiry_date: string | null;
   supplier_code?: string | null;
   vendor_name: string | null;
   po_amount?: string | null;
   payment_terms: string | null;
+  otb_reference_number?: string | null;
+  internal_external_po?: string | null;
   total_items: number;
   total_quantity: number;
   total_taxable_value: string | number | null;
@@ -36,6 +38,8 @@ interface SwiggyPo {
     line_number: number;
     item_code: string;
     item_description: string;
+    category_id?: string | null;
+    brand_name?: string | null;
     hsn_code: string | null;
     quantity: number;
     received_qty?: number;
@@ -55,8 +59,6 @@ interface SwiggyPo {
     additional_cess: string | number | null;
     total_tax_amount: string | number | null;
     line_total: string | number | null;
-    category_id?: string | null;
-    brand_name?: string | null;
     expected_delivery_date?: string | null;
     po_expiry_date?: string | null;
     otb_reference_number?: string | null;
@@ -104,38 +106,72 @@ export function SwiggyPoDetails({ po, open, onOpenChange }: SwiggyPoDetailsProps
         </DialogHeader>
 
         <div className="mb-6">
-          <h3 className="text-lg font-semibold mb-4">Complete Order Information</h3>
+          <h3 className="text-lg font-semibold mb-4">Complete PO Header - All CSV Fields</h3>
 
-          <div className="grid md:grid-cols-3 gap-6 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border">
             <div>
-              <h4 className="font-medium text-gray-900 mb-3">Order Details</h4>
-              <div className="space-y-2 text-sm">
-                <div><span className="text-gray-600">PO Number:</span> <span className="font-mono break-all">{po.po_number}</span></div>
-                <div><span className="text-gray-600">Entity:</span> {po.entity || 'N/A'}</div>
-                <div><span className="text-gray-600">Facility:</span> {po.facility_name} ({po.facility_id})</div>
-                <div><span className="text-gray-600">City:</span> {po.city || 'N/A'}</div>
-                <div><span className="text-gray-600">Status:</span> {po.status || 'N/A'}</div>
-                <div><span className="text-gray-600">Supplier Code:</span> {po.supplier_code || 'N/A'}</div>
-              </div>
+              <span className="text-xs text-gray-500 block mb-1">PO Number</span>
+              <div className="font-semibold text-blue-600 break-all">{po.po_number}</div>
             </div>
-
             <div>
-              <h4 className="font-medium text-gray-900 mb-3">Vendor Information</h4>
-              <div className="space-y-2 text-sm">
-                <div><span className="text-gray-600">Vendor Name:</span> {po.vendor_name || 'N/A'}</div>
-                <div><span className="text-gray-600">Supplier Code:</span> {po.supplier_code || 'N/A'}</div>
-                <div><span className="text-gray-600">PO Amount:</span> ₹{po.po_amount || 'N/A'}</div>
-              </div>
+              <span className="text-xs text-gray-500 block mb-1">Entity</span>
+              <div className="font-medium text-gray-800">{po.entity || 'N/A'}</div>
             </div>
-
             <div>
-              <h4 className="font-medium text-gray-900 mb-3">Date Information</h4>
-              <div className="space-y-2 text-sm">
-                <div><span className="text-gray-600">PO Created:</span> {po.po_date ? format(new Date(po.po_date), 'MMM dd, yyyy HH:mm') : 'N/A'}</div>
-                <div><span className="text-gray-600">Last Modified:</span> {po.po_modified_at ? format(new Date(po.po_modified_at), 'MMM dd, yyyy HH:mm') : 'N/A'}</div>
-                <div><span className="text-gray-600">Expected Delivery:</span> {po.expected_delivery_date ? format(new Date(po.expected_delivery_date), 'MMM dd, yyyy') : 'N/A'}</div>
-                <div><span className="text-gray-600">PO Expiry:</span> {po.po_expiry_date ? format(new Date(po.po_expiry_date), 'MMM dd, yyyy') : 'N/A'}</div>
-              </div>
+              <span className="text-xs text-gray-500 block mb-1">Facility ID</span>
+              <div className="font-medium text-gray-800">{po.facility_id || 'N/A'}</div>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500 block mb-1">Facility Name</span>
+              <div className="font-medium text-gray-800">{po.facility_name || 'N/A'}</div>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500 block mb-1">City</span>
+              <div className="font-medium text-gray-800">{po.city || 'N/A'}</div>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500 block mb-1">PO Created At</span>
+              <div className="font-medium text-gray-800">{po.po_date ? format(new Date(po.po_date), 'MMM dd, yyyy HH:mm') : 'N/A'}</div>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500 block mb-1">PO Modified At</span>
+              <div className="font-medium text-gray-800">{po.po_modified_at ? format(new Date(po.po_modified_at), 'MMM dd, yyyy HH:mm') : 'N/A'}</div>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500 block mb-1">Status</span>
+              <div>{getStatusBadge(po.status)}</div>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500 block mb-1">Supplier Code</span>
+              <div className="font-medium text-gray-800">{po.supplier_code || 'N/A'}</div>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500 block mb-1">Vendor Name</span>
+              <div className="font-medium text-gray-800">{po.vendor_name || 'N/A'}</div>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500 block mb-1">PO Amount</span>
+              <div className="font-semibold text-green-600">₹{po.po_amount || 'N/A'}</div>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500 block mb-1">Payment Terms</span>
+              <div className="font-medium text-gray-800 text-xs">{po.payment_terms || 'N/A'}</div>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500 block mb-1">Expected Delivery</span>
+              <div className="font-medium text-gray-800">{po.expected_delivery_date ? format(new Date(po.expected_delivery_date), 'MMM dd, yyyy') : 'N/A'}</div>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500 block mb-1">PO Expiry Date</span>
+              <div className="font-medium text-gray-800">{po.po_expiry_date ? format(new Date(po.po_expiry_date), 'MMM dd, yyyy') : 'N/A'}</div>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500 block mb-1">OTB Reference</span>
+              <div className="font-medium text-gray-800 text-xs break-all">{po.otb_reference_number || 'N/A'}</div>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500 block mb-1">Internal/External</span>
+              <div className="font-medium text-gray-800">{po.internal_external_po || 'N/A'}</div>
             </div>
           </div>
         </div>
@@ -221,26 +257,31 @@ export function SwiggyPoDetails({ po, open, onOpenChange }: SwiggyPoDetailsProps
           </div>
         </div>
 
-        {/* Enhanced scrollable table container */}
+        {/* Complete scrollable table with ALL CSV columns */}
         <div className="border border-slate-200 rounded-lg bg-white">
           <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
             <Table>
-              <TableHeader className="sticky top-0 bg-white border-b border-slate-200 z-10">
+              <TableHeader className="sticky top-0 bg-white border-b-2 border-slate-300 z-10">
                 <TableRow>
-                  <TableHead className="w-12 min-w-[50px]">#</TableHead>
-                  <TableHead className="min-w-[120px]">Item Code</TableHead>
-                  <TableHead className="min-w-[250px]">Description</TableHead>
-                  <TableHead className="min-w-[150px]">Category</TableHead>
-                  <TableHead className="min-w-[100px]">Brand</TableHead>
-                  <TableHead className="text-right min-w-[60px]">Qty</TableHead>
-                  <TableHead className="text-right min-w-[80px]">UOM</TableHead>
-                  <TableHead className="text-right min-w-[100px]">Unit Price</TableHead>
-                  <TableHead className="text-right min-w-[100px]">MRP</TableHead>
-                  <TableHead className="text-right min-w-[120px]">Tax Amount</TableHead>
-                  <TableHead className="text-right min-w-[120px]">Total Amount</TableHead>
-                  <TableHead className="text-right min-w-[80px]">Received</TableHead>
-                  <TableHead className="text-right min-w-[80px]">Balanced</TableHead>
-                  <TableHead className="text-right min-w-[80px]">Ageing</TableHead>
+                  <TableHead className="w-12 min-w-[50px] bg-white">#</TableHead>
+                  <TableHead className="min-w-[120px] bg-white">Item Code</TableHead>
+                  <TableHead className="min-w-[300px] bg-white">Description</TableHead>
+                  <TableHead className="min-w-[180px] bg-white">Category</TableHead>
+                  <TableHead className="min-w-[100px] bg-white">Brand</TableHead>
+                  <TableHead className="text-right min-w-[80px] bg-white">Ordered Qty</TableHead>
+                  <TableHead className="text-right min-w-[100px] bg-white">Received Qty</TableHead>
+                  <TableHead className="text-right min-w-[100px] bg-white">Balanced Qty</TableHead>
+                  <TableHead className="text-right min-w-[100px] bg-white">MRP</TableHead>
+                  <TableHead className="text-right min-w-[120px] bg-white">Unit Base Cost</TableHead>
+                  <TableHead className="text-right min-w-[120px] bg-white">Taxable Value</TableHead>
+                  <TableHead className="text-right min-w-[100px] bg-white">Tax Amount</TableHead>
+                  <TableHead className="text-right min-w-[120px] bg-white">Line Total</TableHead>
+                  <TableHead className="min-w-[130px] bg-white">Expected Delivery</TableHead>
+                  <TableHead className="min-w-[120px] bg-white">PO Expiry</TableHead>
+                  <TableHead className="min-w-[180px] bg-white">OTB Reference</TableHead>
+                  <TableHead className="min-w-[120px] bg-white">Internal/External</TableHead>
+                  <TableHead className="text-right min-w-[80px] bg-white">Ageing</TableHead>
+                  <TableHead className="min-w-[120px] bg-white">Reference PO</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -248,8 +289,8 @@ export function SwiggyPoDetails({ po, open, onOpenChange }: SwiggyPoDetailsProps
                   <TableRow key={line.id} className="hover:bg-slate-50">
                     <TableCell className="font-semibold">{line.line_number}</TableCell>
                     <TableCell className="font-mono text-xs">{line.item_code}</TableCell>
-                    <TableCell title={line.item_description} className="max-w-[250px]">
-                      <div className="truncate">{line.item_description}</div>
+                    <TableCell title={line.item_description} className="min-w-[300px]">
+                      <div className="whitespace-normal break-words">{line.item_description}</div>
                     </TableCell>
                     <TableCell className="text-xs text-gray-600">
                       {line.category_id || 'N/A'}
@@ -258,27 +299,48 @@ export function SwiggyPoDetails({ po, open, onOpenChange }: SwiggyPoDetailsProps
                       {line.brand_name || 'N/A'}
                     </TableCell>
                     <TableCell className="text-right font-medium">{line.quantity || 0}</TableCell>
-                    <TableCell className="text-right">Unit</TableCell>
-                    <TableCell className="text-right">
-                      {line.unit_base_cost ? `₹${(typeof line.unit_base_cost === 'string' ? parseFloat(line.unit_base_cost) : line.unit_base_cost).toFixed(2)}` : '₹0.00'}
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
+                    <TableCell className="text-right text-gray-600">{line.received_qty || 0}</TableCell>
+                    <TableCell className="text-right text-gray-600">{line.balanced_qty || 0}</TableCell>
+                    <TableCell className="text-right font-medium text-green-700">
                       {line.mrp ? `₹${(typeof line.mrp === 'string' ? parseFloat(line.mrp) : line.mrp).toFixed(2)}` : '₹0.00'}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right text-gray-600">
+                      {line.unit_base_cost ? `₹${(typeof line.unit_base_cost === 'string' ? parseFloat(line.unit_base_cost) : line.unit_base_cost).toFixed(2)}` : '₹0.00'}
+                    </TableCell>
+                    <TableCell className="text-right text-gray-600">
+                      {line.taxable_value ? `₹${(typeof line.taxable_value === 'string' ? parseFloat(line.taxable_value) : line.taxable_value).toFixed(2)}` : '₹0.00'}
+                    </TableCell>
+                    <TableCell className="text-right text-orange-600">
                       {line.total_tax_amount ? `₹${(typeof line.total_tax_amount === 'string' ? parseFloat(line.total_tax_amount) : line.total_tax_amount).toFixed(2)}` : '₹0.00'}
                     </TableCell>
-                    <TableCell className="text-right font-medium bg-green-50">
+                    <TableCell className="text-right font-semibold text-green-700 bg-green-50">
                       {line.line_total ? `₹${(typeof line.line_total === 'string' ? parseFloat(line.line_total) : line.line_total).toFixed(2)}` : '₹0.00'}
                     </TableCell>
-                    <TableCell className="text-right text-xs">{line.received_qty || 0}</TableCell>
-                    <TableCell className="text-right text-xs">{line.balanced_qty || 0}</TableCell>
-                    <TableCell className="text-right text-xs">{line.po_ageing || 0}</TableCell>
+                    <TableCell className="text-xs text-gray-600">
+                      {line.expected_delivery_date ? format(new Date(line.expected_delivery_date), 'MMM dd, yyyy') : 'N/A'}
+                    </TableCell>
+                    <TableCell className="text-xs text-gray-600">
+                      {line.po_expiry_date ? format(new Date(line.po_expiry_date), 'MMM dd, yyyy') : 'N/A'}
+                    </TableCell>
+                    <TableCell className="text-xs text-gray-600">
+                      {line.otb_reference_number || 'N/A'}
+                    </TableCell>
+                    <TableCell className="text-xs text-gray-600">
+                      {line.internal_external_po || 'N/A'}
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-gray-600">{line.po_ageing || 0}</TableCell>
+                    <TableCell className="text-xs text-gray-600">
+                      {line.reference_po_number || 'N/A'}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </div>
+        </div>
+
+        <div className="mt-2 text-xs text-gray-500 italic">
+          💡 Scroll horizontally to view all CSV fields. All columns from the original CSV are displayed.
         </div>
 
         {/* Additional Line Item Details Section */}

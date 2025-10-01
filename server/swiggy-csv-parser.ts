@@ -144,25 +144,29 @@ export function parseSwiggyCSV(csvContent: string, uploadedBy: string): Multiple
       // Create header matching InsertSwiggyPo schema
       const header = {
         po_number: poNumber,
+        entity: firstRow.Entity || null,
+        facility_id: firstRow.FacilityId || null,
+        facility_name: firstRow.FacilityName || null,
+        city: firstRow.City || null,
         po_date: parseDate(firstRow.PoCreatedAt),
+        po_modified_at: parseDate(firstRow.PoModifiedAt),
         po_release_date: parseDate(firstRow.PoModifiedAt),
         expected_delivery_date: parseDate(firstRow.ExpectedDeliveryDate),
         po_expiry_date: parseDate(firstRow.PoExpiryDate),
+        supplier_code: firstRow.SupplierCode || null,
         vendor_name: firstRow.VendorName || null,
-        payment_terms: `${firstRow.InternalExternalPo || 'External'} PO`, // Use available info
+        po_amount: poAmount > 0 ? poAmount.toString() : null,
+        payment_terms: `${firstRow.InternalExternalPo || 'External'} PO`,
+        otb_reference_number: firstRow.OtbReferenceNumber || null,
+        internal_external_po: firstRow.InternalExternalPo || null,
         total_items: poRows.length,
         total_quantity: totalQuantity,
         total_taxable_value: totalTaxableValue > 0 ? totalTaxableValue.toString() : null,
         total_tax_amount: totalTaxAmount > 0 ? totalTaxAmount.toString() : null,
         grand_total: grandTotal > 0 ? grandTotal.toString() : null,
-        total_amount: grandTotal > 0 ? grandTotal.toString() : null, // For unified component
-        unique_hsn_codes: Array.from(new Set(poRows.map((row: SwiggyCSVRow) => row.CategoryId).filter(Boolean))), // Use categories as proxy
+        unique_hsn_codes: Array.from(new Set(poRows.map((row: SwiggyCSVRow) => row.CategoryId).filter(Boolean))),
         status: firstRow.Status || 'pending',
-        created_by: uploadedBy,
-        // Additional fields for unified component
-        delivery_city: firstRow.City || null,
-        facility_name: firstRow.FacilityName || null,
-        supplier_code: firstRow.SupplierCode || null
+        created_by: uploadedBy
       };
 
       // Create lines matching InsertSwiggyPoLine schema
@@ -179,8 +183,12 @@ export function parseSwiggyCSV(csvContent: string, uploadedBy: string): Multiple
         line_number: index + 1,
         item_code: row.SkuCode || '',
         item_description: row.SkuDescription || '',
-        hsn_code: hsnCode, // Extract using HSN mapper or null
+        category_id: row.CategoryId || null,
+        brand_name: row.BrandName || null,
+        hsn_code: hsnCode,
         quantity: parseNumberOrZero(row.OrderedQty),
+        received_qty: parseNumberOrZero(row.ReceivedQty),
+        balanced_qty: parseNumberOrZero(row.BalancedQty),
         mrp: parseNumber(row.Mrp)?.toString() || null,
         unit_base_cost: parseNumber(row.UnitBasedCost)?.toString() || null,
         taxable_value: parseNumber(row.PoLineValueWithoutTax)?.toString() || null,
@@ -219,7 +227,13 @@ export function parseSwiggyCSV(csvContent: string, uploadedBy: string): Multiple
             return (mrp * quantity).toString();
           }
           return parseNumber(row.PoLineValueWithTax)?.toString() || null;
-        })()
+        })(),
+        expected_delivery_date: parseDate(row.ExpectedDeliveryDate),
+        po_expiry_date: parseDate(row.PoExpiryDate),
+        otb_reference_number: row.OtbReferenceNumber || null,
+        internal_external_po: row.InternalExternalPo || null,
+        po_ageing: parseNumberOrZero(row.PoAgeing),
+        reference_po_number: row.ReferencePoNumber || null
       };
     });
 
