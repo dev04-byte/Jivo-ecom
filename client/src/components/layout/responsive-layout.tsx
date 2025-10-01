@@ -1,12 +1,12 @@
 import { useState, ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { 
-  ChartLine, 
-  ShoppingCart, 
-  Truck, 
-  Upload, 
-  Package, 
-  Store, 
+import {
+  ChartLine,
+  ShoppingCart,
+  Truck,
+  Upload,
+  Package,
+  Store,
   User,
   Database,
   Menu,
@@ -14,12 +14,15 @@ import {
   LogOut,
   Settings,
   ChevronDown,
-  Plus
+  Plus,
+  Shield,
+  UserPlus
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { MobileHeader } from "./mobile-header";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permissions";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,6 +38,8 @@ type NavigationItem = {
   active: boolean;
   description?: string;
   comingSoon?: boolean;
+  adminOnly?: boolean;
+  requiredPermission?: string;
 };
 
 const navigation: NavigationItem[] = [
@@ -42,56 +47,82 @@ const navigation: NavigationItem[] = [
     name: "Dashboard",
     href: "/",
     icon: ChartLine,
-    active: true
+    active: true,
+    requiredPermission: "view_dashboard"
   },
   {
     name: "Platform PO",
     href: "/platform-po",
     icon: ShoppingCart,
     active: true,
-    description: "Create, upload & manage platform orders"
+    description: "Create, upload & manage platform orders",
+    requiredPermission: "view_platform_po"
   },
   {
     name: "Distributor PO",
     href: "/distributor-po",
     icon: Truck,
     active: true,
-    description: "Create & manage distributor purchase orders"
+    description: "Create & manage distributor purchase orders",
+    requiredPermission: "view_distributor_po"
   },
   {
     name: "Secondary Sales",
     href: "/secondary-sales",
     icon: Upload,
     active: true,
-    description: "Upload & manage secondary sales data from platforms"
+    description: "Upload & manage secondary sales data from platforms",
+    requiredPermission: "view_secondary_sales"
   },
   {
     name: "Inventory",
     href: "/inventory",
     icon: Package,
     active: true,
-    description: "Upload & manage inventory data from platforms"
+    description: "Upload & manage inventory data from platforms",
+    requiredPermission: "view_inventory"
   },
   {
     name: "Create PF Item",
     href: "/pf-item-creation",
     icon: Plus,
     active: true,
-    description: "Create new platform items"
+    description: "Create new platform items",
+    requiredPermission: "create_pf_item"
   },
   {
     name: "SAP Sync",
-    href: "/sap-sync", 
+    href: "/sap-sync",
     icon: Database,
     active: true,
-    description: "Sync item master data from SAP B1 Hanna ERP"
+    description: "Sync item master data from SAP B1 Hanna ERP",
+    requiredPermission: "view_sap_sync"
   },
   {
     name: "SQL Query",
     href: "/sql-query",
     icon: Database,
     active: true,
-    description: "Execute custom SQL queries and explore data"
+    description: "Execute custom SQL queries and explore data",
+    requiredPermission: "view_sql_query"
+  },
+  {
+    name: "User Permissions",
+    href: "/user-permissions",
+    icon: Shield,
+    active: true,
+    description: "Manage user access and permissions",
+    adminOnly: true,
+    requiredPermission: "manage_permissions"
+  },
+  {
+    name: "Create Users",
+    href: "/create-users",
+    icon: UserPlus,
+    active: true,
+    description: "Create and manage user accounts",
+    adminOnly: true,
+    requiredPermission: "create_users"
   }
 ];
 
@@ -103,6 +134,28 @@ export function ResponsiveLayout({ children }: ResponsiveLayoutProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [location, navigate] = useLocation();
   const { user, logoutMutation } = useAuth();
+  const { hasPermission, isAdmin } = usePermissions();
+
+  // Filter navigation items based on permissions
+  const filteredNavigation = navigation.filter(item => {
+    // Admins see everything
+    if (isAdmin()) {
+      return true;
+    }
+
+    // If item is admin-only and user is not admin, hide it
+    if (item.adminOnly && !isAdmin()) {
+      return false;
+    }
+
+    // Check if user has required permission
+    if (item.requiredPermission) {
+      return hasPermission(item.requiredPermission);
+    }
+
+    // Show items without permission requirements
+    return true;
+  });
 
   const toggleMobileMenu = () => {
     setIsMobileMenuOpen(!isMobileMenuOpen);
@@ -139,7 +192,7 @@ export function ResponsiveLayout({ children }: ResponsiveLayoutProps) {
           
           {/* Navigation Section */}
           <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto" style={{scrollbarWidth: 'thin'}}>
-            {navigation.map((item) => {
+            {filteredNavigation.map((item) => {
               const isActive = location === item.href;
               const Icon = item.icon;
 
@@ -236,7 +289,7 @@ export function ResponsiveLayout({ children }: ResponsiveLayoutProps) {
 
           {/* Mobile Navigation */}
           <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
-            {navigation.map((item) => {
+            {filteredNavigation.map((item) => {
               const isActive = location === item.href;
               const Icon = item.icon;
 

@@ -41,6 +41,7 @@ import { insertPfPoSchema, insertPfOrderItemsSchema, insertFlipkartGroceryPoHead
 import { z } from "zod";
 import { seedTestData } from "./seed-data";
 import { parseFlipkartGroceryPO, parseZeptoPO, parseCityMallPO, parseBlinkitPO } from "./csv-parser";
+import { parseBlinkitCSVPO } from "./blinkit-csv-parser";
 import { parseCityMallPO as parseCityMallExcelPO } from "./citymall-parser";
 import { parseFlipkartGroceryExcelPO } from "./flipkart-excel-parser";
 import { parseBlinkitPDF, validateBlinkitPDFData } from "./blinkit-pdf-parser";
@@ -55,6 +56,7 @@ import { parseSwiggyCSV } from "./swiggy-csv-parser";
 import { parseBigBasketPO } from "./bigbasket-parser";
 import { parseZomatoPO } from "./zomato-parser";
 import { parseDealsharePO } from "./dealshare-parser";
+import { parseAmazonPO } from "./amazon-po-parser";
 import { parseAmazonSecondarySales } from "./amazon-secondary-sales-parser";
 import { parseZeptoSecondaryData } from "./zepto-secondary-sales-parser";
 import { parseBlinkitSecondarySalesFile } from "./blinkit-secondary-sales-parser";
@@ -469,10 +471,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // DEBUG: Check distributors table directly
+  app.get("/api/distributors/debug", async (req, res) => {
+    console.log('🐛 DEBUG: Checking distributors table directly');
+    try {
+      const { distributors } = await import('@shared/schema');
+      const { db } = await import('./db');
+      const result = await db.select().from(distributors);
+      console.log('🐛 DEBUG: Found', result.length, 'distributors in table');
+      res.json({ count: result.length, distributors: result });
+    } catch (error) {
+      console.error("🐛 DEBUG ERROR:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Distributors API
   app.get("/api/distributors", async (req, res) => {
+    console.log('🌐 API /api/distributors called');
     try {
       const distributors = await storage.getAllDistributors();
+      console.log('🌐 API /api/distributors returning:', distributors.length, 'distributors');
+      console.log('🌐 First distributor:', distributors[0]?.distributor_name);
       res.json(distributors);
     } catch (error) {
       console.error("Error fetching distributors:", error);
@@ -971,15 +991,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       console.log(`🔍 API /pos/${id}: Searching for PO with ID ${id}`);
 
-      // PRIORITY 1: Check platform-specific tables first (Zepto, Blinkit, Zomato)
+      // PRIORITY 1: Check platform-specific tables first (Zepto, Blinkit, Zomato, Amazon, etc.)
       // This ensures we show original data from each platform's tables
-      const platformPo = await storage.getPoById(id);
+      let platformPo;
+      try {
+        platformPo = await storage.getPoById(id);
+      } catch (getPoError) {
+        console.error(`❌ Error in storage.getPoById for ID ${id}:`, getPoError);
+        console.error('Stack trace:', getPoError instanceof Error ? getPoError.stack : 'No stack available');
+        return res.status(500).json({
+          message: "Failed to fetch PO",
+          error: getPoError instanceof Error ? getPoError.message : String(getPoError),
+          id: id
+        });
+      }
+
       if (platformPo) {
         console.log("📋 Found PO in platform-specific tables for ID:", id);
         console.log("📊 Platform PO data:", {
           id: platformPo.id,
           po_number: platformPo.po_number,
           platform: platformPo.platform?.pf_name,
+          serving_distributor: platformPo.serving_distributor,
+          vendor_name: platformPo.vendor_name,
           orderItems_count: platformPo.orderItems?.length || 0
         });
 
@@ -1170,7 +1204,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("🚀 HIT THE PO UPDATE ROUTE!");
     console.log("ID:", req.params.id);
     console.log("Body keys:", Object.keys(req.body || {}));
-    console.log("Body:", JSON.stringify(req.body, null, 2));
+    console.log("Body master:", JSON.stringify(req.body.master, null, 2));
+    console.log("Body lines count:", req.body.lines?.length || 0);
     
 
     try {
@@ -1184,26 +1219,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Check if this is the master/lines structure - use po_master and po_lines tables
       if (req.body.master && req.body.lines) {
-        console.log("✅ Using po_master and po_lines tables for update");
+        console.log("✅ Using po_master and po_lines tables for update/insert");
         const { master, lines } = req.body;
-        
-        const updatedPo = await storage.updatePoInExistingTables(id, master, lines);
-        
-        // Log the PO update
-        await storage.logEdit({
-          username,
-          action: 'UPDATE',
-          tableName: 'po_master',
-          recordId: id,
-          fieldName: 'full_record',
-          oldValue: 'Previous PO data',
-          newValue: JSON.stringify(master),
-          ipAddress,
-          userAgent,
-          sessionId
-        });
-        
-        res.json(updatedPo);
+
+        try {
+          // Check if PO exists in po_master to determine INSERT or UPDATE (for logging purposes)
+          const existingPoCheck = await db.select().from(poMaster).where(eq(poMaster.id, id)).limit(1);
+          const isInsert = !existingPoCheck || existingPoCheck.length === 0;
+          console.log(`📝 PO ${id} exists in po_master: ${!isInsert}, will ${isInsert ? 'INSERT' : 'UPDATE'}`);
+
+          const updatedPo = await storage.updatePoInExistingTables(id, master, lines);
+
+          // Log the PO operation (INSERT or UPDATE)
+          await storage.logEdit({
+            username,
+            action: isInsert ? 'INSERT' : 'UPDATE',
+            tableName: 'po_master',
+            recordId: id,
+            fieldName: 'full_record',
+            oldValue: isInsert ? null : 'Previous PO data',
+            newValue: JSON.stringify(master),
+            ipAddress,
+            userAgent,
+            sessionId
+          });
+
+          // Also log po_lines operation
+          await storage.logEdit({
+            username,
+            action: isInsert ? 'INSERT' : 'UPDATE',
+            tableName: 'po_lines',
+            recordId: id,
+            fieldName: 'lines_data',
+            oldValue: isInsert ? null : 'Previous lines data',
+            newValue: `${lines.length} line items`,
+            ipAddress,
+            userAgent,
+            sessionId
+          });
+
+          console.log(`✅ Logged ${isInsert ? 'INSERT' : 'UPDATE'} operation for PO ${id} in po_master and po_lines`);
+
+          res.json(updatedPo);
+        } catch (updateError: any) {
+          console.error("❌ Error in update/insert operation:", updateError);
+          return res.status(500).json({
+            message: "Failed to update purchase order",
+            error: updateError.message || String(updateError),
+            details: updateError.detail || null
+          });
+        }
       } else {
         // Fall back to direct pf_po structure
         console.log("⚠️ Using direct pf_po structure for update");
@@ -1984,14 +2049,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         });
 
-      } else {
-        console.log('📝 Processing as CSV file...');
+      } else if (fileName.endsWith('.csv')) {
+        console.log('📝 Processing as CSV file with new parser...');
 
-        // Fallback to CSV parser for non-Excel files
-        const result = parseBlinkitPO(req.file.buffer, "system");
-        const firstPo = result.poList[0];
-        header = firstPo.header;
-        lines = firstPo.lines;
+        // Use the new Blinkit CSV parser for CSV files
+        const csvContent = req.file.buffer.toString('utf-8');
+        const result = parseBlinkitCSVPO(csvContent, "system");
+
+        if (result.poList && result.poList.length > 1) {
+          // Multiple POs - create all of them
+          console.log(`📊 Creating ${result.poList.length} separate Blinkit POs from CSV...`);
+
+          const createdPOs = [];
+          for (let i = 0; i < result.poList.length; i++) {
+            const po = result.poList[i];
+            console.log(`📋 Creating PO ${i + 1}/${result.poList.length}: ${po.header.po_number}`);
+
+            try {
+              const createdPo = await storage.createBlinkitPo(po.header, po.lines);
+              createdPOs.push(createdPo);
+            } catch (error) {
+              console.error(`❌ Error creating PO ${po.header.po_number}:`, error);
+              // Continue with the next PO instead of failing completely
+            }
+          }
+
+          return res.status(201).json({
+            message: `Successfully uploaded ${createdPOs.length} Blinkit POs from CSV file`,
+            totalPOs: createdPOs.length,
+            totalItemsProcessed: result.totalItems,
+            totalAmount: result.totalAmount,
+            source: 'csv_bulk_upload',
+            createdPOs: createdPOs.map(po => ({
+              id: po.id,
+              po_number: po.po_number
+            }))
+          });
+        } else if (result.poList && result.poList.length === 1) {
+          // Single PO
+          const singlePo = result.poList[0];
+          header = singlePo.header;
+          lines = singlePo.lines;
+        } else {
+          // Fallback single PO format
+          header = result.header;
+          lines = result.lines;
+        }
+      } else {
+        console.log('📝 Processing as generic file with fallback parser...');
+
+        // Try CSV parser first for generic files
+        if (fileName.endsWith('.csv') || !fileName.includes('.')) {
+          try {
+            console.log('🧪 Attempting CSV parsing for generic file...');
+            const csvContent = req.file.buffer.toString('utf-8');
+            const csvResult = parseBlinkitCSVPO(csvContent, "system");
+
+            if (csvResult.poList && csvResult.poList.length > 1) {
+              // Multiple POs found via CSV parser
+              console.log(`📊 Creating ${csvResult.poList.length} separate Blinkit POs from generic file...`);
+
+              const createdPOs = [];
+              for (let i = 0; i < csvResult.poList.length; i++) {
+                const po = csvResult.poList[i];
+                console.log(`📋 Creating PO ${i + 1}/${csvResult.poList.length}: ${po.header.po_number}`);
+
+                try {
+                  const createdPo = await storage.createBlinkitPo(po.header, po.lines);
+                  createdPOs.push(createdPo);
+                } catch (error) {
+                  console.error(`❌ Error creating PO ${po.header.po_number}:`, error);
+                }
+              }
+
+              return res.status(201).json({
+                message: `Successfully uploaded ${createdPOs.length} Blinkit POs from file`,
+                totalPOs: createdPOs.length,
+                totalItemsProcessed: csvResult.totalItems,
+                totalAmount: csvResult.totalAmount,
+                source: 'generic_file_csv_bulk',
+                parsing_method: 'csv_bulk',
+                createdPOs: createdPOs.map(po => ({
+                  id: po.id,
+                  po_number: po.po_number
+                }))
+              });
+            } else if (csvResult.poList && csvResult.poList.length === 1) {
+              header = csvResult.poList[0].header;
+              lines = csvResult.poList[0].lines;
+            } else if (csvResult.header) {
+              header = csvResult.header;
+              lines = csvResult.lines;
+            }
+          } catch (csvError) {
+            console.warn('⚠️ CSV parsing failed, falling back to legacy parser:', csvError);
+          }
+        }
+
+        // Fallback to original parser if CSV parsing didn't work
+        if (!header) {
+          const result = parseBlinkitPO(req.file.buffer, "system");
+          const firstPo = result.poList[0];
+          header = firstPo.header;
+          lines = firstPo.lines;
+        }
       }
 
       if (!header || !lines || lines.length === 0) {
@@ -2212,24 +2373,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const { parseSwiggyCSVPO } = await import('./swiggy-csv-parser-new');
 
         const parsedData = parseSwiggyCSVPO(csvContent, uploadedBy);
-        console.log(`📊 Previewed Swiggy CSV PO: ${parsedData.header.po_number} with ${parsedData.lines.length} line items`);
 
-        // Calculate totals for preview
-        const totalQuantity = parsedData.lines.reduce((sum, line) => sum + (line.quantity || 0), 0);
-        const totalAmount = parsedData.lines.reduce((sum, line) => {
-          const lineTotal = parseFloat(line.line_total || '0');
-          return sum + (isNaN(lineTotal) ? 0 : lineTotal);
-        }, 0);
+        // Check if it's single PO or multiple POs
+        if (parsedData.poList && Array.isArray(parsedData.poList)) {
+          // Multiple POs
+          console.log(`📊 Previewed ${parsedData.totalPOs} Swiggy CSV POs with ${parsedData.totalItems} total items`);
+          res.status(200).json({
+            message: `Preview completed. Found ${parsedData.totalPOs} POs with ${parsedData.totalItems} items`,
+            totalPOs: parsedData.totalPOs,
+            totalItems: parsedData.totalItems,
+            totalQuantity: parsedData.poList.reduce((sum: number, po: any) => sum + (po.totalQuantity || 0), 0),
+            totalAmount: parsedData.totalAmount,
+            poList: parsedData.poList
+          });
+        } else {
+          // Single PO
+          console.log(`📊 Previewed Swiggy CSV PO: ${parsedData.header.po_number} with ${parsedData.lines.length} line items`);
 
-        res.status(200).json({
-          message: `Preview completed. Found 1 PO with ${parsedData.lines.length} items`,
-          totalPOs: 1,
-          totalItems: parsedData.lines.length,
-          totalQuantity: totalQuantity,
-          totalAmount: totalAmount.toFixed(2),
-          header: parsedData.header,
-          lines: parsedData.lines
-        });
+          // Calculate totals for preview
+          const totalQuantity = parsedData.lines.reduce((sum: number, line: any) => sum + (line.quantity || line.OrderedQty || 0), 0);
+          const totalAmount = parsedData.lines.reduce((sum: number, line: any) => {
+            const lineTotal = parseFloat(line.line_total || line.PoLineValueWithTax || '0');
+            return sum + (isNaN(lineTotal) ? 0 : lineTotal);
+          }, 0);
+
+          res.status(200).json({
+            message: `Preview completed. Found 1 PO with ${parsedData.lines.length} items`,
+            totalPOs: 1,
+            totalItems: parsedData.lines.length,
+            totalQuantity: totalQuantity,
+            totalAmount: totalAmount.toFixed(2),
+            header: parsedData.header,
+            lines: parsedData.lines
+          });
+        }
       } else {
         // Handle Excel file preview (existing logic)
         const { header, lines } = await parseSwiggyPO(req.file.buffer, uploadedBy);
@@ -2359,24 +2536,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/swiggy-pos", async (req, res) => {
     try {
+      console.log('🔄 /api/swiggy-pos endpoint called');
       const { header, lines } = req.body;
-      
+
+      console.log('📦 Request body structure:', {
+        hasHeader: !!header,
+        hasLines: !!lines,
+        linesCount: lines ? lines.length : 0,
+        headerKeys: header ? Object.keys(header) : [],
+        sampleLineKeys: lines && lines.length > 0 ? Object.keys(lines[0]) : []
+      });
+
       if (!header || !lines) {
+        console.error('❌ Missing header or lines in request body');
         return res.status(400).json({ error: "Header and lines are required" });
       }
-      
-      const createdPo = await storage.createSwiggyPo(header, lines);
-      
-      // Fetch the created lines to return complete data
-      const createdLines = await storage.getSwiggyPoLines(createdPo.id);
-      
-      // Return the complete PO with lines
-      res.status(201).json({ 
-        ...createdPo, 
-        lines: createdLines 
+
+      // Use new database operations instead of old storage method
+      const { insertSwiggyPoToDatabase } = await import('./swiggy-db-operations');
+
+      const swiggyPoData = {
+        header: header,
+        lines: lines
+      };
+
+      console.log('📤 Calling insertSwiggyPoToDatabase with data structure:', {
+        headerSample: header ? JSON.stringify(header).substring(0, 200) + '...' : 'null',
+        linesCount: lines ? lines.length : 0
       });
+
+      const insertResult = await insertSwiggyPoToDatabase(swiggyPoData);
+
+      console.log('📥 insertSwiggyPoToDatabase result:', {
+        success: insertResult.success,
+        message: insertResult.message,
+        hasData: !!insertResult.data
+      });
+
+      if (!insertResult.success) {
+        console.error('❌ Database insertion failed:', insertResult.message);
+        return res.status(400).json({
+          error: "Failed to create PO",
+          message: insertResult.message
+        });
+      }
+
+      // Return success response
+      res.status(201).json(insertResult.data);
     } catch (error) {
-      console.error("Error creating Swiggy PO:", error);
+      console.error("❌ Error in /api/swiggy-pos endpoint:", error);
+      console.error("❌ Error stack:", error instanceof Error ? error.stack : 'No stack');
       res.status(500).json({ error: "Failed to create PO" });
     }
   });
@@ -2640,8 +2849,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.log("Processing Blinkit Excel file...");
 
             try {
-              // Try to parse as real Blinkit Excel format first
-              console.log("🔍 Attempting to parse as real Blinkit Excel format...");
+              // First, try to convert Excel to CSV and check for multiple POs
+              console.log("🔍 Checking if Excel contains multiple POs by converting to CSV...");
+
+              const XLSX = require('xlsx');
+              const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+              const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+
+              // Convert to CSV format
+              const csvContent = XLSX.utils.sheet_to_csv(worksheet);
+              console.log(`📊 Converted Excel to CSV, size: ${csvContent.length} characters`);
+
+              // Try to parse with our CSV multi-PO parser
+              try {
+                const blinkitResult = parseBlinkitCSVPO(csvContent, uploadedBy);
+
+                if (blinkitResult.poList && blinkitResult.poList.length > 1) {
+                  // Multiple POs found in Excel! Use CSV parser result
+                  console.log(`🎯 Found ${blinkitResult.poList.length} POs in Excel file - using multi-PO format`);
+
+                  return res.json({
+                    poList: blinkitResult.poList.map(po => ({
+                      header: po.header,
+                      lines: po.lines,
+                      totalItems: po.totalItems || po.lines.length,
+                      totalQuantity: po.totalQuantity || po.header.total_quantity,
+                      totalAmount: po.totalAmount?.toString() || po.header.total_amount
+                    })),
+                    detectedVendor: 'blinkit',
+                    totalPOs: blinkitResult.totalPOs,
+                    totalItems: blinkitResult.totalItems,
+                    totalAmount: blinkitResult.totalAmount,
+                    source: 'blinkit_excel_multiple_pos'
+                  });
+                }
+              } catch (csvParseError) {
+                console.log("💡 CSV parsing failed, falling back to single PO Excel parsing");
+              }
+
+              // Fallback to single PO Excel parsing if CSV parsing didn't work or found only 1 PO
+              console.log("🔍 Processing as single PO Excel format...");
               const realExcelData = parseBlinkitExcelFile(req.file.buffer);
 
               // Validate the extracted data
@@ -2676,22 +2923,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
               console.warn("⚠️ Real Excel format parsing failed, trying legacy CSV parser:", realExcelError);
 
               try {
-                // Fallback to legacy CSV parser
-                const blinkitResult = parseBlinkitPO(req.file.buffer, uploadedBy);
-                console.log("Found", blinkitResult.poList.length, "POs in Blinkit file (legacy format)");
+                // Check if it's a CSV file and use the new CSV parser
+                if (filename.endsWith('.csv')) {
+                  console.log("Processing Blinkit CSV file with new parser...");
+                  const csvContent = req.file.buffer.toString('utf-8');
+                  const blinkitResult = parseBlinkitCSVPO(csvContent, uploadedBy);
 
-                return res.json({
-                  poList: blinkitResult.poList.map(po => ({
-                    header: po.header,
-                    lines: po.lines,
-                    totalItems: po.lines.length,
-                    totalQuantity: po.header.total_quantity,
-                    totalAmount: po.lines.reduce((sum, line) => sum + parseFloat(line.total_amount || '0'), 0).toFixed(2)
-                  })),
-                  detectedVendor: 'blinkit',
-                  totalPOs: blinkitResult.poList.length,
-                  source: 'legacy_format'
-                });
+                  if (blinkitResult.poList) {
+                    // Multiple POs
+                    console.log("Found", blinkitResult.poList.length, "POs in Blinkit CSV file");
+
+                    return res.json({
+                      poList: blinkitResult.poList.map(po => ({
+                        header: po.header,
+                        lines: po.lines,
+                        totalItems: po.totalItems,
+                        totalQuantity: po.totalQuantity,
+                        totalAmount: po.totalAmount.toString()
+                      })),
+                      detectedVendor: 'blinkit',
+                      totalPOs: blinkitResult.totalPOs,
+                      totalItems: blinkitResult.totalItems,
+                      totalAmount: blinkitResult.totalAmount,
+                      source: 'blinkit_csv_new_parser'
+                    });
+                  } else {
+                    // Single PO
+                    const totalAmount = blinkitResult.lines.reduce((sum, line) => sum + parseFloat(line.total_amount || '0'), 0);
+
+                    return res.json({
+                      poList: [{
+                        header: blinkitResult.header,
+                        lines: blinkitResult.lines,
+                        totalItems: blinkitResult.lines.length,
+                        totalQuantity: blinkitResult.header.total_quantity,
+                        totalAmount: totalAmount.toFixed(2)
+                      }],
+                      detectedVendor: 'blinkit',
+                      totalPOs: 1,
+                      totalItems: blinkitResult.lines.length,
+                      totalAmount: totalAmount.toFixed(2),
+                      source: 'blinkit_csv_single_po'
+                    });
+                  }
+                } else {
+                  // Fallback to legacy parser for non-CSV files
+                  const blinkitResult = parseBlinkitPO(req.file.buffer, uploadedBy);
+                  console.log("Found", blinkitResult.poList.length, "POs in Blinkit file (legacy format)");
+
+                  return res.json({
+                    poList: blinkitResult.poList.map(po => ({
+                      header: po.header,
+                      lines: po.lines,
+                      totalItems: po.lines.length,
+                      totalQuantity: po.header.total_quantity,
+                      totalAmount: po.lines.reduce((sum, line) => sum + parseFloat(line.total_amount || '0'), 0).toFixed(2)
+                    })),
+                    detectedVendor: 'blinkit',
+                    totalPOs: blinkitResult.poList.length,
+                    source: 'legacy_format'
+                  });
+                }
               } catch (legacyError) {
                 console.error("❌ Both real Excel and legacy parsing failed:", legacyError);
 
@@ -2769,19 +3061,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
             try {
               const { parseSwiggyCSVPO } = await import('./swiggy-csv-parser-new');
               const csvResult = parseSwiggyCSVPO(req.file.buffer.toString('utf-8'), uploadedBy);
-              console.log('✅ Swiggy CSV parsing successful with NEW parser:', {
-                poNumber: csvResult.header.PoNumber,
-                lineItems: csvResult.lines.length
-              });
 
-              // Convert to unified format for preview - single PO with lines
-              parsedData = {
-                header: csvResult.header,
-                lines: csvResult.lines,
-                totalPOs: 1,
-                totalItems: csvResult.lines.length,
-                detectedVendor: 'swiggy'
-              };
+              // Handle both single PO and multiple PO formats
+              if (csvResult.poList) {
+                // Multiple POs case
+                console.log('✅ Swiggy CSV parsing successful with NEW parser (Multiple POs):', {
+                  totalPOs: csvResult.totalPOs,
+                  totalItems: csvResult.totalItems,
+                  firstPoNumber: csvResult.poList[0]?.header?.PoNumber || 'Unknown'
+                });
+
+                // Return multiple PO format for frontend
+                parsedData = {
+                  poList: csvResult.poList,
+                  totalPOs: csvResult.totalPOs,
+                  totalItems: csvResult.totalItems,
+                  totalAmount: csvResult.totalAmount,
+                  source: csvResult.source,
+                  detectedVendor: 'swiggy'
+                };
+              } else {
+                // Single PO case
+                console.log('✅ Swiggy CSV parsing successful with NEW parser (Single PO):', {
+                  poNumber: csvResult.header?.PoNumber || csvResult.header?.po_number || 'Unknown',
+                  vendor_name: csvResult.header?.vendor_name || csvResult.header?.VendorName || 'NOT FOUND',
+                  lineItems: csvResult.lines?.length || 0
+                });
+
+                // Return single PO format for frontend
+                parsedData = {
+                  header: csvResult.header,
+                  lines: csvResult.lines,
+                  totalPOs: 1,
+                  totalItems: csvResult.lines?.length || 0,
+                  detectedVendor: 'swiggy'
+                };
+              }
             } catch (csvError) {
               console.error('❌ Swiggy CSV parsing failed:', csvError);
               throw new Error(`Failed to parse Swiggy CSV: ${csvError instanceof Error ? csvError.message : 'Unknown error'}`);
@@ -2804,6 +3119,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else if (platformParam === "dealshare") {
           detectedVendor = "dealshare";
           parsedData = await parseDealsharePO(req.file.buffer, uploadedBy);
+        } else if (platformParam === "amazon") {
+          detectedVendor = "amazon";
+          const amazonResult = await parseAmazonPO(req.file.buffer, req.file.originalname, uploadedBy);
+          parsedData = {
+            header: amazonResult.header,
+            lines: amazonResult.lines,
+            totalItems: amazonResult.totalItems,
+            totalQuantity: amazonResult.totalQuantity,
+            totalAmount: amazonResult.totalAmount,
+            detectedVendor: amazonResult.detectedVendor
+          };
         }
         // Fallback to filename detection if platform param not provided or recognized
         else if (filename.includes('flipkart') || filename.includes('grocery')) {
@@ -2878,6 +3204,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.error("Blinkit parsing failed:", blinkitError);
             throw blinkitError; // Re-throw to fall through to fallback parsers
           }
+        } else if (filename.includes('amazon')) {
+          detectedVendor = "amazon";
+          console.log("Processing Amazon file (filename detection)...");
+          const amazonResult = await parseAmazonPO(req.file.buffer, req.file.originalname, uploadedBy);
+          parsedData = {
+            header: amazonResult.header,
+            lines: amazonResult.lines,
+            totalItems: amazonResult.totalItems,
+            totalQuantity: amazonResult.totalQuantity,
+            totalAmount: amazonResult.totalAmount,
+            detectedVendor: amazonResult.detectedVendor
+          };
         } else if (filename.includes('swiggy') || filename.includes('soty')) {
           detectedVendor = "swiggy";
 
@@ -2967,10 +3305,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Map vendor to platform information for frontend compatibility
         const platformMap: { [key: string]: { pf_name: string, id: number } } = {
           'blinkit': { pf_name: 'Blinkit', id: 1 },
-          'zepto': { pf_name: 'Zepto', id: 2 },
-          'swiggy': { pf_name: 'Swiggy', id: 3 },
-          'flipkart': { pf_name: 'Flipkart Grocery', id: 4 },
-          'zomato': { pf_name: 'Zomato', id: 15 },
+          'zepto': { pf_name: 'Zepto', id: 3 },
+          'swiggy': { pf_name: 'Swiggy', id: 4 },
+          'flipkart': { pf_name: 'Flipkart Grocery', id: 5 },
+          'zomato': { pf_name: 'Zomato', id: 9 },
           'amazon': { pf_name: 'Amazon', id: 6 },
           'citymall': { pf_name: 'Citymall', id: 7 },
           'dealshare': { pf_name: 'Dealshare', id: 8 },
@@ -3727,10 +4065,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Convert all platform data to unified format and use po_master table
       const platformMap: Record<string, number> = {
         'blinkit': 1,     // Blinkit
-        'swiggy': 2,      // Swiggy Instamart
+        'swiggy': 4,      // Swiggy Instamart (corrected from 2 to 4)
         'zepto': 3,       // Zepto
-        'flipkart': 4,    // Flipkart Grocery
-        'zomato': 15,     // Zomato (using ID 15 from database)
+        'flipkart': 5,    // Flipkart Grocery (corrected from 4 to 5)
+        'zomato': 9,      // Zomato (corrected from 15 to 9)
         'amazon': 6,      // Amazon
         'citymall': 7,    // Citymall
         'dealshare': 8,   // Dealshare
@@ -4305,6 +4643,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           console.log('🔍 DealShare: Calling createDealsharePo with enhanced header');
           createdPo = await storage.createDealsharePo(safeHeader, safeLines);
+        } else if (vendor === 'amazon') {
+          console.log('🔍 Amazon: Processing Amazon PO import');
+
+          // Prepare Amazon header with proper field validation
+          const safeHeader = {
+            ...cleanHeader
+          };
+
+          // Ensure proper Amazon-specific field handling
+          const amazonFields = [
+            'po_number', 'po_date', 'shipment_date', 'delivery_date',
+            'ship_to_location', 'ship_to_address', 'bill_to_location',
+            'vendor_code', 'vendor_name', 'buyer_name', 'currency',
+            'total_amount', 'tax_amount', 'shipping_cost', 'discount_amount',
+            'net_amount', 'status', 'notes', 'created_by'
+          ];
+
+          const finalHeader = {};
+          amazonFields.forEach(field => {
+            if (safeHeader[field] !== undefined) {
+              finalHeader[field] = safeHeader[field];
+            }
+          });
+
+          // Ensure numeric fields are strings for database compatibility
+          ['total_amount', 'tax_amount', 'shipping_cost', 'discount_amount', 'net_amount'].forEach(field => {
+            if (finalHeader[field] !== undefined) {
+              finalHeader[field] = String(finalHeader[field]);
+            }
+          });
+
+          const safeLines = cleanLines?.map((line, index) => {
+            const safeLine = { ...line };
+            // Ensure line_number is set
+            if (!safeLine.line_number) {
+              safeLine.line_number = index + 1;
+            }
+            // Ensure numeric fields are strings
+            ['unit_cost', 'total_cost', 'tax_rate', 'tax_amount', 'discount_percent', 'discount_amount', 'net_amount'].forEach(field => {
+              if (safeLine[field] !== undefined) {
+                safeLine[field] = String(safeLine[field]);
+              }
+            });
+            return safeLine;
+          }) || [];
+
+          console.log('🔍 Amazon: Calling createAmazonPo with processed data');
+          createdPo = await storage.createAmazonPo(finalHeader, safeLines);
         } else {
           // Fallback to unified po_master table for platforms without specific methods
           createdPo = await storage.createPoInExistingTables(masterData, linesData);
@@ -4865,6 +5251,184 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting Dealshare PO:", error);
       res.status(500).json({ error: "Failed to delete PO" });
+    }
+  });
+
+  // Amazon PO routes
+  app.get("/api/amazon-pos", async (_req, res) => {
+    try {
+      const pos = await storage.getAllAmazonPos();
+      res.json(pos);
+    } catch (error) {
+      console.error("Error fetching Amazon POs:", error);
+      res.status(500).json({ message: "Failed to fetch Amazon POs" });
+    }
+  });
+
+  app.get("/api/amazon-pos/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const po = await storage.getAmazonPoById(id);
+      if (!po) {
+        return res.status(404).json({ message: "Amazon PO not found" });
+      }
+      res.json(po);
+    } catch (error) {
+      console.error("Error fetching Amazon PO:", error);
+      res.status(500).json({ message: "Failed to fetch Amazon PO" });
+    }
+  });
+
+  app.post("/api/amazon-pos/upload", upload.single('file'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      console.log('📁 Amazon PO upload received:', {
+        filename: req.file.originalname,
+        size: req.file.size,
+        uploadedBy: req.body.uploadedBy || 'admin'
+      });
+
+      const parsedData = await parseAmazonPO(
+        req.file.buffer,
+        req.file.originalname,
+        req.body.uploadedBy || 'admin'
+      );
+
+      const createdPo = await storage.createAmazonPo(parsedData.header, parsedData.lines);
+
+      res.json({
+        success: true,
+        message: `Amazon PO uploaded successfully: ${parsedData.totalItems} items processed`,
+        poId: createdPo.id,
+        poNumber: createdPo.po_number,
+        totalItems: parsedData.totalItems,
+        totalAmount: parsedData.totalAmount,
+        vendor: parsedData.detectedVendor
+      });
+
+    } catch (error) {
+      console.error('❌ Amazon PO upload error:', error);
+      res.status(400).json({
+        error: error instanceof Error ? error.message : 'Unknown error occurred during Amazon PO upload'
+      });
+    }
+  });
+
+  app.post("/api/amazon-pos/preview", upload.single('file'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const parsedData = await parseAmazonPO(
+        req.file.buffer,
+        req.file.originalname,
+        req.body.uploadedBy || 'admin'
+      );
+
+      res.json({
+        success: true,
+        data: {
+          header: parsedData.header,
+          lines: parsedData.lines,
+          summary: {
+            totalItems: parsedData.totalItems,
+            totalQuantity: parsedData.totalQuantity,
+            totalAmount: parsedData.totalAmount,
+            detectedVendor: parsedData.detectedVendor
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Amazon PO preview error:', error);
+      res.status(400).json({
+        error: error instanceof Error ? error.message : 'Unknown error occurred during Amazon PO preview'
+      });
+    }
+  });
+
+  app.post("/api/amazon-pos/import", async (req, res) => {
+    try {
+      const { header, lines } = req.body;
+
+      if (!header || !lines || !Array.isArray(lines)) {
+        return res.status(400).json({ error: "Invalid import data: header and lines required" });
+      }
+
+      const createdPo = await storage.createAmazonPo(header, lines);
+
+      res.json({
+        success: true,
+        message: `Amazon PO imported successfully: ${lines.length} items processed`,
+        poId: createdPo.id,
+        poNumber: createdPo.po_number
+      });
+
+    } catch (error) {
+      console.error('❌ Amazon PO import error:', error);
+      res.status(400).json({
+        error: error instanceof Error ? error.message : 'Unknown error occurred during Amazon PO import'
+      });
+    }
+  });
+
+  app.post("/api/amazon-pos", async (req, res) => {
+    try {
+      const { header, lines } = req.body;
+
+      if (!header || !lines) {
+        return res.status(400).json({ error: "Header and lines are required" });
+      }
+
+      const createdPo = await storage.createAmazonPo(header, lines);
+      res.status(201).json(createdPo);
+    } catch (error) {
+      console.error("Error creating Amazon PO:", error);
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to create Amazon PO" });
+    }
+  });
+
+  app.put("/api/amazon-pos/:id", async (req, res) => {
+    try {
+      let id = parseInt(req.params.id);
+
+      // Check if this is a unified Amazon ID (starts with 10000000)
+      let amazonId = id;
+      if (id >= 10000000 && id < 11000000) {
+        amazonId = id - 10000000; // Convert back to original Amazon ID
+        console.log(`🔍 Amazon PUT: Detected unified ID ${id}, converting to real ID ${amazonId}`);
+      }
+
+      const { header, lines } = req.body;
+
+      const updatedPo = await storage.updateAmazonPo(amazonId, header, lines);
+      res.json(updatedPo);
+    } catch (error) {
+      console.error("Error updating Amazon PO:", error);
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to update Amazon PO" });
+    }
+  });
+
+  app.delete("/api/amazon-pos/:id", async (req, res) => {
+    try {
+      let id = parseInt(req.params.id);
+
+      // Check if this is a unified Amazon ID (starts with 10000000)
+      let amazonId = id;
+      if (id >= 10000000 && id < 11000000) {
+        amazonId = id - 10000000; // Convert back to original Amazon ID
+        console.log(`🔍 Amazon DELETE: Detected unified ID ${id}, converting to real ID ${amazonId}`);
+      }
+
+      await storage.deleteAmazonPo(amazonId);
+      res.json({ message: "Amazon PO deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting Amazon PO:", error);
+      res.status(500).json({ message: "Failed to delete Amazon PO" });
     }
   });
 
@@ -7204,12 +7768,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/users", async (req, res) => {
     try {
+      const { scrypt, randomBytes } = await import("crypto");
+      const { promisify } = await import("util");
+      const scryptAsync = promisify(scrypt);
+
+      // Hash password function
+      async function hashPassword(password: string) {
+        const salt = randomBytes(16).toString("hex");
+        const buf = (await scryptAsync(password, salt, 64)) as Buffer;
+        return `${buf.toString("hex")}.${salt}`;
+      }
+
       const userData = req.body;
+
+      // Check if username already exists
+      if (userData.username) {
+        const existingUser = await storage.getUserByUsername(userData.username);
+        if (existingUser) {
+          return res.status(400).json({ error: "Username already exists" });
+        }
+      }
+
+      // Check if email already exists
+      if (userData.email) {
+        const existingEmail = await storage.getUserByEmail(userData.email);
+        if (existingEmail) {
+          return res.status(400).json({ error: "Email already exists" });
+        }
+      }
+
+      // Hash the password before creating the user
+      if (userData.password) {
+        const hashedPassword = await hashPassword(userData.password);
+        userData.password = hashedPassword;
+        userData.password_hash = hashedPassword; // Set both fields for compatibility
+      }
+
+      // If no role_id but has role field, find matching role
+      if (!userData.role_id && userData.role) {
+        const roles = await storage.getAllRoles();
+        const matchingRole = roles.find(r =>
+          r.role_name.toLowerCase() === userData.role.toLowerCase()
+        );
+        if (matchingRole) {
+          userData.role_id = matchingRole.id;
+          console.log(`✅ Matched role "${userData.role}" to role_id: ${matchingRole.id}`);
+        }
+      }
+
+      console.log('Creating user:', userData.username, 'with role_id:', userData.role_id);
       const newUser = await storage.createUser(userData);
-      res.status(201).json(newUser);
+      console.log('User created successfully:', newUser.id, newUser.username, 'role_id:', newUser.role_id);
+
+      // Remove password from response
+      const { password, password_hash, ...userResponse } = newUser;
+      res.status(201).json(userResponse);
     } catch (error) {
       console.error("Error creating user:", error);
       res.status(500).json({ error: "Failed to create user" });
+    }
+  });
+
+  app.delete("/api/users/:id", async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      await storage.deleteUser(userId);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      res.status(500).json({ error: "Failed to delete user" });
     }
   });
 
@@ -7251,10 +7878,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const roleId = parseInt(req.params.roleId);
       const permissionId = parseInt(req.params.permissionId);
+
+      console.log(`🔐 Assigning permission ${permissionId} to role ${roleId}`);
+
+      // Get role and permission details for logging
+      const role = await storage.getRoleById(roleId);
+      const allPerms = await storage.getAllPermissions();
+      const permission = allPerms.find(p => p.id === permissionId);
+
+      if (role && permission) {
+        console.log(`   Role: ${role.role_name}, Permission: ${permission.permission_name}`);
+      }
+
       const rolePermission = await storage.assignPermissionToRole(roleId, permissionId);
+      console.log(`✅ Successfully assigned permission to role`);
+
       res.status(201).json(rolePermission);
     } catch (error) {
-      console.error("Error assigning permission to role:", error);
+      console.error("❌ Error assigning permission to role:", error);
       res.status(500).json({ error: "Failed to assign permission to role" });
     }
   });
@@ -7263,10 +7904,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const roleId = parseInt(req.params.roleId);
       const permissionId = parseInt(req.params.permissionId);
+
+      console.log(`🗑️  Removing permission ${permissionId} from role ${roleId}`);
+
+      // Get role and permission details for logging
+      const role = await storage.getRoleById(roleId);
+      const allPerms = await storage.getAllPermissions();
+      const permission = allPerms.find(p => p.id === permissionId);
+
+      if (role && permission) {
+        console.log(`   Role: ${role.role_name}, Permission: ${permission.permission_name}`);
+      }
+
       await storage.removePermissionFromRole(roleId, permissionId);
+      console.log(`✅ Successfully removed permission from role`);
+
       res.status(204).send();
     } catch (error) {
-      console.error("Error removing permission from role:", error);
+      console.error("❌ Error removing permission from role:", error);
       res.status(500).json({ error: "Failed to remove permission from role" });
     }
   });

@@ -50,6 +50,10 @@ import {
   type DealsharePoItems,
   type InsertDealsharePoHeader,
   type InsertDealsharePoItems,
+  type AmazonPoHeader,
+  type AmazonPoLines,
+  type InsertAmazonPoHeader,
+  type InsertAmazonPoLines,
   type SecondarySalesHeader,
   type SecondarySalesItems,
   type InsertSecondarySalesHeader,
@@ -140,6 +144,8 @@ import {
   zomatoPoItems,
   dealsharePoHeader,
   dealsharePoLines,
+  amazonPoHeader,
+  amazonPoLines,
   secondarySalesHeader,
   secondarySalesItems,
   zeptoAttachments,
@@ -254,9 +260,10 @@ export interface IStorage {
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: number, user: UpdateUser): Promise<User>;
+  deleteUser(id: number): Promise<void>;
   updateLastLogin(id: number): Promise<void>;
   changePassword(id: number, hashedPassword: string): Promise<void>;
-  
+
   // Platform methods
   getAllPlatforms(): Promise<PfMst[]>;
   createPlatform(platform: InsertPfMst): Promise<PfMst>;
@@ -396,6 +403,14 @@ export interface IStorage {
   createZomatoPo(header: InsertZomatoPoHeader, items: InsertZomatoPoItems[]): Promise<ZomatoPoHeader>;
   updateZomatoPo(id: number, header: Partial<InsertZomatoPoHeader>, items?: InsertZomatoPoItems[]): Promise<ZomatoPoHeader>;
   deleteZomatoPo(id: number): Promise<void>;
+
+  // Amazon PO methods
+  getAllAmazonPos(): Promise<(AmazonPoHeader & { poLines: AmazonPoLines[] })[]>;
+  getAmazonPoById(id: number): Promise<(AmazonPoHeader & { poLines: AmazonPoLines[] }) | undefined>;
+  getAmazonPoByNumber(poNumber: string): Promise<AmazonPoHeader | undefined>;
+  createAmazonPo(header: InsertAmazonPoHeader, items: InsertAmazonPoLines[]): Promise<AmazonPoHeader>;
+  updateAmazonPo(id: number, header: Partial<InsertAmazonPoHeader>, items?: InsertAmazonPoLines[]): Promise<AmazonPoHeader>;
+  deleteAmazonPo(id: number): Promise<void>;
 
   // Secondary Sales methods
   getAllSecondarySales(platform?: string, businessUnit?: string): Promise<(SecondarySalesHeader & { salesItems: SecondarySalesItems[] })[]>;
@@ -558,6 +573,12 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.id, id))
       .returning();
     return user;
+  }
+
+  async deleteUser(id: number): Promise<void> {
+    await db
+      .delete(users)
+      .where(eq(users.id, id));
   }
 
   async updateLastLogin(id: number): Promise<void> {
@@ -1094,6 +1115,91 @@ export class DatabaseStorage implements IStorage {
       console.error('❌ getAllPos: Error fetching Zomato POs:', error);
     }
 
+    // Fetch Amazon POs from amazon_po_header (original Amazon data)
+    try {
+      const amazonPos = await this.getAllAmazonPos();
+      console.log(`📊 getAllPos: Found ${amazonPos.length} Amazon POs from amazon_po_header (original data)`);
+
+      // Get Amazon platform from database
+      const amazonPlatform = await db.select().from(pfMst).where(eq(pfMst.pf_name, 'Amazon')).limit(1);
+      const amazonPlatformId = amazonPlatform[0]?.id || 10; // Fallback to 10 if not found
+      console.log(`📊 getAllPos: Amazon platform ID: ${amazonPlatformId}`);
+
+      for (const amazonPo of amazonPos) {
+        // Calculate total amount from po lines
+        const totalAmount = amazonPo.poLines?.reduce((sum, line) => {
+          const lineTotal = parseFloat(line.net_amount?.toString() || line.total_cost?.toString() || '0');
+          return sum + lineTotal;
+        }, 0) || parseFloat(amazonPo.net_amount?.toString() || amazonPo.total_amount?.toString() || '0');
+
+        // Calculate the unified ID
+        const unifiedId = 10000000 + amazonPo.id; // Amazon IDs start from 10000000 to avoid conflicts
+
+        // Map order items
+        const orderItems = amazonPo.poLines?.map((line: any, index: number) => ({
+          id: line.id,
+          po_id: unifiedId,
+          item_name: line.product_name || line.product_description || '',
+          item_code: line.sku || line.asin || '',
+          sap_code: line.sku || line.asin || '',
+          quantity: parseInt(line.quantity_ordered?.toString() || '0', 10),
+          basic_rate: line.unit_cost?.toString() || '0',
+          gst_rate: line.tax_rate?.toString() || '0',
+          landing_rate: line.net_amount?.toString() || line.unit_cost?.toString() || '0',
+          total_amount: line.net_amount?.toString() || line.total_cost?.toString() || '0',
+          status: 'Active',
+          platform_code: line.sku || line.asin || '',
+          uom: 'PCS',
+          hsn_code: '',
+          mrp: '0',
+          cost_price: parseFloat(line.unit_cost?.toString() || '0'),
+          po_line_number: line.line_number || index + 1,
+          product_description: line.product_description || line.product_name || '',
+          create_on: line.created_at || new Date(),
+          create_by: 'amazon',
+          modify_on: line.updated_at || line.created_at || new Date(),
+          modify_by: 'amazon'
+        })) || [];
+
+        // Use original Amazon data exactly as uploaded
+        const originalAmazonPo = {
+          id: unifiedId,
+          po_number: amazonPo.po_number,
+          po_date: amazonPo.po_date || new Date(),
+          order_date: amazonPo.po_date || new Date(),
+          platform: { id: amazonPlatformId, pf_name: "Amazon" },
+          vendor_name: amazonPo.vendor_name || amazonPo.buyer_name || 'Amazon',
+          buyer_name: amazonPo.buyer_name || 'Amazon',
+          status: amazonPo.status || 'Open',
+          created_at: amazonPo.created_at,
+          updated_at: amazonPo.updated_at,
+          expiry_date: amazonPo.delivery_date || null,
+          delivery_date: amazonPo.delivery_date || null,
+          shipment_date: amazonPo.shipment_date || null,
+          serving_distributor: amazonPo.vendor_name || null,
+          city: amazonPo.ship_to_location || '',
+          state: '',
+          region: '',
+          area: '',
+          ship_to_address: amazonPo.ship_to_address || '',
+          bill_to_location: amazonPo.bill_to_location || '',
+          vendor_code: amazonPo.vendor_code || '',
+          currency: amazonPo.currency || 'INR',
+          total_amount: amazonPo.net_amount?.toString() || amazonPo.total_amount?.toString() || totalAmount.toString(),
+          tax_amount: amazonPo.tax_amount?.toString() || '0',
+          shipping_cost: amazonPo.shipping_cost?.toString() || '0',
+          discount_amount: amazonPo.discount_amount?.toString() || '0',
+          net_amount: amazonPo.net_amount?.toString() || totalAmount.toString(),
+          notes: amazonPo.notes || '',
+          orderItems: orderItems
+        };
+
+        result.push(originalAmazonPo as any);
+      }
+    } catch (error) {
+      console.error('❌ getAllPos: Error fetching Amazon POs:', error);
+    }
+
     // PRIORITY 2: Fetch POs from po_master table (but exclude platform-specific tables to avoid duplicates)
     const posWithPlatforms = await db
       .select({
@@ -1321,6 +1427,54 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  // Helper function to find distributor with fuzzy matching
+  private async findDistributorByName(vendorName: string): Promise<{ id: number; distributor_name: string } | undefined> {
+    console.log(`🔍 Looking up distributor for vendor: "${vendorName}"`);
+
+    try {
+      // Try exact match first (case-insensitive)
+      let foundDistributor = await db.select().from(distributorMst)
+        .where(sql`LOWER(${distributorMst.distributor_name}) = LOWER(${vendorName})`)
+        .limit(1);
+
+      // If no exact match, try partial match using simple ILIKE
+      if (!foundDistributor || foundDistributor.length === 0) {
+        console.log(`🔍 Trying partial match for: "${vendorName}"`);
+
+        // Try: distributor_name contains vendor name
+        foundDistributor = await db.select().from(distributorMst)
+          .where(sql`${distributorMst.distributor_name} ILIKE ${`%${vendorName}%`}`)
+          .limit(1);
+
+        // If still not found, try: vendor name contains distributor name
+        if (!foundDistributor || foundDistributor.length === 0) {
+          const allDists = await db.select().from(distributorMst);
+          for (const dist of allDists) {
+            if (vendorName.toLowerCase().includes(dist.distributor_name.toLowerCase())) {
+              foundDistributor = [dist];
+              console.log(`🔍 Found via reverse match: "${dist.distributor_name}" is in "${vendorName}"`);
+              break;
+            }
+          }
+        }
+      }
+
+      if (foundDistributor && foundDistributor.length > 0) {
+        console.log(`✅ Found distributor ID ${foundDistributor[0].id}: ${foundDistributor[0].distributor_name}`);
+        return {
+          id: foundDistributor[0].id,
+          distributor_name: foundDistributor[0].distributor_name
+        };
+      } else {
+        console.log(`⚠️ Distributor "${vendorName}" not found in distributors table.`);
+        return undefined;
+      }
+    } catch (error) {
+      console.error(`❌ Error finding distributor for "${vendorName}":`, error);
+      return undefined;
+    }
+  }
+
   async getPoById(id: number): Promise<(Omit<PfPo, 'platform'> & { platform: PfMst; orderItems: PfOrderItems[] }) | undefined> {
     console.log(`🔍 getPoById: Starting search for PO ${id} - prioritizing platform-specific data`);
 
@@ -1331,26 +1485,49 @@ export class DatabaseStorage implements IStorage {
       if (zeptoPo) {
         console.log(`✅ getPoById: Found Zepto PO ${id} in zepto_po_header (using original data)`);
 
+        // Get Zepto platform from database to ensure correct ID
+        const zeptoPlatform = await db.select().from(pfMst).where(eq(pfMst.pf_name, 'Zepto')).limit(1);
+        const zeptoPlatformId = zeptoPlatform[0]?.id || 3;
+
+        // Find distributor by vendor name using fuzzy matching
+        const zeptoDistributorObj = zeptoPo.vendor_name ? await this.findDistributorByName(zeptoPo.vendor_name) : undefined;
+
         // Return RAW Zepto table data PLUS frontend compatibility fields
         const rawZeptoPo = {
-          // Add platform info for frontend identification
-          platform: { id: 3, pf_name: "Zepto" },
           // All original zepto_po_header columns exactly as they are
           ...zeptoPo,
           // Frontend compatibility fields (mapped from raw data)
+          // Add platform info for frontend identification (MUST be after spread to override any existing platform field)
+          platform: { id: zeptoPlatformId, pf_name: "Zepto" },
+          distributor: zeptoDistributorObj,
           expiry_date: zeptoPo.po_expiry_date,
           city: zeptoPo.delivery_location || '',
           state: '',
           serving_distributor: zeptoPo.vendor_name,
           // Convert poLines to exact zepto_po_lines column names + frontend compatibility
           orderItems: zeptoPo.poLines.map(line => ({
-            // All original zepto_po_lines columns exactly as they are
-            ...line,
             // Frontend compatibility fields (mapped from raw data)
             item_name: line.sku_desc || 'Zepto Product',
+            platform_code: line.sku_code || '',
+            sap_code: line.sku_code || '',
             quantity: line.po_qty || 0,
+            basic_rate: line.landing_cost?.toString() || '0',
+            basic_amount: parseFloat(line.landing_cost?.toString() || '0'), // Required by form validation
             landing_rate: line.landing_cost?.toString() || '0',
-            total_amount: line.total_value?.toString() || '0'
+            total_amount: line.total_value?.toString() || '0',
+            tax_percent: 0, // Required by form validation - default to 0 if not available
+            uom: 'PCS',
+            hsn_code: line.hsn_code || '',
+            // Original zepto_po_lines columns
+            id: line.id,
+            zepto_po_header_id: line.zepto_po_header_id,
+            sku_code: line.sku_code,
+            sku_desc: line.sku_desc,
+            po_qty: line.po_qty,
+            landing_cost: line.landing_cost,
+            total_value: line.total_value,
+            created_at: line.created_at,
+            updated_at: line.updated_at
           }))
         };
 
@@ -1368,24 +1545,44 @@ export class DatabaseStorage implements IStorage {
       if (blinkitPo) {
         console.log(`✅ getPoById: Found Blinkit PO ${id} in blinkit_po_header (using original data)`);
 
+        // Get Blinkit platform from database to ensure correct ID
+        const blinkitPlatform = await db.select().from(pfMst).where(eq(pfMst.pf_name, 'Blinkit')).limit(1);
+        const blinkitPlatformId = blinkitPlatform[0]?.id || 1;
+
+        // Find distributor by vendor name using fuzzy matching
+        const blinkitDistributorObj = blinkitPo.vendor_name ? await this.findDistributorByName(blinkitPo.vendor_name) : undefined;
+
         // Return RAW Blinkit table data PLUS frontend compatibility fields
         const rawBlinkitPo = {
-          // Add platform info for frontend identification
-          platform: { id: 1, pf_name: "Blinkit" },
           // All original blinkit_po_header columns exactly as they are
           ...blinkitPo,
           // Frontend compatibility fields (mapped from raw data)
+          // Add platform info for frontend identification (MUST be after spread to override any existing platform field)
+          platform: { id: blinkitPlatformId, pf_name: "Blinkit" },
+          distributor: blinkitDistributorObj,
           expiry_date: blinkitPo.po_expiry_date,
           serving_distributor: blinkitPo.vendor_name,
           // Convert poLines to exact blinkit_po_lines column names + frontend compatibility
           orderItems: blinkitPo.poLines.map(line => ({
-            // All original blinkit_po_lines columns exactly as they are
-            ...line,
             // Frontend compatibility fields (mapped from raw data)
             item_name: line.product_description || 'Blinkit Product',
+            platform_code: line.sku_code || '',
+            sap_code: line.sku_code || '',
             quantity: line.quantity || 0,
+            basic_rate: line.landing_rate?.toString() || '0',
+            basic_amount: parseFloat(line.landing_rate?.toString() || '0'), // Required by form validation
             landing_rate: line.landing_rate?.toString() || '0',
-            total_amount: line.total_amount?.toString() || '0'
+            total_amount: line.total_amount?.toString() || '0',
+            tax_percent: 0, // Required by form validation - default to 0 if not available
+            uom: 'PCS',
+            hsn_code: line.hsn_code || '',
+            // Original blinkit_po_lines columns
+            id: line.id,
+            blinkit_po_header_id: line.blinkit_po_header_id,
+            sku_code: line.sku_code,
+            product_description: line.product_description,
+            created_at: line.created_at,
+            updated_at: line.updated_at
           }))
         };
 
@@ -1402,34 +1599,51 @@ export class DatabaseStorage implements IStorage {
       if (swiggyPo) {
         console.log(`✅ getPoById: Found Swiggy PO ${id} in swiggy_pos (using original data)`);
 
+        // Get Swiggy platform from database to ensure correct ID
+        const swiggyPlatform = await db.select().from(pfMst).where(eq(pfMst.pf_name, 'Swiggy')).limit(1);
+        const swiggyPlatformId = swiggyPlatform[0]?.id || 4;
+
+        // Find distributor by vendor name using fuzzy matching
+        const distributorObj = swiggyPo.vendor_name ? await this.findDistributorByName(swiggyPo.vendor_name) : undefined;
+
         // Return RAW Swiggy table data PLUS frontend compatibility fields
         const rawSwiggyPo = {
-          // Add platform info for frontend identification
-          platform: { id: 4, pf_name: "Swiggy" },
           // All original swiggy_pos columns exactly as they are
           ...swiggyPo,
           // Frontend compatibility fields (mapped from raw data)
+          // Add platform info for frontend identification (MUST be after spread to override any existing platform field)
+          platform: { id: swiggyPlatformId, pf_name: "Swiggy" },
+          distributor: distributorObj,
           expiry_date: swiggyPo.po_expiry_date,
           city: '',
           state: '',
           serving_distributor: swiggyPo.vendor_name,
           // Convert poLines to exact swiggy_po_lines column names + frontend compatibility
           orderItems: swiggyPo.poLines.map(line => ({
-            // All original swiggy_po_lines columns exactly as they are
-            ...line,
             // Frontend compatibility fields (mapped from raw data)
             item_name: line.item_description || 'Swiggy Product',
             product_description: line.item_description,
+            platform_code: line.item_code || '',
+            sap_code: line.item_code || '',
             quantity: line.quantity || 0,
             basic_rate: line.unit_base_cost?.toString() || '0',
+            basic_amount: parseFloat(line.unit_base_cost?.toString() || '0'), // Required by form validation
             landing_rate: line.unit_base_cost?.toString() || '0',
             total_amount: line.line_total?.toString() || '0',
             tax_amount: line.total_tax_amount?.toString() || '0',
+            tax_percent: 0, // Required by form validation - default to 0 if not available
             mrp: line.mrp?.toString() || '0',
-            hsn_code: line.hsn_code,
-            platform_code: line.item_code,
-            sap_code: line.item_code,
-            uom: 'PCS'
+            hsn_code: line.hsn_code || '',
+            uom: 'PCS',
+            // Original swiggy_po_lines columns
+            id: line.id,
+            swiggy_po_id: line.swiggy_po_id,
+            item_code: line.item_code,
+            unit_base_cost: line.unit_base_cost,
+            line_total: line.line_total,
+            total_tax_amount: line.total_tax_amount,
+            created_at: line.created_at,
+            updated_at: line.updated_at
           }))
         };
 
@@ -1447,13 +1661,21 @@ export class DatabaseStorage implements IStorage {
       if (flipkartPo) {
         console.log(`✅ getPoById: Found Flipkart PO ${id} in flipkart_grocery_po_header (using original data)`);
 
+        // Get Flipkart platform from database to ensure correct ID
+        const flipkartPlatform = await db.select().from(pfMst).where(eq(pfMst.pf_name, 'Flipkart')).limit(1);
+        const flipkartPlatformId = flipkartPlatform[0]?.id || 5;
+
+        // Find distributor by supplier name using fuzzy matching
+        const flipkartDistributorObj = flipkartPo.supplier_name ? await this.findDistributorByName(flipkartPo.supplier_name) : undefined;
+
         // Return RAW Flipkart table data PLUS frontend compatibility fields
         const rawFlipkartPo = {
-          // Add platform info for frontend identification
-          platform: { id: 2, pf_name: "Flipkart" },
           // All original flipkart_grocery_po_header columns exactly as they are
           ...flipkartPo,
           // Frontend compatibility fields (mapped from raw data)
+          // Add platform info for frontend identification (MUST be after spread to override any existing platform field)
+          platform: { id: flipkartPlatformId, pf_name: "Flipkart" },
+          distributor: flipkartDistributorObj,
           po_date: flipkartPo.order_date || flipkartPo.created_at,
           order_date: flipkartPo.order_date || flipkartPo.created_at,
           expiry_date: flipkartPo.expiry_date,
@@ -1463,20 +1685,30 @@ export class DatabaseStorage implements IStorage {
           vendor_name: flipkartPo.supplier_name || '',
           // Convert poLines to exact flipkart_grocery_po_lines column names + frontend compatibility
           orderItems: flipkartPo.poLines.map(line => ({
-            // All original flipkart_grocery_po_lines columns exactly as they are
-            ...line,
             // Frontend compatibility fields (mapped from raw data)
             item_name: line.title || 'Flipkart Product',
             product_description: line.title,
+            platform_code: line.fsn_isbn || line.ean || '',
+            sap_code: line.ean || '',
             quantity: line.quantity || 0,
             basic_rate: line.supplier_price?.toString() || '0',
+            basic_amount: parseFloat(line.supplier_price?.toString() || '0'), // Required by form validation
             landing_rate: line.supplier_price?.toString() || '0',
             total_amount: line.total_amount?.toString() || '0',
+            tax_percent: 0, // Required by form validation - default to 0 if not available
             mrp: line.supplier_mrp?.toString() || '0',
-            hsn_code: line.hsn_code,
-            platform_code: line.fsn_isbn || line.ean,
-            sap_code: line.ean,
-            uom: 'PCS'
+            hsn_code: line.hsn_code || '',
+            uom: 'PCS',
+            // Original flipkart_grocery_po_lines columns
+            id: line.id,
+            flipkart_grocery_po_header_id: line.flipkart_grocery_po_header_id,
+            fsn_isbn: line.fsn_isbn,
+            ean: line.ean,
+            title: line.title,
+            supplier_price: line.supplier_price,
+            supplier_mrp: line.supplier_mrp,
+            created_at: line.created_at,
+            updated_at: line.updated_at
           }))
         };
 
@@ -1501,13 +1733,21 @@ export class DatabaseStorage implements IStorage {
       if (bigbasketPo) {
         console.log(`✅ getPoById: Found BigBasket PO ${id} in bigbasket_po_header (using original data)`);
 
+        // Get BigBasket platform from database to ensure correct ID
+        const bigbasketPlatform = await db.select().from(pfMst).where(eq(pfMst.pf_name, 'BigBasket')).limit(1);
+        const bigbasketPlatformId = bigbasketPlatform[0]?.id || 12;
+
+        // Find distributor by supplier name using fuzzy matching
+        const bigbasketDistributorObj = bigbasketPo.supplier_name ? await this.findDistributorByName(bigbasketPo.supplier_name) : undefined;
+
         // Return RAW BigBasket table data PLUS frontend compatibility fields
         const rawBigBasketPo = {
-          // Add platform info for frontend identification
-          platform: { id: 12, pf_name: "BigBasket" },
           // All original bigbasket_po_header columns exactly as they are
           ...bigbasketPo,
           // Frontend compatibility fields (mapped from raw data)
+          // Add platform info for frontend identification (MUST be after spread to override any existing platform field)
+          platform: { id: bigbasketPlatformId, pf_name: "BigBasket" },
+          distributor: bigbasketDistributorObj,
           po_date: bigbasketPo.po_date,
           order_date: bigbasketPo.po_date,
           expiry_date: bigbasketPo.po_expiry_date,
@@ -1518,20 +1758,29 @@ export class DatabaseStorage implements IStorage {
           total_amount: bigbasketPo.grand_total?.toString() || '0',
           // Convert poLines to exact bigbasket_po_lines column names + frontend compatibility
           orderItems: bigbasketPo.poLines.map(line => ({
-            // All original bigbasket_po_lines columns exactly as they are
-            ...line,
             // Frontend compatibility fields (mapped from raw data)
             item_name: line.product_name || 'BigBasket Product',
             product_description: line.product_name,
+            platform_code: line.sku_code || '',
+            sap_code: line.sku_code || '',
             quantity: line.order_quantity || 0,
             basic_rate: line.purchase_rate?.toString() || '0',
+            basic_amount: parseFloat(line.purchase_rate?.toString() || '0'), // Required by form validation
             landing_rate: line.purchase_rate?.toString() || '0',
             total_amount: line.total_amount?.toString() || '0',
+            tax_percent: 0, // Required by form validation - default to 0 if not available
             mrp: line.mrp?.toString() || '0',
-            hsn_code: line.hsn_code,
-            platform_code: line.sku_code,
-            sap_code: line.sku_code,
-            uom: 'PCS'
+            hsn_code: line.hsn_code || '',
+            uom: 'PCS',
+            // Original bigbasket_po_lines columns
+            id: line.id,
+            bigbasket_po_header_id: line.bigbasket_po_header_id,
+            sku_code: line.sku_code,
+            product_name: line.product_name,
+            order_quantity: line.order_quantity,
+            purchase_rate: line.purchase_rate,
+            created_at: line.created_at,
+            updated_at: line.updated_at
           }))
         };
 
@@ -1556,38 +1805,52 @@ export class DatabaseStorage implements IStorage {
       if (cityMallPo) {
         console.log(`✅ getPoById: Found CityMall PO ${id} in city_mall_po_header (using original data)`);
 
+        // Get CityMall platform from database to ensure correct ID
+        const cityMallPlatform = await db.select().from(pfMst).where(eq(pfMst.pf_name, 'CityMall')).limit(1);
+        const cityMallPlatformId = cityMallPlatform[0]?.id || 7;
+
+        // Find distributor by vendor name using fuzzy matching
+        const cityMallDistributorObj = cityMallPo.vendor_name ? await this.findDistributorByName(cityMallPo.vendor_name) : undefined;
+
         // Return RAW CityMall table data PLUS frontend compatibility fields
         const rawCityMallPo = {
-          // Add platform info for frontend identification
-          platform: { id: 7, pf_name: "CityMall" },
           // All original city_mall_po_header columns exactly as they are
           ...cityMallPo,
           // Frontend compatibility fields (mapped from raw data)
+          // Add platform info for frontend identification (MUST be after spread to override any existing platform field)
+          platform: { id: cityMallPlatformId, pf_name: "CityMall" },
+          distributor: cityMallDistributorObj,
           order_date: cityMallPo.po_date,
           expiry_date: cityMallPo.po_expiry_date,
           city: '',
           state: '',
-          serving_distributor: cityMallPo.vendor_name || '',
+          serving_distributor: '',
           // Convert poLines to exact city_mall_po_lines column names + frontend compatibility
           orderItems: cityMallPo.poLines.map(line => ({
-            // All original city_mall_po_lines columns exactly as they are
-            ...line,
             // Frontend compatibility fields (mapped from raw data)
             item_name: line.article_name || 'CityMall Product',
             product_description: line.article_name,
+            platform_code: line.article_id || '',
+            sap_code: line.article_id || '',
             quantity: line.quantity || 0,
             basic_rate: line.base_cost_price?.toString() || '0',
             landing_rate: line.base_cost_price?.toString() || '0',
             total_amount: line.total_amount?.toString() || '0',
             mrp: line.mrp?.toString() || '0',
-            hsn_code: line.hsn_code,
-            platform_code: line.article_id,
-            sap_code: line.article_id,
+            hsn_code: line.hsn_code || '',
             uom: 'PCS',
             igst_percent: line.igst_percent,
             cess_percent: line.cess_percent,
             igst_amount: line.igst_amount?.toString() || '0',
-            cess_amount: line.cess_amount?.toString() || '0'
+            cess_amount: line.cess_amount?.toString() || '0',
+            // Original city_mall_po_lines columns
+            id: line.id,
+            city_mall_po_header_id: line.city_mall_po_header_id,
+            article_id: line.article_id,
+            article_name: line.article_name,
+            base_cost_price: line.base_cost_price,
+            created_at: line.created_at,
+            updated_at: line.updated_at
           }))
         };
 
@@ -1612,13 +1875,21 @@ export class DatabaseStorage implements IStorage {
       if (dealsharePo) {
         console.log(`✅ getPoById: Found Dealshare PO ${id} in dealshare_po_header (using original data)`);
 
+        // Get Dealshare platform from database to ensure correct ID
+        const dealsharePlatform = await db.select().from(pfMst).where(eq(pfMst.pf_name, 'Dealshare')).limit(1);
+        const dealsharePlatformId = dealsharePlatform[0]?.id || 8;
+
+        // Find distributor by shipped_by name using fuzzy matching
+        const dealshareDistributorObj = dealsharePo.shipped_by ? await this.findDistributorByName(dealsharePo.shipped_by) : undefined;
+
         // Return RAW Dealshare table data PLUS frontend compatibility fields
         const rawDealsharePo = {
-          // Add platform info for frontend identification
-          platform: { id: 8, pf_name: "Dealshare" },
           // All original dealshare_po_header columns exactly as they are
           ...dealsharePo,
           // Frontend compatibility fields (mapped from raw data)
+          // Add platform info for frontend identification (MUST be after spread to override any existing platform field)
+          platform: { id: dealsharePlatformId, pf_name: "Dealshare" },
+          distributor: dealshareDistributorObj,
           po_date: dealsharePo.po_created_date,
           order_date: dealsharePo.po_created_date,
           expiry_date: dealsharePo.po_expiry_date,
@@ -1629,23 +1900,35 @@ export class DatabaseStorage implements IStorage {
           total_amount: dealsharePo.total_gross_amount?.toString() || '0',
           // Convert poItems to orderItems for frontend compatibility
           orderItems: dealsharePo.poItems.map(line => ({
-            // All original dealshare_po_lines columns exactly as they are
-            ...line,
             // Frontend compatibility fields (mapped from raw data)
             item_name: line.product_name || 'Dealshare Product',
             product_description: line.product_name,
             item_code: line.sku || '',
-            quantity: line.quantity || 0,
-            basic_rate: line.buying_price?.toString() || '0',
-            landing_rate: line.buying_price?.toString() || '0',
-            total_amount: line.gross_amount?.toString() || '0',
-            hsn_code: line.hsn_code || '',
-            mrp: line.mrp_tax_inclusive?.toString() || '0',
             platform_code: line.sku || '',
             sap_code: line.sku || '',
+            quantity: line.quantity || 0,
+            basic_rate: line.buying_price?.toString() || '0',
+            basic_amount: parseFloat(line.buying_price?.toString() || '0'), // Required by form validation
+            landing_rate: line.buying_price?.toString() || '0',
+            total_amount: line.gross_amount?.toString() || '0',
+            tax_percent: parseFloat(line.gst_percent?.toString() || '0'), // Use actual GST if available
+            hsn_code: line.hsn_code || '',
+            mrp: line.mrp_tax_inclusive?.toString() || '0',
             uom: 'PCS',
             gst_rate: line.gst_percent?.toString() || '0',
-            cess_rate: line.cess_percent?.toString() || '0'
+            cess_rate: line.cess_percent?.toString() || '0',
+            // Original dealshare_po_lines columns
+            id: line.id,
+            dealshare_po_header_id: line.dealshare_po_header_id,
+            sku: line.sku,
+            product_name: line.product_name,
+            buying_price: line.buying_price,
+            gross_amount: line.gross_amount,
+            gst_percent: line.gst_percent,
+            cess_percent: line.cess_percent,
+            mrp_tax_inclusive: line.mrp_tax_inclusive,
+            created_at: line.created_at,
+            updated_at: line.updated_at
           }))
         };
 
@@ -1670,6 +1953,10 @@ export class DatabaseStorage implements IStorage {
       if (zomatoPo) {
         console.log(`✅ getPoById: Found Zomato PO ${id} in zomato_po_header (using original data)`);
 
+        // Find distributor by bill_from_name using fuzzy matching
+        const vendorName = zomatoPo.bill_from_name || 'KNOWTABLE ONLINE SERVICES PRIVATE LIMITED';
+        const zomatoDistributorObj = await this.findDistributorByName(vendorName);
+
         // Return RAW Zomato table data PLUS frontend compatibility fields
         const rawZomatoPo = {
           // Add platform info for frontend identification
@@ -1682,7 +1969,8 @@ export class DatabaseStorage implements IStorage {
           created_at: zomatoPo.created_at,
           updated_at: zomatoPo.updated_at,
           expiry_date: zomatoPo.expected_delivery_date || null,
-          vendor_name: zomatoPo.bill_from_name || 'KNOWTABLE ONLINE SERVICES PRIVATE LIMITED',
+          vendor_name: vendorName,
+          distributor: zomatoDistributorObj,
           buyer_name: zomatoPo.ship_to_name || 'Zomato Hyperpure Private Limited',
           vendor_address: zomatoPo.bill_from_address || '',
           buyer_address: zomatoPo.bill_to_address || '',
@@ -1693,7 +1981,7 @@ export class DatabaseStorage implements IStorage {
           total_quantity: zomatoPo.total_quantity?.toString() || '0',
           city: 'Mumbai',
           state: 'Maharashtra',
-          serving_distributor: null,
+          serving_distributor: '',
           region: '',
           area: '',
           appointment_date: null,
@@ -1706,7 +1994,9 @@ export class DatabaseStorage implements IStorage {
             sap_code: line.product_number || '',
             quantity: parseInt(line.quantity_ordered?.toString() || '1', 10),
             basic_rate: line.price_per_unit?.toString() || '0',
+            basic_amount: parseFloat(line.price_per_unit?.toString() || '0'), // Required by form validation
             gst_rate: line.gst_rate?.toString() || '0',
+            tax_percent: parseFloat(line.gst_rate?.toString() || '0'), // Use actual GST if available
             landing_rate: line.total_amount?.toString() || line.line_total?.toString() || '0',
             total_amount: line.total_amount?.toString() || line.line_total?.toString() || '0',
             status: 'active',
@@ -1729,7 +2019,170 @@ export class DatabaseStorage implements IStorage {
       console.error(`❌ getPoById: Error checking Zomato tables for PO ${id}:`, error);
     }
 
-    // PRIORITY 9: Check po_master table (unified POs)
+    // PRIORITY 9: Check Amazon-specific tables (original data)
+    console.log(`🔍 getPoById: Checking Amazon tables for PO ${id}...`);
+    try {
+      // Check if this is an Amazon ID (starts with 10000000)
+      let amazonId = id;
+      if (id >= 10000000 && id < 11000000) {
+        amazonId = id - 10000000; // Convert back to original Amazon ID
+        console.log(`🔍 getPoById: Detected Amazon ID mapping ${id} -> ${amazonId}`);
+      }
+
+      console.log(`🔍 getPoById: Attempting to fetch Amazon PO with ID ${amazonId}...`);
+      const amazonPo = await this.getAmazonPoById(amazonId);
+      console.log(`🔍 getPoById: Amazon PO fetch result:`, amazonPo ? 'Found' : 'Not found');
+
+      if (amazonPo) {
+        console.log(`✅ getPoById: Found Amazon PO ${id} in amazon_po_header (using original data)`);
+
+        // Get Amazon platform from database
+        const amazonPlatform = await db.select().from(pfMst).where(eq(pfMst.pf_name, 'Amazon')).limit(1);
+        const amazonPlatformId = amazonPlatform[0]?.id || 10;
+
+        // Calculate total amount from po lines
+        const totalAmount = amazonPo.poLines?.reduce((sum, line) => {
+          const lineTotal = parseFloat(line.net_amount?.toString() || line.total_cost?.toString() || '0');
+          return sum + lineTotal;
+        }, 0) || parseFloat(amazonPo.net_amount?.toString() || amazonPo.total_amount?.toString() || '0');
+
+        // Return RAW Amazon table data PLUS frontend compatibility fields
+        const rawAmazonPo = {
+          // Add platform info for frontend identification
+          platform: { id: amazonPlatformId, pf_name: "Amazon" },
+          id: id, // Use the unified ID for consistency
+          po_number: amazonPo.po_number,
+          po_date: amazonPo.po_date || new Date(),
+          order_date: amazonPo.po_date || new Date(),
+          status: amazonPo.status || 'Open',
+          created_at: amazonPo.created_at,
+          updated_at: amazonPo.updated_at,
+          expiry_date: amazonPo.delivery_date || null,
+          delivery_date: amazonPo.delivery_date || null,
+          shipment_date: amazonPo.shipment_date || null,
+          vendor_name: amazonPo.vendor_name || amazonPo.buyer_name || 'Amazon',
+          buyer_name: amazonPo.buyer_name || 'Amazon',
+          vendor_code: amazonPo.vendor_code || '',
+          serving_distributor: amazonPo.vendor_name || null,
+          city: amazonPo.ship_to_location || '',
+          state: '',
+          region: '',
+          area: '',
+          ship_to_address: amazonPo.ship_to_address || '',
+          ship_to_location: amazonPo.ship_to_location || '',
+          bill_to_location: amazonPo.bill_to_location || '',
+          currency: amazonPo.currency || 'INR',
+          total_amount: amazonPo.net_amount?.toString() || amazonPo.total_amount?.toString() || totalAmount.toString(),
+          tax_amount: amazonPo.tax_amount?.toString() || '0',
+          shipping_cost: amazonPo.shipping_cost?.toString() || '0',
+          discount_amount: amazonPo.discount_amount?.toString() || '0',
+          net_amount: amazonPo.net_amount?.toString() || totalAmount.toString(),
+          notes: amazonPo.notes || '',
+          orderItems: await Promise.all(amazonPo.poLines?.map(async (line: any, index: number) => {
+            // Enrich item data by looking up in pf_item_mst and items tables
+            let enrichedData = {
+              item_name: line.product_name || line.product_description || '',
+              basic_rate: line.unit_cost?.toString() || '0',
+              basic_amount: parseFloat(line.unit_cost?.toString() || '0'),
+              tax_percent: parseFloat(line.tax_rate?.toString() || '0'),
+              landing_rate: line.net_amount?.toString() || line.unit_cost?.toString() || '0',
+              mrp: '0',
+              uom: 'PCS',
+              hsn_code: ''
+            };
+
+            try {
+              // Look up ASIN in pf_item_mst to get sap_id
+              const asin = line.asin || line.sku || '';
+              if (asin) {
+                const pfItem = await db.select()
+                  .from(pfItemMst)
+                  .where(eq(pfItemMst.pf_itemcode, asin))
+                  .limit(1);
+
+                if (pfItem && pfItem.length > 0) {
+                  const sapId = pfItem[0].sap_id;
+                  console.log(`🔍 Found pf_item_mst for ASIN ${asin}, sap_id: ${sapId}`);
+
+                  // Look up sap_id in items table to get enriched data
+                  const itemData = await db.select()
+                    .from(items)
+                    .where(eq(items.itemcode, sapId))
+                    .limit(1);
+
+                  if (itemData && itemData.length > 0) {
+                    const item = itemData[0];
+                    console.log(`✅ Enriched item data for ${asin}:`, item.itemname);
+
+                    enrichedData = {
+                      item_name: item.itemname || enrichedData.item_name,
+                      basic_rate: item.basic_rate?.toString() || item.landing_rate?.toString() || enrichedData.basic_rate,
+                      basic_amount: parseFloat(item.basic_rate?.toString() || item.landing_rate?.toString() || enrichedData.basic_rate),
+                      tax_percent: parseFloat(item.taxrate?.toString() || enrichedData.tax_percent.toString()),
+                      landing_rate: item.landing_rate?.toString() || enrichedData.landing_rate,
+                      mrp: item.mrp?.toString() || enrichedData.mrp,
+                      uom: item.uom || enrichedData.uom,
+                      hsn_code: enrichedData.hsn_code // HSN not in items table
+                    };
+                  }
+                }
+              }
+            } catch (lookupError) {
+              console.error(`❌ Error enriching item data for ASIN ${line.asin}:`, lookupError);
+              // Continue with original data if lookup fails
+            }
+
+            return {
+              id: line.id,
+              po_id: id, // Use the unified ID
+              item_name: enrichedData.item_name,
+              item_code: line.sku || line.asin || '',
+              sap_code: line.sku || line.asin || '',
+              product_description: line.product_description || line.product_name || '',
+              quantity: parseInt(line.quantity_ordered?.toString() || '0', 10),
+              basic_rate: enrichedData.basic_rate,
+              basic_amount: enrichedData.basic_amount, // Required by form validation
+              gst_rate: line.tax_rate?.toString() || '0',
+              tax_percent: enrichedData.tax_percent, // Use enriched or actual tax rate
+              landing_rate: enrichedData.landing_rate,
+              total_amount: line.net_amount?.toString() || line.total_cost?.toString() || '0',
+            total_cost: line.total_cost?.toString() || '0',
+            net_amount: line.net_amount?.toString() || '0',
+            unit_cost: line.unit_cost?.toString() || '0',
+            tax_rate: line.tax_rate?.toString() || '0',
+            tax_amount: line.tax_amount?.toString() || '0',
+            discount_percent: line.discount_percent?.toString() || '0',
+            discount_amount: line.discount_amount?.toString() || '0',
+            status: 'Active',
+            platform_code: line.sku || line.asin || '',
+            asin: line.asin || '',
+            sku: line.sku || '',
+            category: line.category || '',
+            brand: line.brand || '',
+            uom: enrichedData.uom,
+            hsn_code: enrichedData.hsn_code,
+            mrp: enrichedData.mrp,
+            cost_price: parseFloat(line.unit_cost?.toString() || '0'),
+            po_line_number: line.line_number || index + 1,
+            line_number: line.line_number || index + 1,
+            supplier_reference: line.supplier_reference || '',
+            expected_delivery_date: line.expected_delivery_date || null,
+            create_on: line.created_at || new Date(),
+            create_by: 'amazon',
+            modify_on: line.updated_at || line.created_at || new Date(),
+            modify_by: 'amazon'
+          };
+        }) || [])
+        };
+
+        console.log(`✅ getPoById: Returning RAW Amazon PO ${id} with ${rawAmazonPo.orderItems.length} items`);
+        return rawAmazonPo as any;
+      }
+    } catch (error) {
+      console.error(`❌ getPoById: Error checking Amazon tables for PO ${id}:`, error);
+    }
+
+    // PRIORITY 10: Check po_master table (unified POs)
     const masterPoResult = await db
       .select({
         master: poMaster,
@@ -2259,19 +2712,16 @@ export class DatabaseStorage implements IStorage {
     }
     
     // Get associated po lines with product and tax rate information
+    // Note: Removed items join due to database schema mismatch - items table doesn't have id column in physical database
     const linesWithProducts = await db
       .select({
         line: poLines,
         product: pfItemMst,
-        sapItem: {
-          itemcode: items.itemcode,
-          itemname: items.itemname,
-          taxrate: items.taxrate  // Explicitly select the tax rate field (maps to u_tax_rate column)
-        }
+        sapItem: sql`NULL`.as('sapItem')  // Temporarily disabled due to schema issues
       })
       .from(poLines)
       .leftJoin(pfItemMst, eq(poLines.platform_product_code_id, pfItemMst.id))
-      .leftJoin(items, eq(pfItemMst.sap_id, items.itemcode))
+      // .leftJoin(items, eq(pfItemMst.sap_id, items.itemcode))  // Disabled: causes "items.id does not exist" error
       .where(eq(poLines.po_id, id))
       .orderBy(poLines.id);
       
@@ -3337,7 +3787,16 @@ export class DatabaseStorage implements IStorage {
 
   // Distributor methods
   async getAllDistributors(): Promise<DistributorMst[]> {
-    return await db.select().from(distributorMst).where(eq(distributorMst.status, 'Active')).orderBy(distributorMst.distributor_name);
+    console.log('🔍 getAllDistributors: Fetching from distributor_mst table...');
+
+    try {
+      const result = await db.select().from(distributorMst).orderBy(distributorMst.distributor_name);
+      console.log(`✅ getAllDistributors: Found ${result.length} distributors:`, result.map(d => d.distributor_name));
+      return result;
+    } catch (error) {
+      console.error('❌ getAllDistributors: Error fetching distributors:', error);
+      throw error;
+    }
   }
 
   async getDistributorById(id: number): Promise<DistributorMst | undefined> {
@@ -3347,10 +3806,7 @@ export class DatabaseStorage implements IStorage {
 
   async getDistributorByName(name: string): Promise<DistributorMst | undefined> {
     const [distributor] = await db.select().from(distributorMst)
-      .where(and(
-        eq(distributorMst.distributor_name, name),
-        eq(distributorMst.status, 'Active')
-      ));
+      .where(eq(distributorMst.distributor_name, name));
     return distributor || undefined;
   }
 
@@ -4552,6 +5008,97 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
+  // Amazon PO methods
+  async getAllAmazonPos(): Promise<(AmazonPoHeader & { poLines: AmazonPoLines[] })[]> {
+    const pos = await db.select().from(amazonPoHeader).orderBy(desc(amazonPoHeader.created_at));
+    console.log(`🔍 getAllAmazonPos: Found ${pos.length} Amazon PO headers in database`);
+
+    const result = [];
+    for (const po of pos) {
+      const poLines = await db.select().from(amazonPoLines).where(eq(amazonPoLines.po_header_id, po.id));
+      result.push({
+        ...po,
+        poLines
+      });
+    }
+
+    return result;
+  }
+
+  async getAmazonPoById(id: number): Promise<(AmazonPoHeader & { poLines: AmazonPoLines[] }) | undefined> {
+    const [po] = await db.select().from(amazonPoHeader).where(eq(amazonPoHeader.id, id));
+
+    if (!po) {
+      return undefined;
+    }
+
+    const poLines = await db.select().from(amazonPoLines).where(eq(amazonPoLines.po_header_id, po.id));
+
+    return {
+      ...po,
+      poLines
+    };
+  }
+
+  async getAmazonPoByNumber(poNumber: string): Promise<AmazonPoHeader | undefined> {
+    const [po] = await db.select().from(amazonPoHeader).where(eq(amazonPoHeader.po_number, poNumber));
+    return po || undefined;
+  }
+
+  async createAmazonPo(header: InsertAmazonPoHeader, items: InsertAmazonPoLines[]): Promise<AmazonPoHeader> {
+    return await db.transaction(async (tx) => {
+      console.log('🔍 Amazon: About to insert into amazon_po_header table');
+      console.log('🔍 Amazon: Header data:', JSON.stringify(header, null, 2));
+
+      const [insertedHeader] = await tx.insert(amazonPoHeader).values(header).returning();
+      console.log('✅ Amazon: Successfully inserted header:', insertedHeader);
+
+      if (items && items.length > 0) {
+        const itemsWithHeaderId = items.map(item => ({
+          ...item,
+          po_header_id: insertedHeader.id
+        }));
+
+        console.log(`🔍 Amazon: About to insert ${itemsWithHeaderId.length} line items`);
+        await tx.insert(amazonPoLines).values(itemsWithHeaderId);
+        console.log('✅ Amazon: Successfully inserted line items');
+      }
+
+      return insertedHeader;
+    });
+  }
+
+  async updateAmazonPo(id: number, header: Partial<InsertAmazonPoHeader>, items?: InsertAmazonPoLines[]): Promise<AmazonPoHeader> {
+    return await db.transaction(async (tx) => {
+      const [updatedHeader] = await tx
+        .update(amazonPoHeader)
+        .set({ ...header, updated_at: new Date() })
+        .where(eq(amazonPoHeader.id, id))
+        .returning();
+
+      if (items) {
+        await tx.delete(amazonPoLines).where(eq(amazonPoLines.po_header_id, id));
+
+        if (items.length > 0) {
+          const itemsWithHeaderId = items.map(item => ({
+            ...item,
+            po_header_id: id
+          }));
+          await tx.insert(amazonPoLines).values(itemsWithHeaderId);
+        }
+      }
+
+      return updatedHeader;
+    });
+  }
+
+  async deleteAmazonPo(id: number): Promise<void> {
+    await db.transaction(async (tx) => {
+      await tx.delete(amazonPoLines).where(eq(amazonPoLines.po_header_id, id));
+      await tx.delete(amazonPoHeader).where(eq(amazonPoHeader.id, id));
+    });
+  }
+
   // Dealshare PO methods
   async getAllDealsharePos(): Promise<(DealsharePoHeader & { poItems: DealsharePoItems[] })[]> {
     const pos = await db.select().from(dealsharePoHeader).orderBy(desc(dealsharePoHeader.created_at));
@@ -5041,6 +5588,131 @@ export class DatabaseStorage implements IStorage {
   // Method to update PO in existing po_master and po_lines tables
   async updatePoInExistingTables(poId: number, masterData: any, linesData: any[]): Promise<any> {
     return await db.transaction(async (tx) => {
+      // First check if PO exists in po_master
+      console.log(`🔍 Checking if PO ${poId} exists in po_master...`);
+      const existingPo = await tx.select().from(poMaster).where(eq(poMaster.id, poId)).limit(1);
+
+      // If PO doesn't exist in po_master, INSERT it (first-time edit of platform-specific PO)
+      if (!existingPo || existingPo.length === 0) {
+        console.log(`📝 PO ${poId} not found in po_master, performing INSERT...`);
+
+        // Find distributor ID by name if serving_distributor is provided
+        let distributorId = 1; // Default distributor ID
+        if (masterData.serving_distributor) {
+          try {
+            const distributor = await tx
+              .select({ id: distributorMst.id })
+              .from(distributorMst)
+              .where(eq(distributorMst.distributor_name, masterData.serving_distributor))
+              .limit(1);
+
+            if (distributor.length > 0) {
+              distributorId = distributor[0].id;
+              console.log(`🔍 Found distributor ID ${distributorId} for name "${masterData.serving_distributor}"`);
+            }
+          } catch (error) {
+            console.error("Error looking up distributor:", error);
+          }
+        }
+
+        // Insert new record with the platform-specific ID
+        const insertValues: any = {
+          id: poId, // Use the platform-specific ID
+          platform_id: masterData.platform_id || 1, // Default to platform 1 if missing
+          vendor_po_number: masterData.po_number || `PO-${poId}`,
+          distributor_id: distributorId || 1, // Ensure we have a distributor
+          series: "PO",
+          company_id: 6,
+          po_date: masterData.po_date ? new Date(masterData.po_date) : new Date(),
+          status_id: masterData.status_id || 1,
+          region: masterData.region || null,
+          area: masterData.area || null,
+          state_id: masterData.state_id || null,
+          district_id: masterData.district_id || null,
+          dispatch_from: masterData.dispatch_from || null,
+          ware_house: masterData.warehouse || null,
+          appointment_date: masterData.appointment_date ? new Date(masterData.appointment_date) : null,
+          expiry_date: masterData.expiry_date ? new Date(masterData.expiry_date) : null,
+          created_by: null,
+          create_on: new Date(), // Add create_on which is required
+          updated_on: new Date()
+        };
+
+        console.log(`📝 Prepared insertValues:`, JSON.stringify(insertValues, null, 2));
+
+        console.log(`📝 Inserting into po_master with ID ${poId}:`, insertValues);
+
+        let createdMaster;
+        try {
+          [createdMaster] = await tx.insert(poMaster).values(insertValues).returning();
+          console.log(`✅ Successfully inserted po_master record with ID ${poId}`);
+        } catch (insertError: any) {
+          console.error(`❌ Error inserting into po_master:`, insertError);
+          console.error(`❌ Error code:`, insertError?.code);
+          console.error(`❌ Error detail:`, insertError?.detail);
+
+          // If duplicate key error, this means it already exists - treat as update instead
+          if (insertError?.code === '23505' || insertError?.message?.includes('duplicate key')) {
+            console.log(`⚠️ PO ${poId} already exists in po_master (likely from race condition), switching to UPDATE`);
+            throw new Error(`PO ${poId} already exists in po_master. Please try refreshing and editing again.`);
+          }
+
+          throw insertError;
+        }
+
+        // Insert lines
+        if (linesData.length > 0) {
+          const mappedLines = [];
+
+          for (const line of linesData) {
+            let platformProductCodeId = 1;
+
+            if (line.platform_code || line.sap_code) {
+              const searchCode = line.platform_code || line.sap_code;
+              const platformItem = await tx
+                .select({ id: pfItemMst.id })
+                .from(pfItemMst)
+                .where(eq(pfItemMst.pf_itemcode, searchCode))
+                .limit(1);
+
+              if (platformItem.length > 0) {
+                platformProductCodeId = platformItem[0].id;
+              }
+            }
+
+            mappedLines.push({
+              po_id: createdMaster.id,
+              platform_product_code_id: platformProductCodeId,
+              quantity: line.quantity.toString(),
+              basic_amount: line.basic_amount.toString(),
+              tax: line.tax_percent ? (parseFloat(line.basic_amount.toString()) * parseFloat(line.tax_percent.toString()) / 100).toString() : "0",
+              landing_amount: line.landing_amount ? line.landing_amount.toString() : null,
+              total_amount: line.total_amount.toString(),
+              uom: line.uom || null,
+              total_liter: line.total_ltrs ? line.total_ltrs.toString() : null,
+              boxes: line.boxes ? Math.floor(parseFloat(line.boxes.toString())) : null,
+              invoice_date: line.invoice_date || null,
+              invoice_litre: line.invoice_litre ? line.invoice_litre.toString() : null,
+              invoice_amount: line.invoice_amount ? line.invoice_amount.toString() : null,
+              invoice_qty: line.invoice_qty ? line.invoice_qty.toString() : null,
+              remark: `${line.item_name} - Platform Code: ${line.platform_code} - SAP Code: ${line.sap_code} - Tax Rate: ${line.tax_percent || 0}%`,
+              status: this.mapItemStatusToId(line.status),
+              delete: false,
+              deleted: false
+            });
+          }
+
+          await tx.insert(poLines).values(mappedLines);
+          console.log(`✅ Inserted ${mappedLines.length} lines into po_lines for new PO ${poId}`);
+        }
+
+        console.log(`✅ Successfully INSERTED PO ${poId} into po_master and po_lines`);
+        return createdMaster;
+      }
+
+      // PO exists, proceed with UPDATE
+      console.log(`📝 PO ${poId} found in po_master, performing UPDATE...`);
+
       // Build update object with only provided fields
       const updateData: any = {
         updated_on: new Date()
@@ -5597,9 +6269,15 @@ export class DatabaseStorage implements IStorage {
 
   // Role-Permission management
   async getRolePermissions(roleId: number): Promise<RolePermission[]> {
-    return await db.select()
+    const results = await db.select()
       .from(rolePermissions)
+      .innerJoin(permissions, eq(rolePermissions.permission_id, permissions.id))
       .where(eq(rolePermissions.role_id, roleId));
+
+    return results.map(result => ({
+      ...result.role_permissions,
+      permission: result.permissions
+    })) as RolePermission[];
   }
 
   async assignPermissionToRole(roleId: number, permissionId: number): Promise<RolePermission> {
@@ -5619,14 +6297,35 @@ export class DatabaseStorage implements IStorage {
 
   async getUserPermissions(userId: number): Promise<Permission[]> {
     const user = await db.select().from(users).where(eq(users.id, userId));
-    if (!user[0] || !user[0].role_id) {
+    if (!user[0]) {
+      return [];
+    }
+
+    let roleId = user[0].role_id;
+
+    // If user doesn't have role_id but has legacy role field, try to find matching role
+    if (!roleId && user[0].role) {
+      const matchingRole = await db.select()
+        .from(roles)
+        .where(eq(roles.role_name, user[0].role));
+
+      if (matchingRole[0]) {
+        roleId = matchingRole[0].id;
+        // Update user with role_id for future queries
+        await db.update(users)
+          .set({ role_id: roleId, updated_at: new Date() })
+          .where(eq(users.id, userId));
+      }
+    }
+
+    if (!roleId) {
       return [];
     }
 
     return await db.select()
       .from(permissions)
       .innerJoin(rolePermissions, eq(permissions.id, rolePermissions.permission_id))
-      .where(eq(rolePermissions.role_id, user[0].role_id))
+      .where(eq(rolePermissions.role_id, roleId))
       .then(results => results.map(result => result.permissions));
   }
 

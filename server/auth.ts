@@ -50,21 +50,38 @@ export function setupAuth(app: Express) {
   passport.use(
     new LocalStrategy(async (username, password, done) => {
       try {
+        console.log('🔐 Login attempt for username:', username);
         const user = await storage.getUserByUsername(username);
         if (!user) {
+          console.log('❌ User not found:', username);
           return done(null, false);
         }
-        
+
+        console.log('✅ User found:', user.username, 'ID:', user.id);
+
         // Check password_hash first (for new RBAC users), then fallback to password (for legacy users)
         const passwordToCheck = user.password_hash || user.password;
-        if (!passwordToCheck || !(await comparePasswords(password, passwordToCheck))) {
+        console.log('🔑 Checking password... (hash exists:', !!passwordToCheck, ')');
+
+        if (!passwordToCheck) {
+          console.log('❌ No password hash found for user');
           return done(null, false);
         }
-        
+
+        const isPasswordValid = await comparePasswords(password, passwordToCheck);
+        console.log('🔑 Password valid:', isPasswordValid);
+
+        if (!isPasswordValid) {
+          console.log('❌ Invalid password for user:', username);
+          return done(null, false);
+        }
+
         // Update last login
         await storage.updateLastLogin(user.id);
+        console.log('✅ Login successful for user:', username);
         return done(null, user);
       } catch (error) {
+        console.error('❌ Login error:', error);
         return done(error);
       }
     }),
@@ -156,10 +173,26 @@ export function setupAuth(app: Express) {
     });
   });
 
-  // Get current user endpoint
-  app.get("/api/user", (req, res) => {
+  // Get current user endpoint with permissions
+  app.get("/api/user", async (req, res) => {
     if (!req.isAuthenticated()) return res.sendStatus(401);
-    res.json(req.user);
+
+    try {
+      // Get user permissions
+      const permissions = await storage.getUserPermissions(req.user!.id);
+      const permissionNames = permissions.map(p => p.permission_name);
+
+      // Return user with permissions
+      res.json({
+        ...req.user,
+        permissions: permissionNames,
+        permissionDetails: permissions
+      });
+    } catch (error) {
+      console.error("Error fetching user permissions:", error);
+      // Return user without permissions if there's an error
+      res.json(req.user);
+    }
   });
 
   // Update user profile endpoint

@@ -9,9 +9,13 @@ import {
   User,
   Database,
   Plus,
-  FileText
+  FileText,
+  Shield,
+  UserPlus
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permissions";
 
 type NavigationItem = {
   name: string;
@@ -20,6 +24,8 @@ type NavigationItem = {
   active: boolean;
   description?: string;
   comingSoon?: boolean;
+  adminOnly?: boolean;
+  requiredPermission?: string;
 };
 
 const navigation: NavigationItem[] = [
@@ -27,69 +33,104 @@ const navigation: NavigationItem[] = [
     name: "Dashboard",
     href: "/",
     icon: ChartLine,
-    active: true
+    active: true,
+    requiredPermission: "view_dashboard"
   },
   {
     name: "Platform PO",
     href: "/platform-po",
     icon: ShoppingCart,
     active: true,
-    description: "Create, upload & manage platform orders"
-  },
-  {
-    name: "Swiggy POs",
-    href: "/swiggy-pos",
-    icon: FileText,
-    active: true,
-    description: "View & import Swiggy purchase orders"
+    requiredPermission: "view_platform_po"
   },
   {
     name: "Distributor PO",
     href: "/distributor-po",
     icon: Truck,
     active: true,
-    description: "Create & manage distributor purchase orders"
+    requiredPermission: "view_distributor_po"
   },
   {
     name: "Secondary Sales",
     href: "/secondary-sales",
     icon: Upload,
     active: true,
-    description: "Upload & manage secondary sales data from platforms"
+    requiredPermission: "view_secondary_sales"
   },
   {
     name: "Inventory",
     href: "/inventory",
     icon: Package,
     active: true,
-    description: "Upload & manage inventory data from platforms"
+    requiredPermission: "view_inventory"
   },
   {
     name: "Create PF Item",
     href: "/pf-item-creation",
     icon: Plus,
     active: true,
-    description: "Create new platform items"
+    requiredPermission: "create_pf_item"
   },
   {
     name: "SAP Sync",
-    href: "/sap-sync", 
+    href: "/sap-sync",
     icon: Database,
     active: true,
-    description: "Sync item master data from SAP B1 Hanna ERP"
+    requiredPermission: "view_sap_sync"
   },
   {
     name: "SQL Query",
     href: "/sql-query",
     icon: Database,
     active: true,
-    description: "Execute custom SQL queries and generate reports"
+    requiredPermission: "view_sql_query"
   },
-
+  {
+    name: "User Permissions",
+    href: "/user-permissions",
+    icon: Shield,
+    active: true,
+    adminOnly: true,
+    requiredPermission: "manage_permissions"
+  },
+  {
+    name: "Create Users",
+    href: "/create-users",
+    icon: UserPlus,
+    active: true,
+    adminOnly: true,
+    requiredPermission: "create_users"
+  },
 ];
 
 export function Sidebar() {
   const [location] = useLocation();
+  const { user } = useAuth();
+  const { hasPermission, isAdmin } = usePermissions();
+
+  // Filter navigation items based on permissions
+  const filteredNavigation = navigation.filter(item => {
+    // Admins see everything
+    if (isAdmin()) {
+      return true;
+    }
+
+    // If item is admin-only and user is not admin, hide it
+    if (item.adminOnly && !isAdmin()) {
+      return false;
+    }
+
+    // Check if user has required permission
+    if (item.requiredPermission) {
+      return hasPermission(item.requiredPermission);
+    }
+
+    // Show items without permission requirements
+    return true;
+  });
+
+  console.log('🔍 User role:', user?.role, 'Is Admin:', isAdmin());
+  console.log('🔍 Filtered navigation items:', filteredNavigation.length, filteredNavigation.map(n => n.name));
 
   return (
     <div className="w-64 bg-white shadow-lg border-r border-gray-200 flex flex-col h-screen">
@@ -104,16 +145,16 @@ export function Sidebar() {
           </div>
         </div>
       </div>
-      {/* Navigation Section */}
-      <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-scroll" style={{scrollbarWidth: 'thin'}}>
-        {navigation.map((item) => {
+      {/* Navigation Section - Updated with User Management */}
+      <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto" style={{scrollbarWidth: 'thin'}}>
+        {filteredNavigation.map((item) => {
           const isActive = location === item.href;
           const Icon = item.icon;
 
           return (
             <Link key={item.name} to={item.href}>
               <div className={cn(
-                "flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors duration-200",
+                "flex items-center space-x-3 px-4 py-2 rounded-lg transition-colors duration-200",
                 isActive ? "text-primary bg-blue-50 border border-blue-200 font-medium" : "text-gray-700 hover:bg-gray-50 hover:text-primary",
                 !item.active && "opacity-50 pointer-events-none"
               )}>
@@ -125,9 +166,6 @@ export function Sidebar() {
                       <span className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded-full">Coming Soon</span>
                     )}
                   </div>
-                  {item.description && (
-                    <p className="text-xs text-gray-500 mt-1">{item.description}</p>
-                  )}
                 </div>
               </div>
             </Link>

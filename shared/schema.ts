@@ -780,7 +780,6 @@ export const swiggyPos = pgTable("swiggy_po_header", {
   total_taxable_value: decimal("total_taxable_value", { precision: 15, scale: 2 }),
   total_tax_amount: decimal("total_tax_amount", { precision: 15, scale: 2 }),
   grand_total: decimal("grand_total", { precision: 15, scale: 2 }),
-  unique_hsn_codes: varchar("unique_hsn_codes").array(),
   status: varchar("status", { length: 50 }).default("pending"),
   created_by: varchar("created_by", { length: 100 }),
   created_at: timestamp("created_at").defaultNow(),
@@ -793,7 +792,6 @@ export const swiggyPoLines = pgTable("swiggy_po_lines", {
   line_number: integer("line_number").notNull(),
   item_code: varchar("item_code", { length: 100 }).notNull(),
   item_description: text("item_description"),
-  hsn_code: varchar("hsn_code", { length: 20 }),
   quantity: integer("quantity").notNull(),
   mrp: decimal("mrp", { precision: 10, scale: 2 }),
   unit_base_cost: decimal("unit_base_cost", { precision: 10, scale: 3 }),
@@ -1087,6 +1085,131 @@ export type InsertDealsharePoHeader = z.infer<typeof insertDealsharePoHeaderSche
 export type DealsharePoLines = typeof dealsharePoLines.$inferSelect;
 export type InsertDealsharePoLines = z.infer<typeof insertDealsharePoLinesSchema>;
 
+// Amazon PO Header Table
+export const amazonPoHeader = pgTable("amazon_po_header", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  po_number: varchar("po_number", { length: 100 }).notNull().unique(),
+  po_date: timestamp("po_date"),
+  shipment_date: timestamp("shipment_date"),
+  delivery_date: timestamp("delivery_date"),
+  ship_to_location: text("ship_to_location"),
+  ship_to_address: text("ship_to_address"),
+  bill_to_location: text("bill_to_location"),
+  vendor_code: varchar("vendor_code", { length: 50 }),
+  vendor_name: text("vendor_name"),
+  buyer_name: varchar("buyer_name", { length: 100 }),
+  currency: varchar("currency", { length: 10 }).default("INR"),
+  total_amount: decimal("total_amount", { precision: 15, scale: 2 }).default("0"),
+  tax_amount: decimal("tax_amount", { precision: 15, scale: 2 }).default("0"),
+  shipping_cost: decimal("shipping_cost", { precision: 15, scale: 2 }).default("0"),
+  discount_amount: decimal("discount_amount", { precision: 15, scale: 2 }).default("0"),
+  net_amount: decimal("net_amount", { precision: 15, scale: 2 }).default("0"),
+  status: varchar("status", { length: 50 }).default("Open"),
+  notes: text("notes"),
+  created_by: varchar("created_by", { length: 100 }),
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow()
+});
+
+// Amazon PO Lines Table
+export const amazonPoLines = pgTable("amazon_po_lines", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  po_header_id: integer("po_header_id").notNull().references(() => amazonPoHeader.id, { onDelete: "cascade" }),
+  line_number: integer("line_number").notNull(),
+  asin: varchar("asin", { length: 50 }),
+  sku: varchar("sku", { length: 100 }),
+  product_name: text("product_name"),
+  product_description: text("product_description"),
+  category: varchar("category", { length: 100 }),
+  brand: varchar("brand", { length: 100 }),
+  upc: varchar("upc", { length: 50 }),
+  size: varchar("size", { length: 50 }),
+  color: varchar("color", { length: 50 }),
+  quantity_ordered: integer("quantity_ordered").default(0),
+  unit_cost: decimal("unit_cost", { precision: 10, scale: 2 }),
+  total_cost: decimal("total_cost", { precision: 12, scale: 2 }),
+  tax_rate: decimal("tax_rate", { precision: 5, scale: 2 }),
+  tax_amount: decimal("tax_amount", { precision: 10, scale: 2 }),
+  discount_percent: decimal("discount_percent", { precision: 5, scale: 2 }),
+  discount_amount: decimal("discount_amount", { precision: 10, scale: 2 }),
+  net_amount: decimal("net_amount", { precision: 12, scale: 2 }),
+  supplier_reference: varchar("supplier_reference", { length: 100 }),
+  expected_delivery_date: timestamp("expected_delivery_date"),
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow()
+});
+
+// Amazon Relations
+export const amazonPoHeaderRelations = relations(amazonPoHeader, ({ many }) => ({
+  poLines: many(amazonPoLines),
+  attachments: many(amazonAttachments),
+  comments: many(amazonComments)
+}));
+
+export const amazonPoLinesRelations = relations(amazonPoLines, ({ one }) => ({
+  po: one(amazonPoHeader, {
+    fields: [amazonPoLines.po_header_id],
+    references: [amazonPoHeader.id],
+  }),
+}));
+
+// Insert schemas for Amazon PO tables - with safe date transformations
+export const insertAmazonPoHeaderSchema = createInsertSchema(amazonPoHeader, {
+  po_date: z.union([
+    z.date(),
+    z.string().transform((str) => {
+      if (!str) return null;
+      const date = new Date(str);
+      return isNaN(date.getTime()) ? null : date;
+    }),
+    z.null()
+  ]).optional(),
+  shipment_date: z.union([
+    z.date(),
+    z.string().transform((str) => {
+      if (!str) return null;
+      const date = new Date(str);
+      return isNaN(date.getTime()) ? null : date;
+    }),
+    z.null()
+  ]).optional(),
+  delivery_date: z.union([
+    z.date(),
+    z.string().transform((str) => {
+      if (!str) return null;
+      const date = new Date(str);
+      return isNaN(date.getTime()) ? null : date;
+    }),
+    z.null()
+  ]).optional(),
+}).omit({
+  id: true,
+  created_at: true,
+  updated_at: true
+});
+
+export const insertAmazonPoLinesSchema = createInsertSchema(amazonPoLines, {
+  expected_delivery_date: z.union([
+    z.date(),
+    z.string().transform((str) => {
+      if (!str) return null;
+      const date = new Date(str);
+      return isNaN(date.getTime()) ? null : date;
+    }),
+    z.null()
+  ]).optional(),
+}).omit({
+  id: true,
+  po_header_id: true,
+  created_at: true,
+  updated_at: true
+});
+
+export type AmazonPoHeader = typeof amazonPoHeader.$inferSelect;
+export type InsertAmazonPoHeader = z.infer<typeof insertAmazonPoHeaderSchema>;
+export type AmazonPoLines = typeof amazonPoLines.$inferSelect;
+export type InsertAmazonPoLines = z.infer<typeof insertAmazonPoLinesSchema>;
+
 // Secondary Sales Header Table
 export const secondarySalesHeader = pgTable("secondary_sales_header", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
@@ -1301,6 +1424,30 @@ export const dealshareAttachments = pgTable("dealshare_attachments", {
 export const dealshareComments = pgTable("dealshare_comments", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   poId: integer("po_id").notNull().references(() => dealsharePoHeader.id, { onDelete: "cascade" }),
+  comment: text("comment").notNull(),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow()
+});
+
+// Amazon Attachments
+export const amazonAttachments = pgTable("amazon_attachments", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  poId: integer("po_id").notNull().references(() => amazonPoHeader.id, { onDelete: "cascade" }),
+  fileName: text("file_name").notNull(),
+  filePath: text("file_path").notNull(),
+  fileType: text("file_type"),
+  fileSize: integer("file_size"),
+  uploadedBy: integer("uploaded_by").references(() => users.id),
+  uploadedAt: timestamp("uploaded_at").defaultNow(),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow()
+});
+
+export const amazonComments = pgTable("amazon_comments", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  poId: integer("po_id").notNull().references(() => amazonPoHeader.id, { onDelete: "cascade" }),
   comment: text("comment").notNull(),
   createdBy: integer("created_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow(),
@@ -2654,8 +2801,8 @@ export const districts = pgTable("districts", {
 });
 
 export const distributors = pgTable("distributors", {
-  id: integer("id").primaryKey(),
-  name: text("name").notNull(),
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  distributor_name: text("distributor_name").notNull().unique(),
 });
 
 // Regions table for proper cascading

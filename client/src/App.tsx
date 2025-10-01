@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/use-auth";
 import { ProtectedRoute } from "@/lib/protected-route";
+import { AdminRoute } from "@/lib/admin-route";
 import { ResponsiveLayout } from "@/components/layout/responsive-layout";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { NotificationProvider } from "@/components/ui/notification";
@@ -35,6 +36,8 @@ import DistributorPO from "@/pages/distributor-po";
 import SecondarySales from "@/pages/secondary-sales";
 import Inventory from "@/pages/inventory";
 import PFItemCreation from "@/pages/pf-item-creation";
+import UserPermissions from "@/pages/user-permissions";
+import CreateUsers from "@/pages/create-users";
 
 import NotFound from "@/pages/not-found";
 
@@ -222,6 +225,26 @@ function AppRouter() {
           <SqlQuery />
         </ResponsiveLayout>
       )} />
+
+      <Route path="/user-permissions">
+        {() => (
+          <AdminRoute component={() => (
+            <ResponsiveLayout>
+              <UserPermissions />
+            </ResponsiveLayout>
+          )} />
+        )}
+      </Route>
+
+      <Route path="/create-users">
+        {() => (
+          <AdminRoute component={() => (
+            <ResponsiveLayout>
+              <CreateUsers />
+            </ResponsiveLayout>
+          )} />
+        )}
+      </Route>
 
       <Route component={NotFound} />
     </Switch>

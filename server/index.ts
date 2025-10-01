@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { seedPermissions } from "./seed-permissions";
 import dotenv from "dotenv";
 
 // Load environment variables
@@ -48,6 +49,13 @@ app.use((req, res, next) => {
 
 (async () => {
   const server = await registerRoutes(app);
+
+  // Seed permissions on startup
+  try {
+    await seedPermissions();
+  } catch (error) {
+    console.error("Failed to seed permissions:", error);
+  }
 
   // Global error handler
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
