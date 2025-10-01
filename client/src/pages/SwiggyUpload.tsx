@@ -32,6 +32,14 @@ export default function SwiggyUpload() {
       return response.json();
     },
     onSuccess: (data) => {
+      console.log('📊 Preview data received:', data);
+      if (data.poList && data.poList.length > 0) {
+        console.log('📅 First PO date:', data.poList[0].header.po_date);
+        console.log('📅 Date type:', typeof data.poList[0].header.po_date);
+      } else if (data.header) {
+        console.log('📅 PO date:', data.header.po_date);
+        console.log('📅 Date type:', typeof data.header.po_date);
+      }
       setPreviewData(data);
       toast({
         title: "Preview Generated",
@@ -459,7 +467,17 @@ export default function SwiggyUpload() {
                               {po.header.po_number}
                             </div>
                             <div className="text-sm text-gray-600">
-                              {po.header.po_date ? new Date(po.header.po_date).toLocaleDateString() : 'N/A'}
+                              {(() => {
+                                if (!po.header.po_date) return 'N/A';
+                                try {
+                                  const date = new Date(po.header.po_date);
+                                  if (isNaN(date.getTime())) return 'Invalid Date';
+                                  return date.toLocaleDateString('en-IN');
+                                } catch (e) {
+                                  console.error('Error parsing date:', po.header.po_date, e);
+                                  return 'Error';
+                                }
+                              })()}
                             </div>
                             <div className="text-sm text-gray-600">
                               {po.header.vendor_name || 'N/A'}
@@ -502,8 +520,17 @@ export default function SwiggyUpload() {
                       <div>
                         <span className="text-sm text-gray-600 block mb-1">PO Date</span>
                         <div className="font-semibold">
-                          {previewData.header?.po_date ?
-                            new Date(previewData.header.po_date).toLocaleDateString() : 'N/A'}
+                          {(() => {
+                            if (!previewData.header?.po_date) return 'N/A';
+                            try {
+                              const date = new Date(previewData.header.po_date);
+                              if (isNaN(date.getTime())) return 'Invalid Date';
+                              return date.toLocaleDateString('en-IN');
+                            } catch (e) {
+                              console.error('Error parsing date:', previewData.header.po_date, e);
+                              return 'Error';
+                            }
+                          })()}
                         </div>
                       </div>
                       <div>
