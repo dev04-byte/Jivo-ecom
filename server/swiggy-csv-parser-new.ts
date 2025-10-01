@@ -126,12 +126,15 @@ function parseSingleSwiggyPO(records: any[], uploadedBy: string): ParsedSwiggyPO
   const poNumber = firstRow.PoNumber || '';
   const entity = firstRow.Entity || '';
   const facilityId = firstRow.FacilityId || '';
-  const facilityName = firstRow.FacilityName || '';
+  const facilityName = firstRow.FacilityName || firstRow.Facility || '';
   const city = firstRow.City || '';
   const vendorName = firstRow.VendorName || '';
   const supplierCode = firstRow.SupplierCode || '';
   const poAmount = safeParseFloat(firstRow.PoAmount);
   const status = firstRow.Status || '';
+
+  console.log(`📦 Processing PO: ${poNumber}`);
+  console.log(`💰 Header PoAmount from CSV: ${firstRow.PoAmount} -> Parsed: ${poAmount}`);
 
   // Parse dates exactly as they appear in CSV
   const poCreatedAt = parseSwiggyDate(firstRow.PoCreatedAt);
@@ -151,13 +154,14 @@ function parseSingleSwiggyPO(records: any[], uploadedBy: string): ParsedSwiggyPO
 
     try {
       // Parse values exactly as they appear in CSV using safe parsing
-      const orderedQty = safeParseInt(row.OrderedQty);
+      // Support both column name variations
+      const orderedQty = safeParseInt(row.OrderedQty || row.SkOrderedQty);
       const receivedQty = safeParseInt(row.ReceivedQty);
       const balancedQty = safeParseInt(row.BalancedQty);
       const mrp = safeParseFloat(row.Mrp);
-      const unitBaseCost = safeParseFloat(row.UnitBasedCost);
+      const unitBaseCost = safeParseFloat(row.UnitBasedCost || row.UnitBaseCost);
       const tax = safeParseFloat(row.Tax);
-      const poLineValueWithoutTax = safeParseFloat(row.PoLineValueWithoutTax);
+      const poLineValueWithoutTax = safeParseFloat(row.PoLineValueWithoutTax || row.WithoutTax);
       const poLineValueWithTax = safeParseFloat(row.PoLineValueWithTax);
       const poAgeing = safeParseInt(row.PoAgeing);
 
@@ -221,11 +225,20 @@ function parseSingleSwiggyPO(records: any[], uploadedBy: string): ParsedSwiggyPO
       totalTaxAmount += tax;
       calculatedTotalAmount += poLineValueWithTax;
 
+      console.log(`  Line ${i + 1}: ${row.SkuCode} | Qty: ${orderedQty} | Line Total: ${poLineValueWithTax}`);
+
     } catch (error) {
       console.warn(`⚠️ Error parsing line ${i + 1}:`, error);
       continue;
     }
   }
+
+  console.log(`📊 PO ${poNumber} Totals:`);
+  console.log(`  - Total Quantity: ${totalQuantity}`);
+  console.log(`  - Total Taxable Value: ${totalTaxableValue}`);
+  console.log(`  - Total Tax Amount: ${totalTaxAmount}`);
+  console.log(`  - Calculated Total from Lines: ${calculatedTotalAmount}`);
+  console.log(`  - Header PoAmount: ${poAmount}`);
 
   // Create header object with proper mapping to database schema
   const header: any = {
@@ -242,8 +255,15 @@ function parseSingleSwiggyPO(records: any[], uploadedBy: string): ParsedSwiggyPO
     total_taxable_value: totalTaxableValue,
     total_tax_amount: totalTaxAmount,
     grand_total: (() => {
-      const finalTotal = calculatedTotalAmount > 0 ? calculatedTotalAmount : poAmount;
+      // Prioritize calculated total from line items
+      let finalTotal = 0;
+      if (calculatedTotalAmount > 0) {
+        finalTotal = calculatedTotalAmount;
+      } else if (poAmount > 0) {
+        finalTotal = poAmount;
+      }
       const safeFinalTotal = isNaN(finalTotal) ? 0 : finalTotal;
+      console.log(`💰 Final Grand Total: ${safeFinalTotal}`);
       return safeFinalTotal;
     })(),
     status: status || 'pending',
@@ -264,11 +284,19 @@ function parseSingleSwiggyPO(records: any[], uploadedBy: string): ParsedSwiggyPO
     PoExpiryDate: firstRow.PoExpiryDate || '',
     // Summary fields for display - use safe calculation to prevent NaN
     total_amount: (() => {
-      const finalTotal = calculatedTotalAmount > 0 ? calculatedTotalAmount : poAmount;
+      // Prioritize calculated total from line items
+      let finalTotal = 0;
+      if (calculatedTotalAmount > 0) {
+        finalTotal = calculatedTotalAmount;
+      } else if (poAmount > 0) {
+        finalTotal = poAmount;
+      }
       const safeFinalTotal = isNaN(finalTotal) || finalTotal === null || finalTotal === undefined ? 0 : finalTotal;
       return Number(safeFinalTotal).toFixed(2);
     })()
   };
+
+  console.log(`✅ PO ${poNumber} parsed successfully with ${lines.length} lines, Grand Total: ${header.grand_total}`);
 
   return { header, lines };
 }
@@ -278,6 +306,40 @@ function parseSwiggyDate(dateStr: string | undefined): Date | null {
 
   try {
     const cleanDateStr = dateStr.toString().trim();
+
+    // Handle M/D/YYYY H:MM format (e.g., "9/27/2025 2:26")
+    if (cleanDateStr.includes('/')) {
+      const parts = cleanDateStr.split(' ');
+      const datePart = parts[0];
+      const timePart = parts[1];
+
+      const [month, day, year] = datePart.split('/');
+
+      if (year && month && day) {
+        let date;
+
+        if (timePart) {
+          // M/D/YYYY H:MM format
+          const [hours, minutes] = timePart.split(':');
+          date = new Date(
+            parseInt(year),
+            parseInt(month) - 1,
+            parseInt(day),
+            parseInt(hours || '0'),
+            parseInt(minutes || '0'),
+            0
+          );
+        } else {
+          // M/D/YYYY format
+          date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+        }
+
+        if (!isNaN(date.getTime())) {
+          console.log(`📅 Parsed Swiggy date "${cleanDateStr}" as:`, date.toISOString().split('T')[0]);
+          return date;
+        }
+      }
+    }
 
     // Handle Swiggy date formats: "2025-09-18 20:09:28" and "2025-09-29"
     if (cleanDateStr.includes('-')) {
