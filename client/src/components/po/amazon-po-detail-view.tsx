@@ -139,84 +139,104 @@ export function AmazonPoDetailView({ header, lines, summary }: AmazonPoDetailVie
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* PO Information */}
             <div className="space-y-3">
-              <h4 className="font-semibold flex items-center gap-2">
+              <h4 className="font-semibold flex items-center gap-2 text-blue-700">
                 <Hash className="h-4 w-4" />
                 Purchase Order Info
               </h4>
               <div className="space-y-2 text-sm">
-                <div><span className="font-medium">PO Number:</span> {header.po_number || '-'}</div>
+                <div><span className="font-medium">PO Number:</span> <span className="text-blue-600 font-semibold">{header.po_number || '-'}</span></div>
+                <div><span className="font-medium">Status:</span> <Badge variant="secondary">{header.status || 'Open'}</Badge></div>
                 <div><span className="font-medium">Currency:</span> {header.currency || 'INR'}</div>
+                <div><span className="font-medium">Vendor Code:</span> {header.vendor_code || '-'}</div>
+                <div><span className="font-medium">Vendor Name:</span> {header.vendor_name || '-'}</div>
                 <div><span className="font-medium">Created By:</span> {header.created_by || '-'}</div>
               </div>
             </div>
 
-            {/* Dates */}
+            {/* Shipping & Delivery */}
             <div className="space-y-3">
-              <h4 className="font-semibold flex items-center gap-2">
+              <h4 className="font-semibold flex items-center gap-2 text-green-700">
+                <Truck className="h-4 w-4" />
+                Shipping & Delivery
+              </h4>
+              <div className="space-y-2 text-sm">
+                <div><span className="font-medium">Ship To Location:</span> <span className="text-xs">{header.ship_to_location || '-'}</span></div>
+                <div><span className="font-medium">Ship To Address:</span> <span className="text-xs">{header.ship_to_address || '-'}</span></div>
+                <div><span className="font-medium">Bill To Location:</span> <span className="text-xs">{header.bill_to_location || '-'}</span></div>
+                <div><span className="font-medium">Freight Terms:</span> {header.notes?.match(/Freight Terms: ([^.]+)/)?.[1] || '-'}</div>
+                <div><span className="font-medium">Delivery Date:</span> {formatDate(header.delivery_date)}</div>
+              </div>
+            </div>
+
+            {/* Dates & Timeline */}
+            <div className="space-y-3">
+              <h4 className="font-semibold flex items-center gap-2 text-orange-700">
                 <CalendarDays className="h-4 w-4" />
                 Important Dates
               </h4>
               <div className="space-y-2 text-sm">
-                <div><span className="font-medium">PO Date:</span> {formatDate(header.po_date)}</div>
+                <div><span className="font-medium">Ordered On:</span> {formatDate(header.po_date)}</div>
+                <div><span className="font-medium">Ship Window:</span> <span className="text-xs">{header.notes?.match(/Ship Window: ([^.]+)/)?.[1] || '-'}</span></div>
                 <div><span className="font-medium">Shipment Date:</span> {formatDate(header.shipment_date)}</div>
                 <div><span className="font-medium">Delivery Date:</span> {formatDate(header.delivery_date)}</div>
               </div>
             </div>
 
-            {/* Financial Summary */}
+            {/* Payment & Financial */}
             <div className="space-y-3">
-              <h4 className="font-semibold flex items-center gap-2">
+              <h4 className="font-semibold flex items-center gap-2 text-purple-700">
                 <DollarSign className="h-4 w-4" />
-                Financial Summary
+                Payment & Financial
               </h4>
               <div className="space-y-2 text-sm">
-                <div><span className="font-medium">Subtotal:</span> {formatCurrency(header.total_amount, header.currency)}</div>
-                <div><span className="font-medium">Tax:</span> {formatCurrency(header.tax_amount, header.currency)}</div>
-                <div><span className="font-medium">Shipping:</span> {formatCurrency(header.shipping_cost, header.currency)}</div>
-                <div><span className="font-medium">Discount:</span> {formatCurrency(header.discount_amount, header.currency)}</div>
+                <div><span className="font-medium">Payment Terms:</span> <span className="text-xs">{header.notes?.match(/Payment Terms: ([^.]+)/)?.[1] || '-'}</span></div>
+                <div><span className="font-medium">Payment Method:</span> {header.notes?.match(/Payment Method: ([^.]+)/)?.[1] || '-'}</div>
+                <div><span className="font-medium">Purchasing Entity:</span> <span className="text-xs">{header.buyer_name || '-'}</span></div>
                 <div className="border-t pt-2">
-                  <span className="font-semibold">Total:</span>
-                  <span className="font-bold text-green-600 ml-2">
+                  <span className="font-semibold">Total Cost:</span>
+                  <span className="font-bold text-green-600 ml-2 text-lg">
                     {formatCurrency(header.net_amount || header.total_amount, header.currency)}
                   </span>
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* Vendor Information */}
-            <div className="space-y-3">
-              <h4 className="font-semibold flex items-center gap-2">
-                <Building className="h-4 w-4" />
-                Vendor Details
-              </h4>
-              <div className="space-y-2 text-sm">
-                <div><span className="font-medium">Vendor Code:</span> {header.vendor_code || '-'}</div>
-                <div><span className="font-medium">Vendor Name:</span> {header.vendor_name || '-'}</div>
-                <div><span className="font-medium">Buyer:</span> {header.buyer_name || '-'}</div>
-              </div>
-            </div>
-
-            {/* Summary Stats */}
-            {summary && (
-              <div className="space-y-3">
-                <h4 className="font-semibold flex items-center gap-2">
-                  <Package className="h-4 w-4" />
-                  Order Summary
-                </h4>
-                <div className="space-y-2 text-sm">
-                  <div><span className="font-medium">Total Items:</span> {summary.totalItems}</div>
-                  <div><span className="font-medium">Total Quantity:</span> {summary.totalQuantity.toLocaleString()}</div>
-                  <div><span className="font-medium">Order Value:</span> {formatCurrency(summary.totalAmount, header.currency)}</div>
-                  {summary.detectedVendor && (
-                    <div><span className="font-medium">Detected Vendor:</span> {summary.detectedVendor}</div>
-                  )}
+          {/* Order Summary Stats */}
+          {summary && (
+            <div className="mt-4 bg-gradient-to-r from-blue-50 to-green-50 p-4 rounded-lg border border-blue-200">
+              <h4 className="font-semibold text-gray-800 mb-3 text-center">Order Summary Statistics</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="text-center bg-white p-3 rounded-lg shadow-sm">
+                  <p className="text-xs text-gray-600 mb-1">Submitted</p>
+                  <p className="text-xl font-bold text-blue-600">{summary.totalItems}</p>
+                  <p className="text-xs text-gray-500">items</p>
+                </div>
+                <div className="text-center bg-white p-3 rounded-lg shadow-sm">
+                  <p className="text-xs text-gray-600 mb-1">Total Quantity</p>
+                  <p className="text-xl font-bold text-green-600">{summary.totalQuantity.toLocaleString()}</p>
+                  <p className="text-xs text-gray-500">units</p>
+                </div>
+                <div className="text-center bg-white p-3 rounded-lg shadow-sm">
+                  <p className="text-xs text-gray-600 mb-1">Accepted</p>
+                  <p className="text-xl font-bold text-green-600">
+                    {lines.reduce((sum, line) => {
+                      const additionalData = line.supplier_reference ? parseAdditionalData(line.supplier_reference) : null;
+                      return sum + (additionalData?.quantity_accepted || 0);
+                    }, 0).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-gray-500">units</p>
+                </div>
+                <div className="text-center bg-white p-3 rounded-lg shadow-sm">
+                  <p className="text-xs text-gray-600 mb-1">Order Value</p>
+                  <p className="text-lg font-bold text-green-600">{formatCurrency(summary.totalAmount, header.currency)}</p>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {header.notes && (
             <div className="mt-4 p-3 bg-gray-50 rounded-lg">
@@ -241,22 +261,25 @@ export function AmazonPoDetailView({ header, lines, summary }: AmazonPoDetailVie
               <TableHeader className="sticky top-0 bg-white z-10">
                 <TableRow className="bg-gray-50">
                   <TableHead className="w-16">#</TableHead>
-                  <TableHead className="min-w-[120px]">ASIN</TableHead>
-                  <TableHead className="min-w-[120px]">SKU</TableHead>
-                  <TableHead className="min-w-[300px]">Product Name</TableHead>
-                  <TableHead className="min-w-[200px]">Description</TableHead>
-                  <TableHead className="min-w-[120px]">Category</TableHead>
-                  <TableHead className="min-w-[100px]">Brand</TableHead>
-                  <TableHead className="min-w-[80px]">Size</TableHead>
-                  <TableHead className="min-w-[80px]">Color</TableHead>
-                  <TableHead className="min-w-[120px]">UPC</TableHead>
-                  <TableHead className="text-right min-w-[80px]">Qty</TableHead>
-                  <TableHead className="text-right min-w-[100px]">Unit Cost</TableHead>
-                  <TableHead className="text-right min-w-[100px]">Total Cost</TableHead>
-                  <TableHead className="text-right min-w-[80px]">Tax</TableHead>
-                  <TableHead className="text-right min-w-[100px]">Net Amount</TableHead>
-                  <TableHead className="min-w-[120px]">Delivery Date</TableHead>
-                  <TableHead className="min-w-[150px]">Supplier Ref</TableHead>
+                  <TableHead className="min-w-[130px]">ASIN</TableHead>
+                  <TableHead className="min-w-[150px]">External ID/SKU</TableHead>
+                  <TableHead className="min-w-[150px]">Model Number</TableHead>
+                  <TableHead className="min-w-[100px]">HSN Code</TableHead>
+                  <TableHead className="min-w-[350px]">Title/Description</TableHead>
+                  <TableHead className="min-w-[120px]">Window Type</TableHead>
+                  <TableHead className="min-w-[120px]">Expected Date</TableHead>
+                  <TableHead className="text-right min-w-[100px]">Qty Requested</TableHead>
+                  <TableHead className="text-right min-w-[100px]">Qty Accepted</TableHead>
+                  <TableHead className="text-right min-w-[100px]">Qty Received</TableHead>
+                  <TableHead className="text-right min-w-[110px]">Qty Outstanding</TableHead>
+                  <TableHead className="text-right min-w-[120px]">Unit Cost</TableHead>
+                  <TableHead className="text-right min-w-[80px]">IGST %</TableHead>
+                  <TableHead className="text-right min-w-[80px]">CESS %</TableHead>
+                  <TableHead className="text-right min-w-[100px]">Tax Amt</TableHead>
+                  <TableHead className="text-right min-w-[120px]">Landing Rate</TableHead>
+                  <TableHead className="text-right min-w-[100px]">MRP</TableHead>
+                  <TableHead className="text-right min-w-[100px]">Margin %</TableHead>
+                  <TableHead className="text-right min-w-[130px]">Total Cost</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -270,43 +293,64 @@ export function AmazonPoDetailView({ header, lines, summary }: AmazonPoDetailVie
                         {line.asin || '-'}
                       </TableCell>
                       <TableCell className="font-mono text-xs">
-                        {line.sku || '-'}
+                        <div className="max-w-[150px] break-words text-xs">
+                          {line.sku || additionalData?.external_id || '-'}
+                        </div>
                       </TableCell>
-                      <TableCell className="max-w-[300px]">
-                        <div className="break-words" title={line.product_name}>
+                      <TableCell className="font-mono text-xs">
+                        <div className="max-w-[150px] break-words text-xs">
+                          {additionalData?.model_number || line.product_description || '-'}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {additionalData?.hsn_code || line.category || '-'}
+                      </TableCell>
+                      <TableCell className="max-w-[350px]">
+                        <div className="break-words text-xs" title={line.product_name}>
                           {line.product_name || '-'}
                         </div>
                       </TableCell>
-                      <TableCell className="max-w-[200px]">
-                        <div className="break-words" title={line.product_description}>
-                          {line.product_description || '-'}
-                        </div>
+                      <TableCell className="text-xs">
+                        {additionalData?.window_type || '-'}
                       </TableCell>
-                      <TableCell>{line.category || '-'}</TableCell>
-                      <TableCell>{line.brand || '-'}</TableCell>
-                      <TableCell>{line.size || '-'}</TableCell>
-                      <TableCell>{line.color || '-'}</TableCell>
-                      <TableCell className="font-mono text-xs">{line.upc || '-'}</TableCell>
+                      <TableCell className="text-xs">
+                        {additionalData?.expected_date ? formatDate(additionalData.expected_date) : (line.expected_delivery_date ? formatDate(line.expected_delivery_date) : '-')}
+                      </TableCell>
                       <TableCell className="text-right font-medium">
-                        {line.quantity_ordered?.toLocaleString() || '0'}
+                        {additionalData?.quantity_requested?.toLocaleString() || line.quantity_ordered?.toLocaleString() || '0'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {additionalData?.quantity_accepted?.toLocaleString() || '-'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {additionalData?.quantity_received?.toLocaleString() || '-'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {additionalData?.quantity_outstanding?.toLocaleString() || '-'}
                       </TableCell>
                       <TableCell className="text-right">
                         {formatCurrency(line.unit_cost, header.currency)}
                       </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {formatCurrency(line.total_cost, header.currency)}
+                      <TableCell className="text-right">
+                        {additionalData?.igst_percent ? `${parseFloat(additionalData.igst_percent).toFixed(2)}%` : (line.tax_rate ? `${parseFloat(line.tax_rate.toString()).toFixed(2)}%` : '-')}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {additionalData?.cess_percent ? `${parseFloat(additionalData.cess_percent).toFixed(2)}%` : '-'}
                       </TableCell>
                       <TableCell className="text-right">
                         {formatCurrency(line.tax_amount, header.currency)}
                       </TableCell>
-                      <TableCell className="text-right font-medium text-green-600">
-                        {formatCurrency(line.net_amount || line.total_cost, header.currency)}
+                      <TableCell className="text-right">
+                        {additionalData?.landing_rate ? formatCurrency(additionalData.landing_rate, header.currency) : '-'}
                       </TableCell>
-                      <TableCell>{formatDate(line.expected_delivery_date)}</TableCell>
-                      <TableCell className="max-w-[150px]">
-                        <div className="truncate" title={line.supplier_reference}>
-                          {line.supplier_reference || '-'}
-                        </div>
+                      <TableCell className="text-right">
+                        {additionalData?.mrp ? formatCurrency(additionalData.mrp, header.currency) : '-'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {additionalData?.margin_percent ? `${parseFloat(additionalData.margin_percent).toFixed(2)}%` : '-'}
+                      </TableCell>
+                      <TableCell className="text-right font-medium text-green-600">
+                        {formatCurrency(line.total_cost, header.currency)}
                       </TableCell>
                     </TableRow>
                   );

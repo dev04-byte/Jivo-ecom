@@ -258,11 +258,12 @@ function parseAmazonData(jsonData: any[][], uploadedBy: string): AmazonParsedDat
     // Amazon-specific field detection based on the Excel structure
     const firstCell = row[0] ? row[0].toString() : '';
     const secondCell = row[1] ? row[1].toString() : '';
-    const thirdCell = row[3] ? row[3].toString() : ''; // Amazon format has data in column D (index 3)
+    const thirdCell = row[3]; // Don't convert to string - keep original type for date parsing
+    const thirdCellStr = thirdCell ? thirdCell.toString() : ''; // String version for text matching
 
     // Vendor detection - Row with "Vendor" in first column
-    if (firstCell.toLowerCase() === 'vendor' && thirdCell) {
-      header.vendor_code = thirdCell; // "0M7KK" - vendor code
+    if (firstCell.toLowerCase() === 'vendor' && thirdCellStr) {
+      header.vendor_code = thirdCellStr; // "0M7KK" - vendor code
       header.vendor_name = "Amazon"; // Set as Amazon since this is Amazon PO parser
       detectedVendor = "amazon"; // Always set to amazon for this parser
       console.log('✅ Found Amazon Vendor Code:', header.vendor_code);
@@ -270,34 +271,56 @@ function parseAmazonData(jsonData: any[][], uploadedBy: string): AmazonParsedDat
     }
 
     // Ship to location - Row with "Ship to location" in first column
-    if (firstCell.toLowerCase() === 'ship to location' && thirdCell) {
-      header.ship_to_location = thirdCell;
-      header.bill_to_location = thirdCell; // Use same location for billing
+    if (firstCell.toLowerCase() === 'ship to location' && thirdCellStr) {
+      header.ship_to_location = thirdCellStr;
+      header.bill_to_location = thirdCellStr; // Use same location for billing
       console.log('✅ Found Ship To Location:', header.ship_to_location);
     }
 
-    // Delivery address extraction for more detailed address
-    if (firstCell.toLowerCase().includes('delivery address')) {
-      const deliveryAddress = firstCell.split('Delivery Address:')[1]?.trim();
-      if (deliveryAddress) {
-        header.ship_to_address = deliveryAddress;
-        console.log('✅ Found Delivery Address:', header.ship_to_address);
+    // Delivery address extraction - check all cells in the row
+    for (let j = 0; j < row.length; j++) {
+      const cell = row[j];
+      if (!cell) continue;
+      const cellStr = cell.toString();
+
+      // Look for "Delivery Address:" prefix
+      if (cellStr.includes('Delivery Address:')) {
+        const deliveryAddress = cellStr.split('Delivery Address:')[1]?.trim();
+        if (deliveryAddress) {
+          header.ship_to_address = deliveryAddress;
+          console.log('✅ Found Delivery Address location:', deliveryAddress);
+        }
+      }
+
+      // Next row often contains the full address - check for multi-line addresses with company names
+      if (cellStr.includes('WorldInfocom') || cellStr.includes('ESR') || (cellStr.includes('GURUGRAM') && cellStr.length > 50)) {
+        if (!header.ship_to_address || header.ship_to_address.length < 20) {
+          header.ship_to_address = cellStr.trim();
+          console.log('✅ Found Full Delivery Address:', header.ship_to_address.substring(0, 100) + '...');
+        }
       }
     }
 
     // Ordered On date - Row with "Ordered On" in first column
     if (firstCell.toLowerCase() === 'ordered on' && thirdCell) {
+      console.log(`🔍 Attempting to parse Ordered On date from value: ${thirdCell} (type: ${typeof thirdCell})`);
       const date = parseDate(thirdCell);
       if (date) {
         header.po_date = date;
         console.log('✅ Found Order Date:', date);
+      } else {
+        console.warn(`⚠️ Failed to parse Ordered On date from value: ${thirdCell}`);
       }
     }
 
     // Ship window (delivery date range) - Row with "Ship window" in first column
-    if (firstCell.toLowerCase() === 'ship window' && thirdCell) {
+    if (firstCell.toLowerCase() === 'ship window' && thirdCellStr) {
+      // Store full ship window
+      header.notes = (header.notes || '') + `Ship Window: ${thirdCellStr}. `;
+      console.log('✅ Found Ship Window:', thirdCellStr);
+
       // Extract end date from range like "26/9/2025 - 21/10/2025"
-      const dateRange = thirdCell.match(/(\d{1,2}\/\d{1,2}\/\d{4})\s*-\s*(\d{1,2}\/\d{1,2}\/\d{4})/);
+      const dateRange = thirdCellStr.match(/(\d{1,2}\/\d{1,2}\/\d{4})\s*-\s*(\d{1,2}\/\d{1,2}\/\d{4})/);
       if (dateRange && dateRange[2]) {
         const deliveryDate = parseDate(dateRange[2]);
         if (deliveryDate) {
@@ -308,33 +331,33 @@ function parseAmazonData(jsonData: any[][], uploadedBy: string): AmazonParsedDat
     }
 
     // Payment terms
-    if (firstCell.toLowerCase() === 'payment terms' && thirdCell) {
-      header.notes = (header.notes || '') + `Payment Terms: ${thirdCell}. `;
-      console.log('✅ Found Payment Terms:', thirdCell);
+    if (firstCell.toLowerCase() === 'payment terms' && thirdCellStr) {
+      header.notes = (header.notes || '') + `Payment Terms: ${thirdCellStr}. `;
+      console.log('✅ Found Payment Terms:', thirdCellStr);
     }
 
     // Freight terms
-    if (firstCell.toLowerCase() === 'freight terms' && thirdCell) {
-      header.notes = (header.notes || '') + `Freight Terms: ${thirdCell}. `;
-      console.log('✅ Found Freight Terms:', thirdCell);
+    if (firstCell.toLowerCase() === 'freight terms' && thirdCellStr) {
+      header.notes = (header.notes || '') + `Freight Terms: ${thirdCellStr}. `;
+      console.log('✅ Found Freight Terms:', thirdCellStr);
     }
 
     // Payment method
-    if (firstCell.toLowerCase() === 'payment method' && thirdCell) {
-      header.notes = (header.notes || '') + `Payment Method: ${thirdCell}. `;
-      console.log('✅ Found Payment Method:', thirdCell);
+    if (firstCell.toLowerCase() === 'payment method' && thirdCellStr) {
+      header.notes = (header.notes || '') + `Payment Method: ${thirdCellStr}. `;
+      console.log('✅ Found Payment Method:', thirdCellStr);
     }
 
     // Purchasing entity (can be used as buyer)
-    if (firstCell.toLowerCase() === 'purchasing entity' && thirdCell) {
-      header.buyer_name = thirdCell;
-      console.log('✅ Found Purchasing Entity/Buyer:', thirdCell);
+    if (firstCell.toLowerCase() === 'purchasing entity' && thirdCellStr) {
+      header.buyer_name = thirdCellStr;
+      console.log('✅ Found Purchasing Entity/Buyer:', thirdCellStr);
     }
 
     // Status
-    if (firstCell.toLowerCase() === 'status' && thirdCell) {
-      header.status = thirdCell;
-      console.log('✅ Found Status:', thirdCell);
+    if (firstCell.toLowerCase() === 'status' && thirdCellStr) {
+      header.status = thirdCellStr;
+      console.log('✅ Found Status:', thirdCellStr);
     }
 
     // Look for summary totals in the right side of the Excel (columns 10-20)
@@ -382,19 +405,34 @@ function parseAmazonData(jsonData: any[][], uploadedBy: string): AmazonParsedDat
       }
     }
 
-    // Amazon-specific items header detection - look for exact Amazon headers
+    // Amazon-specific items header detection - look for actual columns
+    const hasItemCode = row.some(cell => cell && cell.toString().toLowerCase().includes('item code'));
+    const hasHSN = row.some(cell => cell && cell.toString().toLowerCase().includes('hsn'));
+    const hasProductDescription = row.some(cell => cell && cell.toString().toLowerCase().includes('product') && cell.toString().toLowerCase().includes('description'));
+    const hasBasicCost = row.some(cell => cell && cell.toString().toLowerCase().includes('basic') && cell.toString().toLowerCase().includes('cost'));
+    const hasMRP = row.some(cell => cell && cell.toString().toLowerCase().trim() === 'mrp');
+    const hasMargin = row.some(cell => cell && cell.toString().toLowerCase().includes('margin'));
+
+    // Debug: Log when we find Item Code header
+    if (hasItemCode && i >= 5) {
+      console.log(`🔍 DEBUG Row ${i + 1}: Found Item Code! Row content:`, row.slice(0, 17));
+      console.log(`🔍 hasHSN: ${hasHSN}, hasProductDescription: ${hasProductDescription}, hasBasicCost: ${hasBasicCost}, hasMRP: ${hasMRP}, hasMargin: ${hasMargin}`);
+    }
+
+    // Priority: If this row has Item Code, HSN, and other key headers, it's the items header
+    if ((hasItemCode || hasHSN || hasProductDescription) && (hasBasicCost || hasMRP || hasMargin) && !headerDataFound) {
+      itemsStartIndex = i;
+      headerDataFound = true;
+      console.log('✅ Found Amazon items header at row:', i + 1);
+      console.log('Header row content:', row.slice(0, 17));
+      break;
+    }
+
+    // Fallback: Also check for ASIN-based format (for other Amazon PO formats)
     const hasASIN = row.some(cell => cell && cell.toString().toLowerCase().trim() === 'asin');
     const hasExternalId = row.some(cell => cell && cell.toString().toLowerCase().trim().includes('external id'));
     const hasTitle = row.some(cell => cell && cell.toString().toLowerCase().trim() === 'title');
-    const hasQuantity = row.some(cell => cell && cell.toString().toLowerCase().includes('quantity'));
 
-    // Debug: Log when we find ASIN
-    if (hasASIN && i >= 5) {
-      console.log(`🔍 DEBUG Row ${i + 1}: Found ASIN! Row content:`, row.slice(0, 10));
-      console.log(`🔍 hasExternalId: ${hasExternalId}, hasTitle: ${hasTitle}, hasQuantity: ${hasQuantity}`);
-    }
-
-    // Priority: If this row has ASIN header text, it's definitely the Amazon items header
     if (hasASIN && !headerDataFound) {
       itemsStartIndex = i;
       headerDataFound = true;
@@ -438,67 +476,111 @@ function parseAmazonData(jsonData: any[][], uploadedBy: string): AmazonParsedDat
   console.log('📋 Analyzing header row for column mapping:');
   console.log('Header row:', headerRow);
 
-  // Amazon-specific column mapping - simplified to focus on essential data only
-  // Based on typical Amazon PO structure
-  columnMapping['asin'] = 0;  // Column A - ASIN
-  columnMapping['sku'] = 1;   // Column B - External Id (use as SKU)
-  columnMapping['product_name'] = 5;  // Column F - Title/Product Name
-  columnMapping['category'] = 4;   // Column E - HSN/Category
-  columnMapping['quantity_ordered'] = 9;  // Column J - Quantity Requested
+  // Amazon-specific column mapping - detect format first
+  // Format 1: Item Code, HSN, UPC, Basic Cost, IGST, etc. (Indian format)
+  // Format 2: ASIN, External Id, Model Number, HSN, Title (Standard Amazon format)
 
-  // Look for unit cost and total cost in common locations
-  // These are typically in later columns in Amazon POs
-  columnMapping['unit_cost'] = 15;  // Common location for unit price
-  columnMapping['total_cost'] = 16; // Common location for line total
+  // Detect which format we have by checking first few headers
+  const firstHeader = headerRow[0] ? headerRow[0].toString().toLowerCase().trim() : '';
+  const secondHeader = headerRow[1] ? headerRow[1].toString().toLowerCase().trim() : '';
 
-  console.log('✅ Applied simplified Amazon column mapping:');
-  console.log('- ASIN: Column 0');
-  console.log('- SKU (External ID): Column 1');
-  console.log('- Product Name (Title): Column 5');
-  console.log('- Category (HSN): Column 4');
-  console.log('- Quantity Requested: Column 9');
-  console.log('- Unit Cost: Column 15');
-  console.log('- Total Cost: Column 16');
+  const isFormat1 = (firstHeader === '#' || firstHeader === 'item number') &&
+                    (secondHeader.includes('item code') || secondHeader.includes('sku'));
+  const isFormat2 = firstHeader === 'asin' ||
+                    (secondHeader.includes('external') && secondHeader.includes('id'));
 
-  // Enhanced dynamic mapping for pricing columns that might vary
+  console.log(`🔍 Detected Amazon format: ${isFormat1 ? 'Format 1 (Indian)' : isFormat2 ? 'Format 2 (Standard)' : 'Unknown, defaulting to Format 2'}`);
+
+  if (isFormat1) {
+    // Format 1: Indian Amazon PO format (5401210015065.xlsx)
+    console.log('📋 Applying Format 1 (Indian) column mapping...');
+    columnMapping['item_number'] = 0;  // Column A - #
+    columnMapping['sku'] = 1;   // Column B - Item Code
+    columnMapping['category'] = 2;   // Column C - HSN Code
+    columnMapping['upc'] = 3;  // Column D - Product UPC
+    columnMapping['product_name'] = 4;  // Column E - Product Description
+    // Column 5 is empty
+    columnMapping['unit_cost'] = 6;  // Column G - Basic Cost Price
+    columnMapping['igst_percent'] = 7;  // Column H - IGST %
+    columnMapping['cess_percent'] = 8;  // Column I - CESS %
+    columnMapping['addt_cess'] = 9;  // Column J - ADDT.CESS
+    columnMapping['tax_amount'] = 10;  // Column K - Tax Amt
+    columnMapping['landing_rate'] = 11; // Column L - Landing Rate
+    // Column 12 is empty
+    columnMapping['quantity_ordered'] = 13;  // Column N - Qty
+    columnMapping['mrp'] = 14;  // Column O - MRP
+    columnMapping['margin_percent'] = 15;  // Column P - Margin %
+    columnMapping['total_cost'] = 16; // Column Q - Total Amt
+
+    console.log('✅ Format 1 mapping applied:');
+    console.log('- #: Column 0, Item Code: Column 1, HSN: Column 2, UPC: Column 3');
+    console.log('- Description: Column 4, Basic Cost: Column 6');
+    console.log('- IGST%: Column 7, CESS%: Column 8, ADDT.CESS: Column 9');
+    console.log('- Tax Amt: Column 10, Landing Rate: Column 11');
+    console.log('- Qty: Column 13, MRP: Column 14, Margin%: Column 15, Total: Column 16');
+  } else {
+    // Format 2: Standard Amazon PO format (664155NW.xlsx)
+    console.log('📋 Applying Format 2 (Standard) column mapping...');
+    columnMapping['asin'] = 0;  // Column A - ASIN
+    columnMapping['external_id'] = 1;   // Column B - External Id (EAN/ISBN/SKU)
+    columnMapping['model_number'] = 2;   // Column C - Model Number
+    columnMapping['category'] = 4;   // Column E - HSN
+    columnMapping['product_name'] = 5;  // Column F - Title
+    columnMapping['window_type'] = 7;  // Column H - Window Type
+    columnMapping['expected_date'] = 8;  // Column I - Expected date
+    columnMapping['quantity_ordered'] = 9;  // Column J - Quantity Requested
+    columnMapping['quantity_accepted'] = 11;  // Column L - Accepted quantity
+    columnMapping['quantity_received'] = 13;  // Column N - Quantity received
+    columnMapping['quantity_outstanding'] = 14;  // Column O - Quantity Outstanding
+    columnMapping['unit_cost'] = 16;  // Column Q - Unit Cost
+    columnMapping['total_cost'] = 18; // Column S - Total cost
+
+    console.log('✅ Format 2 mapping applied:');
+    console.log('- ASIN: Column 0, External ID: Column 1, Model: Column 2');
+    console.log('- HSN: Column 4, Title: Column 5, Window Type: Column 7');
+    console.log('- Expected Date: Column 8, Qty Requested: Column 9');
+    console.log('- Qty Accepted: Column 11, Qty Received: Column 13, Qty Outstanding: Column 14');
+    console.log('- Unit Cost: Column 16, Total Cost: Column 18');
+  }
+
+  // Optional: Validate/refine mapping by checking actual headers (but don't override format-specific mappings)
+  console.log('🔍 Validating column headers match expected positions...');
+  let validationWarnings = 0;
+
   headerRow.forEach((header: any, index: number) => {
     if (!header) return;
-    const headerStr = header.toString().toLowerCase().trim();
+    const headerStr = header.toString().toLowerCase().trim().replace(/\s+/g, ' ');
 
-    // Override direct mapping if we find better header matches
-    if (headerStr === 'asin' && index !== columnMapping['asin']) {
-      columnMapping['asin'] = index;
-      console.log(`✅ Found ASIN header at column ${index}`);
+    // For Format 1, validate key columns
+    if (isFormat1) {
+      if (index === 0 && headerStr !== '#' && !headerStr.includes('item')) {
+        console.warn(`⚠️ Warning: Column 0 header is "${header}", expected "#" or "item number"`);
+        validationWarnings++;
+      }
+      if (index === 1 && !headerStr.includes('item') && !headerStr.includes('code')) {
+        console.warn(`⚠️ Warning: Column 1 header is "${header}", expected "Item Code"`);
+        validationWarnings++;
+      }
     }
 
-    if (headerStr === 'external id' && index !== columnMapping['sku']) {
-      columnMapping['sku'] = index;
-      console.log(`✅ Found External ID (SKU) at column ${index}`);
-    }
-
-    if (headerStr === 'title' && index !== columnMapping['product_name']) {
-      columnMapping['product_name'] = index;
-      console.log(`✅ Found Title (Product Name) at column ${index}`);
-    }
-
-    if (headerStr.includes('quantity requested') || headerStr === 'quantity requested') {
-      columnMapping['quantity_ordered'] = index;
-      console.log(`✅ Found Quantity Requested at column ${index}`);
-    }
-
-    // Look for pricing columns which can vary
-    if ((headerStr.includes('unit') && (headerStr.includes('cost') || headerStr.includes('price'))) ||
-        headerStr === 'unit price' || headerStr === 'price per unit') {
-      columnMapping['unit_cost'] = index;
-      console.log(`✅ Found Unit Cost at column ${index}`);
-    }
-
-    if ((headerStr.includes('total') && (headerStr.includes('cost') || headerStr.includes('price') || headerStr.includes('amount'))) ||
-        headerStr === 'total' || headerStr === 'line total' || headerStr === 'amount') {
-      columnMapping['total_cost'] = index;
-      console.log(`✅ Found Total Cost at column ${index}`);
+    // For Format 2, validate key columns
+    if (isFormat2) {
+      if (index === 0 && headerStr !== 'asin') {
+        console.warn(`⚠️ Warning: Column 0 header is "${header}", expected "ASIN"`);
+        validationWarnings++;
+      }
+      if (index === 1 && !headerStr.includes('external') && !headerStr.includes('id')) {
+        console.warn(`⚠️ Warning: Column 1 header is "${header}", expected "External Id"`);
+        validationWarnings++;
+      }
     }
   });
+
+  if (validationWarnings === 0) {
+    console.log('✅ All column headers validated successfully');
+  } else {
+    console.warn(`⚠️ Found ${validationWarnings} validation warnings - mapping may be incorrect`);
+  }
 
   console.log('📊 Final column mapping:', columnMapping);
 
@@ -532,16 +614,35 @@ function parseAmazonData(jsonData: any[][], uploadedBy: string): AmazonParsedDat
       continue;
     }
 
-    // Create line item with essential Amazon data only
+    // Create line item with comprehensive Amazon data including all fields from both formats
+    const igstPercent = columnMapping['igst_percent'] !== undefined ? parseNumeric(row[columnMapping['igst_percent']]) : "0";
+    const cessPercent = columnMapping['cess_percent'] !== undefined ? parseNumeric(row[columnMapping['cess_percent']]) : "0";
+    const addtCess = columnMapping['addt_cess'] !== undefined ? parseNumeric(row[columnMapping['addt_cess']]) : "0";
+    const marginPercent = columnMapping['margin_percent'] !== undefined ? parseNumeric(row[columnMapping['margin_percent']]) : "0";
+    const mrp = columnMapping['mrp'] !== undefined ? parseNumeric(row[columnMapping['mrp']]) : "0";
+    const landingRate = columnMapping['landing_rate'] !== undefined ? parseNumeric(row[columnMapping['landing_rate']]) : "0";
+
+    // Extract all available data
+    const asin = columnMapping['asin'] !== undefined ? (row[columnMapping['asin']] || '').toString().trim() : '';
+    const externalId = columnMapping['external_id'] !== undefined ? (row[columnMapping['external_id']] || '').toString().trim() : '';
+    const modelNumber = columnMapping['model_number'] !== undefined ? (row[columnMapping['model_number']] || '').toString().trim() : '';
+    const hsnCode = columnMapping['category'] !== undefined ? (row[columnMapping['category']] || '').toString().trim().replace(/\n/g, '') : '';
+    const windowType = columnMapping['window_type'] !== undefined ? (row[columnMapping['window_type']] || '').toString().trim() : '';
+    const expectedDateValue = columnMapping['expected_date'] !== undefined ? row[columnMapping['expected_date']] : null;
+    const quantityAccepted = columnMapping['quantity_accepted'] !== undefined ? parseInt(parseNumeric(row[columnMapping['quantity_accepted']])) || 0 : 0;
+    const quantityReceived = columnMapping['quantity_received'] !== undefined ? parseInt(parseNumeric(row[columnMapping['quantity_received']])) || 0 : 0;
+    const quantityOutstanding = columnMapping['quantity_outstanding'] !== undefined ? parseInt(parseNumeric(row[columnMapping['quantity_outstanding']])) || 0 : 0;
+
     const line: InsertAmazonPoLines = {
-      line_number: lines.length + 1,
-      asin: columnMapping['asin'] !== undefined ? (row[columnMapping['asin']] || '').toString() : '',
-      sku: columnMapping['sku'] !== undefined ? (row[columnMapping['sku']] || '').toString() : '',
-      product_name: columnMapping['product_name'] !== undefined ? (row[columnMapping['product_name']] || '').toString() : '',
-      product_description: '', // Not available in basic Amazon PO
-      category: columnMapping['category'] !== undefined ? (row[columnMapping['category']] || '').toString() : '',
+      line_number: columnMapping['item_number'] !== undefined ?
+        parseInt((row[columnMapping['item_number']] || (lines.length + 1)).toString()) : lines.length + 1,
+      asin: asin,
+      sku: columnMapping['sku'] !== undefined ? (row[columnMapping['sku']] || '').toString().trim() : (externalId || ''),
+      product_name: columnMapping['product_name'] !== undefined ? (row[columnMapping['product_name']] || '').toString().trim() : '',
+      product_description: modelNumber, // Store model number in description field
+      category: hsnCode, // HSN Code
       brand: '', // Not reliably available in Amazon POs
-      upc: '', // Not reliably available in Amazon POs
+      upc: columnMapping['upc'] !== undefined ? (row[columnMapping['upc']] || '').toString().trim() : '',
       size: '', // Not reliably available in Amazon POs
       color: '', // Not reliably available in Amazon POs
       quantity_ordered: columnMapping['quantity_ordered'] !== undefined ?
@@ -552,14 +653,32 @@ function parseAmazonData(jsonData: any[][], uploadedBy: string): AmazonParsedDat
         parseNumeric(row[columnMapping['total_cost']]) :
         columnMapping['unit_cost'] !== undefined && columnMapping['quantity_ordered'] !== undefined ?
         (parseFloat(parseNumeric(row[columnMapping['unit_cost']])) * parseInt(parseNumeric(row[columnMapping['quantity_ordered']]))).toString() : "0",
-      tax_rate: "0",
-      tax_amount: "0",
+      tax_rate: igstPercent, // Use IGST % as tax rate
+      tax_amount: columnMapping['tax_amount'] !== undefined ?
+        parseNumeric(row[columnMapping['tax_amount']]) : "0",
       discount_percent: "0",
       discount_amount: "0",
       net_amount: columnMapping['total_cost'] !== undefined ?
         parseNumeric(row[columnMapping['total_cost']]) : "0",
-      supplier_reference: "",
-      expected_delivery_date: null
+      // Store ALL additional fields in supplier_reference as JSON for display
+      supplier_reference: JSON.stringify({
+        external_id: externalId,
+        model_number: modelNumber,
+        hsn_code: hsnCode,
+        window_type: windowType,
+        expected_date: expectedDateValue,
+        quantity_requested: columnMapping['quantity_ordered'] !== undefined ? parseInt(parseNumeric(row[columnMapping['quantity_ordered']])) || 0 : 0,
+        quantity_accepted: quantityAccepted,
+        quantity_received: quantityReceived,
+        quantity_outstanding: quantityOutstanding,
+        igst_percent: igstPercent,
+        cess_percent: cessPercent,
+        addt_cess: addtCess,
+        landing_rate: landingRate,
+        mrp: mrp,
+        margin_percent: marginPercent
+      }),
+      expected_delivery_date: expectedDateValue ? parseDate(expectedDateValue) : null
     };
 
     console.log(`✅ Parsed line ${line.line_number}:`, {
@@ -578,15 +697,17 @@ function parseAmazonData(jsonData: any[][], uploadedBy: string): AmazonParsedDat
     throw new Error('No valid item lines found in the Amazon PO file');
   }
 
-  // Calculate totals
+  // Calculate totals from parsed lines
   const totalQuantity = lines.reduce((sum, line) => sum + line.quantity_ordered, 0);
   const calculatedTotal = lines.reduce((sum, line) => sum + parseFloat(line.total_cost || '0'), 0);
 
-  // Update header totals if not already set
-  if (header.total_amount === "0" && calculatedTotal > 0) {
-    header.total_amount = calculatedTotal.toString();
-    header.net_amount = calculatedTotal.toString();
-  }
+  console.log(`📊 Calculated totals: Quantity=${totalQuantity}, Total=${calculatedTotal}`);
+
+  // Always use calculated totals (more reliable than header totals)
+  header.total_amount = calculatedTotal.toString();
+  header.net_amount = calculatedTotal.toString();
+
+  console.log(`✅ Updated header totals: total_amount=${header.total_amount}, net_amount=${header.net_amount}`);
 
   // Ensure detectedVendor is always amazon
   detectedVendor = "amazon";
@@ -600,12 +721,31 @@ function parseAmazonData(jsonData: any[][], uploadedBy: string): AmazonParsedDat
     total_amount: header.total_amount
   });
 
-  return {
+  const result = {
     header,
     lines,
     totalItems: lines.length,
     totalQuantity,
-    totalAmount: header.total_amount,
+    totalAmount: header.total_amount || calculatedTotal.toFixed(2),
     detectedVendor: detectedVendor
   };
+
+  console.log(`📦 Final result summary:`, {
+    totalItems: result.totalItems,
+    totalQuantity: result.totalQuantity,
+    totalAmount: result.totalAmount,
+    calculatedTotal: calculatedTotal,
+    header_total_amount: header.total_amount,
+    po_number: header.po_number,
+    po_date: header.po_date,
+    ship_window: header.notes?.match(/Ship Window: ([^.]+)/)?.[1]
+  });
+
+  if (result.totalQuantity === 0 || result.totalAmount === "0" || result.totalAmount === "0.00") {
+    console.warn(`⚠️ WARNING: Totals are zero! totalQuantity=${result.totalQuantity}, totalAmount=${result.totalAmount}`);
+    console.warn(`⚠️ Check: calculatedTotal=${calculatedTotal}, lines.length=${lines.length}`);
+    console.warn(`⚠️ Sample line totals:`, lines.slice(0, 3).map(l => ({ qty: l.quantity_ordered, cost: l.total_cost })));
+  }
+
+  return result;
 }

@@ -52,7 +52,6 @@ import { insertZeptoPoToDatabase, insertMultipleZeptoPoToDatabase } from "./zept
 import { insertSwiggyPoToDatabase } from "./swiggy-db-operations";
 import { parseBlinkitExcelFile } from "./blinkit-excel-parser";
 import { parseSwiggyPO } from "./swiggy-parser";
-import { parseSwiggyCSV } from "./swiggy-csv-parser";
 import { parseBigBasketPO } from "./bigbasket-parser";
 import { parseZomatoPO } from "./zomato-parser";
 import { parseDealsharePO } from "./dealshare-parser";
@@ -989,41 +988,89 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/pos/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      console.log(`🔍 API /pos/${id}: Searching for PO with ID ${id}`);
+      console.log(`🔍 API /pos/${id}: Fetching PO from unified po_master/po_lines tables`);
 
-      // PRIORITY 1: Check platform-specific tables first (Zepto, Blinkit, Zomato, Amazon, etc.)
-      // This ensures we show original data from each platform's tables
-      let platformPo;
+      // UNIFIED APPROACH: Always fetch from po_master and po_lines for editing
+      // This ensures consistent editing experience across all platforms
+      let unifiedPo;
       try {
-        platformPo = await storage.getPoById(id);
-      } catch (getPoError) {
-        console.error(`❌ Error in storage.getPoById for ID ${id}:`, getPoError);
-        console.error('Stack trace:', getPoError instanceof Error ? getPoError.stack : 'No stack available');
-        return res.status(500).json({
-          message: "Failed to fetch PO",
-          error: getPoError instanceof Error ? getPoError.message : String(getPoError),
-          id: id
-        });
+        unifiedPo = await storage.getUnifiedPoById(id);
+      } catch (error) {
+        console.log(`⚠️  Error querying unified po_master table (will try platform-specific tables):`, error instanceof Error ? error.message : error);
+        unifiedPo = null;
       }
 
-      if (platformPo) {
-        console.log("📋 Found PO in platform-specific tables for ID:", id);
-        console.log("📊 Platform PO data:", {
-          id: platformPo.id,
-          po_number: platformPo.po_number,
-          platform: platformPo.platform?.pf_name,
-          serving_distributor: platformPo.serving_distributor,
-          vendor_name: platformPo.vendor_name,
-          orderItems_count: platformPo.orderItems?.length || 0
-        });
+      if (unifiedPo) {
+        console.log("📋 Found PO in unified tables (po_master/po_lines) for ID:", id);
 
-        return res.json(platformPo);
-      } else {
-        console.log(`❌ No PO found in platform-specific tables for ID ${id}`);
+        // Get platform info
+        const platform = await storage.getPlatformById(unifiedPo.platform_id);
+
+        // Transform unified PO data to match expected frontend format
+        const transformedPo = {
+          id: unifiedPo.id,
+          po_number: unifiedPo.po_number,
+          platform: platform || { id: unifiedPo.platform_id, pf_name: 'Unknown' },
+          platform_id: unifiedPo.platform_id,
+          serving_distributor: unifiedPo.serving_distributor,
+          vendor_name: unifiedPo.serving_distributor,
+          company: 'JIVO MART',
+          order_date: unifiedPo.po_date,
+          po_date: unifiedPo.po_date,
+          expiry_date: unifiedPo.expiry_date,
+          appointment_date: unifiedPo.appointment_date,
+          region: unifiedPo.region,
+          state: unifiedPo.state,
+          city: unifiedPo.city,
+          area: unifiedPo.area,
+          dispatch_from: unifiedPo.dispatch_from,
+          warehouse: unifiedPo.warehouse,
+          status: unifiedPo.status,
+          comments: unifiedPo.comments,
+          attachment: unifiedPo.attachment,
+          created_by: unifiedPo.created_by,
+          created_at: unifiedPo.created_at,
+          updated_at: unifiedPo.updated_at,
+          orderItems: unifiedPo.poLines.map(line => ({
+            id: line.id,
+            po_id: line.po_master_id,
+            line_number: line.line_number,
+            item_name: line.item_name,
+            platform_code: line.platform_code,
+            sap_code: line.sap_code,
+            uom: line.uom,
+            quantity: line.quantity,
+            boxes: line.boxes || 0,
+            unit_size_ltrs: parseFloat(line.unit_size_ltrs || '0'),
+            loose_qty: line.loose_qty || 0,
+            basic_rate: line.basic_amount,
+            basic_amount: parseFloat(line.basic_amount),
+            tax_rate: parseFloat(line.tax_percent),
+            tax_percent: line.tax_percent,
+            gst_rate: line.tax_percent,
+            landing_rate: line.landing_amount,
+            landing_amount: parseFloat(line.landing_amount || '0'),
+            total_amount: parseFloat(line.total_amount),
+            total_ltrs: parseFloat(line.total_ltrs || '0'),
+            hsn_code: line.hsn_code,
+            status: line.status || 'Pending',
+            created_at: line.created_at,
+            updated_at: line.updated_at
+          }))
+        };
+
+        console.log("✅ Returning unified PO with", transformedPo.orderItems.length, "items");
+        return res.json(transformedPo);
       }
 
-      // PRIORITY 2: Fall back to po_master table if not found in platform tables
-      const poMaster = await storage.getPoMasterById(id);
+      // FALLBACK: Try old po_master table structure (for backward compatibility)
+      let poMaster;
+      try {
+        poMaster = await storage.getPoMasterById(id);
+      } catch (error) {
+        console.log(`⚠️  Error querying po_master table (will try platform-specific tables):`, error instanceof Error ? error.message : error);
+        poMaster = null;
+      }
       if (poMaster) {
         console.log("📋 Found PO in po_master table for ID:", id);
         console.log("📊 Raw poMaster data:", {
@@ -1131,6 +1178,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json(transformedPo);
       }
 
+      // FALLBACK: Try platform-specific tables (Zepto, Blinkit, Swiggy, Amazon, etc.)
+      console.log(`📋 Checking platform-specific tables for ID: ${id}`);
+      const platformPo = await storage.getPoById(id);
+      if (platformPo) {
+        console.log(`✅ Found PO in platform-specific table: ${platformPo.platform?.pf_name || 'Unknown'}`);
+        return res.json(platformPo);
+      }
+
       // If not found in any table, return 404
       return res.status(404).json({ message: "PO not found" });
     } catch (error) {
@@ -1217,28 +1272,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userAgent = req.get('User-Agent') || 'Unknown';
       const sessionId = req.sessionID || 'Unknown';
       
-      // Check if this is the master/lines structure - use po_master and po_lines tables
+      // Check if this is the master/lines structure - use unified po_master and po_lines tables
       if (req.body.master && req.body.lines) {
-        console.log("✅ Using po_master and po_lines tables for update/insert");
+        console.log("✅ Using UNIFIED po_master and po_lines tables for update");
         const { master, lines } = req.body;
 
         try {
-          // Check if PO exists in po_master to determine INSERT or UPDATE (for logging purposes)
-          const existingPoCheck = await db.select().from(poMaster).where(eq(poMaster.id, id)).limit(1);
-          const isInsert = !existingPoCheck || existingPoCheck.length === 0;
-          console.log(`📝 PO ${id} exists in po_master: ${!isInsert}, will ${isInsert ? 'INSERT' : 'UPDATE'}`);
+          // Transform frontend data to match po_master schema
+          const headerData = {
+            po_number: master.vendor_po_number || master.po_number,
+            company: master.serving_distributor || master.company || 'Unknown',
+            platform_id: master.platform_id || master.platform,
+            serving_distributor: master.serving_distributor,
+            po_date: master.order_date || master.po_date,
+            expiry_date: master.expiry_date,
+            appointment_date: master.appointment_date,
+            region: master.region || 'Unknown',
+            state: master.state || 'Unknown',
+            city: master.city || 'Unknown',
+            area: master.area,
+            dispatch_from: master.dispatch_from,
+            warehouse: master.ware_house || master.warehouse,
+            status: master.status || 'OPEN',
+            comments: master.notes || master.comments,
+            attachment: master.attachment,
+            created_by: master.created_by
+          };
 
-          const updatedPo = await storage.updatePoInExistingTables(id, master, lines);
+          // Transform lines to match po_lines schema
+          const linesData = lines.map((line: any, index: number) => ({
+            line_number: line.line_number || index + 1,
+            item_name: line.item_name,
+            platform_code: line.platform_code || line.sap_code,
+            sap_code: line.sap_code || line.platform_code,
+            uom: line.uom || 'PCS',
+            quantity: line.quantity,
+            boxes: line.boxes || 0,
+            unit_size_ltrs: line.unit_size_ltrs || null,
+            loose_qty: line.loose_qty || 0,
+            basic_amount: line.basic_rate || line.basic_amount,
+            tax_percent: line.tax_rate || line.tax_percent || line.gst_rate || 0,
+            landing_amount: line.landing_rate || line.landing_amount,
+            total_amount: line.total_amount,
+            total_ltrs: line.total_ltrs || 0,
+            hsn_code: line.hsn_code,
+            status: line.status || 'Pending'
+          }));
 
-          // Log the PO operation (INSERT or UPDATE)
+          // Update using unified method
+          const updatedPo = await storage.updateUnifiedPo(id, headerData, linesData);
+
+          // Log the PO UPDATE operation
           await storage.logEdit({
             username,
-            action: isInsert ? 'INSERT' : 'UPDATE',
+            action: 'UPDATE',
             tableName: 'po_master',
             recordId: id,
             fieldName: 'full_record',
-            oldValue: isInsert ? null : 'Previous PO data',
-            newValue: JSON.stringify(master),
+            oldValue: 'Previous PO data',
+            newValue: JSON.stringify(headerData),
             ipAddress,
             userAgent,
             sessionId
@@ -1247,18 +1339,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Also log po_lines operation
           await storage.logEdit({
             username,
-            action: isInsert ? 'INSERT' : 'UPDATE',
+            action: 'UPDATE',
             tableName: 'po_lines',
             recordId: id,
             fieldName: 'lines_data',
-            oldValue: isInsert ? null : 'Previous lines data',
+            oldValue: 'Previous lines data',
             newValue: `${lines.length} line items`,
             ipAddress,
             userAgent,
             sessionId
           });
 
-          console.log(`✅ Logged ${isInsert ? 'INSERT' : 'UPDATE'} operation for PO ${id} in po_master and po_lines`);
+          console.log(`✅ Logged UPDATE operation for PO ${id} in unified po_master and po_lines tables`);
 
           res.json(updatedPo);
         } catch (updateError: any) {
@@ -1675,33 +1767,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     } catch (error) {
       res.status(500).json({ message: "Failed to seed test data" });
-    }
-  });
-
-  // Zepto PO Routes
-  app.get("/api/zepto-pos", async (req, res) => {
-    try {
-      const pos = await storage.getAllZeptoPos();
-      res.json(pos);
-    } catch (error) {
-      console.error("Error fetching Zepto POs:", error);
-      res.status(500).json({ error: "Failed to fetch POs" });
-    }
-  });
-
-  app.get("/api/zepto-pos/:id", async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const po = await storage.getZeptoPOById(id);
-      
-      if (!po) {
-        return res.status(404).json({ error: "PO not found" });
-      }
-      
-      res.json(po);
-    } catch (error) {
-      console.error("Error fetching Zepto PO:", error);
-      res.status(500).json({ error: "Failed to fetch PO" });
     }
   });
 
@@ -2293,18 +2358,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (fileExtension === 'csv') {
         // Handle CSV file upload
         const csvContent = req.file.buffer.toString('utf-8');
-        const { parseSwiggyCSV } = await import('./swiggy-csv-parser');
+        const { parseSwiggyCSVPO } = await import('./swiggy-csv-parser-new');
         const { insertSwiggyPoToDatabase } = await import('./swiggy-db-operations');
 
-        const parsedData = parseSwiggyCSV(csvContent, uploadedBy);
-        console.log(`📊 Parsed ${parsedData.totalPOs} POs from CSV`);
+        const parsedData = parseSwiggyCSVPO(csvContent, uploadedBy);
+
+        // Handle both single PO and multiple PO formats
+        const poList = parsedData.poList ? parsedData.poList : [{ header: parsedData.header, lines: parsedData.lines }];
+        const totalPOs = parsedData.totalPOs || 1;
+
+        console.log(`📊 Parsed ${totalPOs} POs from CSV`);
 
         const results = [];
         let successCount = 0;
         let failureCount = 0;
 
         // Process each PO
-        for (const parsedPO of parsedData.poList) {
+        for (const parsedPO of poList) {
           try {
             // Check for existing PO first
             const existingPo = await storage.getSwiggyPoByNumber(parsedPO.header.po_number);
@@ -2340,7 +2410,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.status(201).json({
           message: `CSV processing completed. Success: ${successCount}, Failed: ${failureCount}`,
-          totalPOs: parsedData.totalPOs,
+          totalPOs: totalPOs,
           successCount,
           failureCount,
           results
@@ -3230,16 +3300,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.log('📄 First 100 chars:', req.file.buffer.toString('utf-8', 0, 100));
 
             try {
-              const csvResult = parseSwiggyCSV(req.file.buffer.toString('utf-8'), uploadedBy);
+              const { parseSwiggyCSVPO } = await import('./swiggy-csv-parser-new');
+              const csvResult = parseSwiggyCSVPO(req.file.buffer.toString('utf-8'), uploadedBy);
+
+              // Handle both single PO and multiple PO formats
+              const poList = csvResult.poList ? csvResult.poList : [{ header: csvResult.header, lines: csvResult.lines }];
+              const totalPOs = csvResult.totalPOs || 1;
+
               console.log('✅ Swiggy CSV parsing successful:', {
-                totalPOs: csvResult.totalPOs,
-                poListLength: csvResult.poList.length
+                totalPOs: totalPOs,
+                poListLength: poList.length
               });
 
               // Convert to unified format for preview
               parsedData = {
-                poList: csvResult.poList,
-                totalPOs: csvResult.totalPOs,
+                poList: poList,
+                totalPOs: totalPOs,
                 detectedVendor: 'swiggy'
               };
             } catch (csvError) {
@@ -4646,10 +4722,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else if (vendor === 'amazon') {
           console.log('🔍 Amazon: Processing Amazon PO import');
 
-          // Prepare Amazon header with proper field validation
-          const safeHeader = {
-            ...cleanHeader
-          };
+          // DEFENSIVE: Ensure all date fields are proper Date objects or null
+          const safeHeader = { ...cleanHeader };
+          Object.keys(safeHeader).forEach(key => {
+            const value = safeHeader[key];
+
+            // Check if this looks like a date field
+            if (key.includes('date') || key.includes('Date') || key.includes('_at') || key.includes('time')) {
+              if (!value || value === null || value === '') {
+                safeHeader[key] = null;
+                console.log(`🔧 Amazon: Set ${key} to null (was empty/null)`);
+              } else if (value instanceof Date) {
+                // Check if it's a valid Date object with proper methods
+                try {
+                  if (typeof value.toISOString !== 'function' || typeof value.getTime !== 'function') {
+                    console.warn(`⚠️ Amazon: ${key} is malformed Date object, setting to null`);
+                    safeHeader[key] = null;
+                  } else if (isNaN(value.getTime())) {
+                    console.warn(`⚠️ Amazon: ${key} is invalid Date (NaN), setting to null`);
+                    safeHeader[key] = null;
+                  } else {
+                    const isoString = value.toISOString();
+                    console.log(`✅ Amazon: ${key} is valid Date:`, isoString);
+                    // Keep as-is for timestamp columns
+                  }
+                } catch (err) {
+                  console.warn(`⚠️ Amazon: ${key} Date conversion error:`, err.message);
+                  safeHeader[key] = null;
+                }
+              } else if (typeof value === 'string') {
+                // Try to parse string to Date
+                try {
+                  const parsed = new Date(value);
+                  if (isNaN(parsed.getTime())) {
+                    console.warn(`⚠️ Amazon: ${key} string "${value}" is not parseable, setting to null`);
+                    safeHeader[key] = null;
+                  } else {
+                    const isoString = parsed.toISOString();
+                    console.log(`✅ Amazon: Parsed ${key} string to Date:`, isoString);
+                    safeHeader[key] = parsed;
+                  }
+                } catch (e) {
+                  console.warn(`⚠️ Amazon: Failed to parse ${key}:`, e instanceof Error ? e.message : String(e));
+                  safeHeader[key] = null;
+                }
+              } else {
+                console.warn(`⚠️ Amazon: ${key} has unexpected type ${typeof value}, setting to null`);
+                safeHeader[key] = null;
+              }
+            }
+          });
 
           // Ensure proper Amazon-specific field handling
           const amazonFields = [
@@ -4676,6 +4798,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           const safeLines = cleanLines?.map((line, index) => {
             const safeLine = { ...line };
+
+            // Convert Date objects in lines
+            Object.keys(safeLine).forEach(key => {
+              // Check if this is a date field
+              if (key.includes('date') || key.includes('Date') || key.includes('_at')) {
+                const value = safeLine[key];
+
+                if (!value || value === null || value === '') {
+                  safeLine[key] = null;
+                } else if (value instanceof Date) {
+                  try {
+                    if (typeof value.toISOString !== 'function' || typeof value.getTime !== 'function') {
+                      console.warn(`⚠️ Amazon Line: ${key} is malformed Date object, setting to null`);
+                      safeLine[key] = null;
+                    } else if (isNaN(value.getTime())) {
+                      console.warn(`⚠️ Amazon Line: ${key} is invalid Date (NaN), setting to null`);
+                      safeLine[key] = null;
+                    } else {
+                      console.log(`✅ Amazon Line: ${key} is valid Date object`);
+                      // Keep as Date object for timestamp columns
+                    }
+                  } catch (err) {
+                    console.warn(`⚠️ Amazon Line: ${key} Date conversion error:`, err instanceof Error ? err.message : String(err));
+                    safeLine[key] = null;
+                  }
+                } else if (typeof value === 'string') {
+                  try {
+                    const parsed = new Date(value);
+                    if (isNaN(parsed.getTime())) {
+                      safeLine[key] = null;
+                    } else {
+                      safeLine[key] = parsed;
+                    }
+                  } catch (e) {
+                    safeLine[key] = null;
+                  }
+                }
+              }
+            });
+
             // Ensure line_number is set
             if (!safeLine.line_number) {
               safeLine.line_number = index + 1;
@@ -4690,6 +4852,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }) || [];
 
           console.log('🔍 Amazon: Calling createAmazonPo with processed data');
+          console.log('🔍 Amazon: Sample header:', JSON.stringify(Object.keys(finalHeader).reduce((obj, key) => {
+            obj[key] = typeof finalHeader[key];
+            return obj;
+          }, {})));
           createdPo = await storage.createAmazonPo(finalHeader, safeLines);
         } else {
           // Fallback to unified po_master table for platforms without specific methods
@@ -4844,18 +5010,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dc_gstin: header.dc_gstin || '',
         total_items: lines.length,
         total_quantity: lines.reduce((sum, line) => sum + (parseInt(String(line.quantity || 0)) || 0), 0),
-        total_basic_cost: lines.reduce((sum, line) => {
+        total_basic_cost: parseFloat(lines.reduce((sum, line) => {
           const quantity = parseInt(String(line.quantity || 0)) || 0;
           const basicCost = parseFloat(String(line.basic_cost || '0')) || 0;
           return sum + (quantity * basicCost);
-        }, 0).toFixed(2),
-        total_gst_amount: lines.reduce((sum, line) => sum + (parseFloat(String(line.gst_amount || '0')) || 0), 0).toFixed(2),
-        total_cess_amount: lines.reduce((sum, line) => {
+        }, 0).toFixed(2)),
+        total_gst_amount: parseFloat(lines.reduce((sum, line) => sum + (parseFloat(String(line.gst_amount || '0')) || 0), 0).toFixed(2)),
+        total_cess_amount: parseFloat(lines.reduce((sum, line) => {
           const cessValue = parseFloat(String(line.cess_value || '0')) || 0;
           const stateCess = parseFloat(String(line.state_cess || '0')) || 0;
           return sum + cessValue + stateCess;
-        }, 0).toFixed(2),
-        grand_total: lines.reduce((sum, line) => sum + (parseFloat(String(line.total_value || '0')) || 0), 0).toFixed(2),
+        }, 0).toFixed(2)),
+        grand_total: parseFloat(lines.reduce((sum, line) => sum + (parseFloat(String(line.total_value || '0')) || 0), 0).toFixed(2)),
         status: header.status || 'pending',
         created_by: header.created_by || 'system'
       };
@@ -4869,22 +5035,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ean_upc_code: String(line.ean_upc_code || '').trim(),
         case_quantity: parseInt(String(line.case_quantity || 0)) || 0,
         quantity: parseInt(String(line.quantity || 0)) || 0,
-        basic_cost: (parseFloat(String(line.basic_cost || '0')) || 0).toFixed(2),
-        sgst_percent: (parseFloat(String(line.sgst_percent || '0')) || 0).toFixed(2),
-        sgst_amount: (parseFloat(String(line.sgst_amount || '0')) || 0).toFixed(2),
-        cgst_percent: (parseFloat(String(line.cgst_percent || '0')) || 0).toFixed(2),
-        cgst_amount: (parseFloat(String(line.cgst_amount || '0')) || 0).toFixed(2),
-        igst_percent: (parseFloat(String(line.igst_percent || '0')) || 0).toFixed(2),
-        igst_amount: (parseFloat(String(line.igst_amount || '0')) || 0).toFixed(2),
-        gst_percent: (parseFloat(String(line.gst_percent || '0')) || 0).toFixed(2),
-        gst_amount: (parseFloat(String(line.gst_amount || '0')) || 0).toFixed(2),
-        cess_percent: (parseFloat(String(line.cess_percent || '0')) || 0).toFixed(2),
-        cess_value: (parseFloat(String(line.cess_value || '0')) || 0).toFixed(2),
-        state_cess_percent: (parseFloat(String(line.state_cess_percent || '0')) || 0).toFixed(2),
-        state_cess: (parseFloat(String(line.state_cess || '0')) || 0).toFixed(2),
-        landing_cost: (parseFloat(String(line.landing_cost || '0')) || 0).toFixed(2),
-        mrp: (parseFloat(String(line.mrp || '0')) || 0).toFixed(2),
-        total_value: (parseFloat(String(line.total_value || '0')) || 0).toFixed(2)
+        basic_cost: parseFloat((parseFloat(String(line.basic_cost || '0')) || 0).toFixed(2)),
+        sgst_percent: parseFloat((parseFloat(String(line.sgst_percent || '0')) || 0).toFixed(2)),
+        sgst_amount: parseFloat((parseFloat(String(line.sgst_amount || '0')) || 0).toFixed(2)),
+        cgst_percent: parseFloat((parseFloat(String(line.cgst_percent || '0')) || 0).toFixed(2)),
+        cgst_amount: parseFloat((parseFloat(String(line.cgst_amount || '0')) || 0).toFixed(2)),
+        igst_percent: parseFloat((parseFloat(String(line.igst_percent || '0')) || 0).toFixed(2)),
+        igst_amount: parseFloat((parseFloat(String(line.igst_amount || '0')) || 0).toFixed(2)),
+        gst_percent: parseFloat((parseFloat(String(line.gst_percent || '0')) || 0).toFixed(2)),
+        gst_amount: parseFloat((parseFloat(String(line.gst_amount || '0')) || 0).toFixed(2)),
+        cess_percent: parseFloat((parseFloat(String(line.cess_percent || '0')) || 0).toFixed(2)),
+        cess_value: parseFloat((parseFloat(String(line.cess_value || '0')) || 0).toFixed(2)),
+        state_cess_percent: parseFloat((parseFloat(String(line.state_cess_percent || '0')) || 0).toFixed(2)),
+        state_cess: parseFloat((parseFloat(String(line.state_cess || '0')) || 0).toFixed(2)),
+        landing_cost: parseFloat((parseFloat(String(line.landing_cost || '0')) || 0).toFixed(2)),
+        mrp: parseFloat((parseFloat(String(line.mrp || '0')) || 0).toFixed(2)),
+        total_value: parseFloat((parseFloat(String(line.total_value || '0')) || 0).toFixed(2))
       }));
 
       // Validate that essential fields are present
@@ -5359,7 +5525,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Invalid import data: header and lines required" });
       }
 
-      const createdPo = await storage.createAmazonPo(header, lines);
+      console.log('🔍 Amazon import - Raw header data:', JSON.stringify(header, null, 2));
+      console.log('🔍 Amazon import - Number of lines:', lines.length);
+
+      // Convert date strings to Date objects and ensure all fields are the correct type
+      const cleanHeader = {
+        ...header,
+        po_date: header.po_date ? new Date(header.po_date) : null,
+        shipment_date: header.shipment_date ? new Date(header.shipment_date) : null,
+        delivery_date: header.delivery_date ? new Date(header.delivery_date) : null,
+        // Ensure numeric fields are strings for decimal columns
+        total_amount: header.total_amount ? String(header.total_amount) : "0",
+        tax_amount: header.tax_amount ? String(header.tax_amount) : "0",
+        shipping_cost: header.shipping_cost ? String(header.shipping_cost) : "0",
+        discount_amount: header.discount_amount ? String(header.discount_amount) : "0",
+        net_amount: header.net_amount ? String(header.net_amount) : "0",
+      };
+
+      console.log('✅ Amazon import - Cleaned header:', JSON.stringify(cleanHeader, null, 2));
+
+      const cleanLines = lines.map((line, index) => {
+        const cleaned = {
+          ...line,
+          expected_delivery_date: line.expected_delivery_date ? new Date(line.expected_delivery_date) : null,
+          // Ensure numeric fields are strings for decimal columns
+          unit_cost: line.unit_cost ? String(line.unit_cost) : "0",
+          total_cost: line.total_cost ? String(line.total_cost) : "0",
+          tax_rate: line.tax_rate ? String(line.tax_rate) : "0",
+          tax_amount: line.tax_amount ? String(line.tax_amount) : "0",
+          discount_percent: line.discount_percent ? String(line.discount_percent) : "0",
+          discount_amount: line.discount_amount ? String(line.discount_amount) : "0",
+          net_amount: line.net_amount ? String(line.net_amount) : "0",
+        };
+
+        if (index === 0) {
+          console.log('✅ Amazon import - Sample cleaned line:', JSON.stringify(cleaned, null, 2));
+        }
+
+        return cleaned;
+      });
+
+      const createdPo = await storage.createAmazonPo(cleanHeader, cleanLines);
 
       res.json({
         success: true,
@@ -5370,6 +5576,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     } catch (error) {
       console.error('❌ Amazon PO import error:', error);
+      console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
       res.status(400).json({
         error: error instanceof Error ? error.message : 'Unknown error occurred during Amazon PO import'
       });
@@ -5384,7 +5591,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Header and lines are required" });
       }
 
-      const createdPo = await storage.createAmazonPo(header, lines);
+      // Convert date strings to Date objects
+      const cleanHeader = {
+        ...header,
+        po_date: header.po_date ? new Date(header.po_date) : null,
+        shipment_date: header.shipment_date ? new Date(header.shipment_date) : null,
+        delivery_date: header.delivery_date ? new Date(header.delivery_date) : null,
+      };
+
+      const cleanLines = lines.map(line => ({
+        ...line,
+        expected_delivery_date: line.expected_delivery_date ? new Date(line.expected_delivery_date) : null,
+      }));
+
+      const createdPo = await storage.createAmazonPo(cleanHeader, cleanLines);
       res.status(201).json(createdPo);
     } catch (error) {
       console.error("Error creating Amazon PO:", error);
@@ -5429,6 +5649,95 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting Amazon PO:", error);
       res.status(500).json({ message: "Failed to delete Amazon PO" });
+    }
+  });
+
+  // ==========================================
+  // Unified PO Routes - Using po_master and po_lines for ALL platforms
+  // ==========================================
+
+  // Get all unified POs (optionally filter by platform_id)
+  app.get("/api/unified-pos", async (req, res) => {
+    try {
+      const platformId = req.query.platform_id ? parseInt(req.query.platform_id as string) : undefined;
+      const pos = await storage.getAllUnifiedPos(platformId);
+      res.json(pos);
+    } catch (error) {
+      console.error("Error fetching unified POs:", error);
+      res.status(500).json({ message: "Failed to fetch unified POs" });
+    }
+  });
+
+  // Get unified PO by ID
+  app.get("/api/unified-pos/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const po = await storage.getUnifiedPoById(id);
+
+      if (!po) {
+        return res.status(404).json({ message: "PO not found" });
+      }
+
+      res.json(po);
+    } catch (error) {
+      console.error("Error fetching unified PO:", error);
+      res.status(500).json({ message: "Failed to fetch unified PO" });
+    }
+  });
+
+  // Get unified PO by PO number
+  app.get("/api/unified-pos/number/:poNumber", async (req, res) => {
+    try {
+      const poNumber = req.params.poNumber;
+      const po = await storage.getUnifiedPoByNumber(poNumber);
+
+      if (!po) {
+        return res.status(404).json({ message: "PO not found" });
+      }
+
+      res.json(po);
+    } catch (error) {
+      console.error("Error fetching unified PO by number:", error);
+      res.status(500).json({ message: "Failed to fetch unified PO" });
+    }
+  });
+
+  // Update unified PO (header and/or lines)
+  app.put("/api/unified-pos/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { header, lines } = req.body;
+
+      if (!header && !lines) {
+        return res.status(400).json({ error: "Header or lines are required" });
+      }
+
+      const updatedPo = await storage.updateUnifiedPo(id, header, lines);
+
+      res.json({
+        success: true,
+        message: "PO updated successfully",
+        po: updatedPo
+      });
+    } catch (error) {
+      console.error("Error updating unified PO:", error);
+      res.status(500).json({ message: "Failed to update unified PO" });
+    }
+  });
+
+  // Delete unified PO
+  app.delete("/api/unified-pos/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteUnifiedPo(id);
+
+      res.json({
+        success: true,
+        message: "PO deleted successfully"
+      });
+    } catch (error) {
+      console.error("Error deleting unified PO:", error);
+      res.status(500).json({ message: "Failed to delete unified PO" });
     }
   });
 

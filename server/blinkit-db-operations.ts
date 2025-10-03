@@ -130,27 +130,26 @@ export async function insertBlinkitPoData(data: BlinkitPoData): Promise<{ header
       console.log('📝 Inserting header into blinkit_po_header...');
 
       // Step 1: Insert PO Header
-      // Convert date strings to proper date format
-      const parsePODate = (dateStr: string): string => {
+      // Convert date strings to proper Date objects for database trigger compatibility
+      const parsePODate = (dateStr: string): Date => {
         // Handle formats like "Sept. 18, 2025, 9:40 a.m." or just "Sept. 18, 2025"
         try {
           if (!dateStr || dateStr === 'N/A' || dateStr === '') {
             console.warn('Empty or N/A date, using current date');
-            return new Date().toISOString().split('T')[0];
+            return new Date();
           }
 
           const cleanDate = dateStr.replace(/\./g, '').replace(/,\s*\d{1,2}:\d{2}\s*[ap]\.m\./i, '');
           const dateObj = new Date(cleanDate);
           if (!isNaN(dateObj.getTime())) {
-            const formattedDate = dateObj.toISOString().split('T')[0]; // YYYY-MM-DD format
-            console.log(`✅ Successfully parsed date: ${dateStr} -> ${formattedDate}`);
-            return formattedDate;
+            console.log(`✅ Successfully parsed date: ${dateStr} -> ${dateObj.toISOString()}`);
+            return dateObj;
           }
         } catch (e) {
           console.warn('Failed to parse date:', dateStr, e);
         }
         console.warn('Using default date for:', dateStr);
-        return new Date().toISOString().split('T')[0]; // Default to today if parse fails
+        return new Date(); // Return Date object for trigger compatibility
       };
 
       // Clean numeric values by removing units and text

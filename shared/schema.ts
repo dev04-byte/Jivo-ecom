@@ -2679,81 +2679,78 @@ export type InsertBigBasketInventoryDaily = z.infer<typeof insertBigBasketInvent
 export type BigBasketInventoryRange = typeof invBigBasketJmRange.$inferSelect;
 export type InsertBigBasketInventoryRange = z.infer<typeof insertBigBasketInventoryRangeSchema>;
 
-// PO Master table - matches existing database structure
+// PO Master table - unified consolidated table for all platforms
 export const poMaster = pgTable("po_master", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  po_number: varchar("po_number", { length: 100 }).notNull().unique(),
+  company: varchar("company", { length: 100 }),
   platform_id: integer("platform_id").notNull(),
-  vendor_po_number: varchar("vendor_po_number", { length: 256 }),
-  distributor_id: integer("distributor_id").notNull(),
-  series: varchar("series", { length: 250 }).notNull(),
-  company_id: integer("company_id").notNull(),
+  serving_distributor: varchar("serving_distributor", { length: 200 }),
   po_date: timestamp("po_date").notNull(),
-  delivery_date: timestamp("delivery_date"),
-  create_on: timestamp("create_on").notNull().defaultNow(),
-  updated_on: timestamp("updated_on").notNull().defaultNow(),
-  status_id: integer("status_id").notNull(),
-  dispatch_date: timestamp("dispatch_date"),
-  created_by: varchar("created_by", { length: 150 }),
-  dispatch_from: varchar("dispatch_from", { length: 256 }),
-  state_id: integer("state_id"),
-  district_id: integer("district_id"),
-  region: text("region"),
-  area: text("area"),
-  ware_house: varchar("ware_house", { length: 50 }),
-  invoice_date: timestamp("invoice_date"),
+  expiry_date: timestamp("expiry_date"),
   appointment_date: timestamp("appointment_date"),
-  expiry_date: timestamp("expiry_date")
+  region: varchar("region", { length: 100 }).notNull(),
+  state: varchar("state", { length: 100 }).notNull(),
+  city: varchar("city", { length: 100 }).notNull(),
+  area: varchar("area", { length: 100 }),
+  dispatch_from: varchar("dispatch_from", { length: 100 }),
+  warehouse: varchar("warehouse", { length: 100 }),
+  status: varchar("status", { length: 50 }).notNull().default('OPEN'),
+  comments: text("comments"),
+  attachment: varchar("attachment", { length: 255 }),
+  created_by: varchar("created_by", { length: 100 }),
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow()
 });
 
-// Generic PO Lines table for unified purchase order items
+// PO Lines table - unified consolidated table for all platform line items
 export const poLines = pgTable("po_lines", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  po_id: integer("po_id").notNull(),
-  platform_product_code_id: integer("platform_product_code_id").notNull(),
-  quantity: decimal("quantity", { precision: 12, scale: 2 }).notNull(),
-  basic_amount: decimal("basic_amount", { precision: 14, scale: 2 }).notNull(),
-  tax: decimal("tax", { precision: 14, scale: 2 }),
-  landing_amount: decimal("landing_amount", { precision: 14, scale: 2 }),
-  total_amount: decimal("total_amount", { precision: 14, scale: 2 }).notNull(),
-  uom: varchar("uom", { length: 50 }),
-  total_liter: decimal("total_liter", { precision: 14, scale: 2 }),
+  po_master_id: integer("po_master_id").notNull(),
+  line_number: integer("line_number").notNull(),
+  item_name: text("item_name").notNull(),
+  platform_code: varchar("platform_code", { length: 50 }),
+  sap_code: varchar("sap_code", { length: 50 }),
+  uom: varchar("uom", { length: 20 }).notNull(),
+  quantity: integer("quantity").notNull(),
   boxes: integer("boxes"),
-  remark: text("remark"),
-  invoice_date: date("invoice_date"),
-  invoice_litre: decimal("invoice_litre", { precision: 14, scale: 2 }),
-  invoice_amount: decimal("invoice_amount", { precision: 14, scale: 2 }),
-  invoice_qty: decimal("invoice_qty", { precision: 14, scale: 2 }),
-  dispatch_date: date("dispatch_date"),
-  delivery_date: date("delivery_date"),
-  status: integer("status"),
-  delete: boolean("delete").default(false),
-  deleted: boolean("deleted").default(false)
+  unit_size_ltrs: decimal("unit_size_ltrs", { precision: 10, scale: 3 }),
+  loose_qty: integer("loose_qty"),
+  basic_amount: decimal("basic_amount", { precision: 10, scale: 2 }).notNull(),
+  tax_percent: decimal("tax_percent", { precision: 5, scale: 2 }).notNull(),
+  landing_amount: decimal("landing_amount", { precision: 10, scale: 2 }),
+  total_amount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
+  total_ltrs: decimal("total_ltrs", { precision: 10, scale: 3 }),
+  hsn_code: varchar("hsn_code", { length: 20 }),
+  status: varchar("status", { length: 50 }).notNull().default('Pending'),
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow()
 });
 
-// Relations for PO Master and Lines (existing tables structure)
+// Relations for PO Master and Lines
 export const poMasterRelations = relations(poMaster, ({ many }) => ({
   poLines: many(poLines),
 }));
 
 export const poLinesRelations = relations(poLines, ({ one }) => ({
   poMaster: one(poMaster, {
-    fields: [poLines.po_id],
+    fields: [poLines.po_master_id],
     references: [poMaster.id]
   })
 }));
 
-// Insert schemas for existing PO Master and Lines tables
+// Insert schemas for PO Master and Lines tables
 export const insertPoMasterSchema = createInsertSchema(poMaster).omit({
   id: true,
-  create_on: true,
-  updated_on: true
+  created_at: true,
+  updated_at: true
 });
 
 export const insertPoLinesSchema = createInsertSchema(poLines).omit({
   id: true,
-  po_id: true,  // Auto-generated by backend
-  delete: true,
-  deleted: true
+  po_master_id: true,  // Auto-generated by backend
+  created_at: true,
+  updated_at: true
 });
 
 // Types for PO Master and Lines

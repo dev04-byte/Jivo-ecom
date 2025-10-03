@@ -57,10 +57,10 @@ export async function parseBigBasketPO(buffer: Buffer, uploadedBy: string): Prom
       dc_gstin: "",
       total_items: 0,
       total_quantity: 0,
-      total_basic_cost: "0",
-      total_gst_amount: "0",
-      total_cess_amount: "0",
-      grand_total: "0",
+      total_basic_cost: 0,
+      total_gst_amount: 0,
+      total_cess_amount: 0,
+      grand_total: 0,
       status: "pending",
       created_by: uploadedBy
     };
@@ -223,9 +223,9 @@ export async function parseBigBasketPO(buffer: Buffer, uploadedBy: string): Prom
       }
       
       // Helper function to safely parse numeric values
-      const safeParseFloat = (value: any, defaultValue: number = 0): string => {
+      const safeParseFloat = (value: any, defaultValue: number = 0): number => {
         const parsed = parseFloat(String(value || '0'));
-        return isNaN(parsed) ? defaultValue.toFixed(2) : parsed.toFixed(2);
+        return isNaN(parsed) ? defaultValue : parseFloat(parsed.toFixed(2));
       };
 
       const safeParseInt = (value: any, defaultValue: number = 0): number => {
@@ -288,10 +288,10 @@ export async function parseBigBasketPO(buffer: Buffer, uploadedBy: string): Prom
     // Update header totals
     header.total_items = lines.length;
     header.total_quantity = totalQuantity;
-    header.grand_total = totalValue.toFixed(2);
-    header.total_gst_amount = totalGST.toFixed(2);
-    header.total_cess_amount = totalCess.toFixed(2);
-    header.total_basic_cost = lines.reduce((sum, line) => sum + (parseFloat(line.basic_cost || '0') * line.quantity), 0).toFixed(2);
+    header.grand_total = parseFloat(totalValue.toFixed(2));
+    header.total_gst_amount = parseFloat(totalGST.toFixed(2));
+    header.total_cess_amount = parseFloat(totalCess.toFixed(2));
+    header.total_basic_cost = parseFloat(lines.reduce((sum, line) => sum + ((typeof line.basic_cost === 'number' ? line.basic_cost : parseFloat(line.basic_cost || '0')) * line.quantity), 0).toFixed(2));
     
     // Final validation
     if (lines.length === 0) {

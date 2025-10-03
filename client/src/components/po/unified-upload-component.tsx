@@ -2246,9 +2246,12 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                     <th className="text-left p-2 font-medium border-r min-w-[200px]">Description</th>
                                     <th className="text-center p-2 font-medium border-r min-w-[60px]">Qty</th>
                                     <th className="text-left p-2 font-medium border-r min-w-[60px]">UOM</th>
-                                    <th className="text-right p-2 font-medium border-r min-w-[100px]">Unit Price</th>
+                                    <th className="text-right p-2 font-medium border-r min-w-[100px]">Buying Price</th>
                                     <th className="text-right p-2 font-medium border-r min-w-[100px]">MRP</th>
+                                    <th className="text-right p-2 font-medium border-r min-w-[80px]">GST %</th>
+                                    <th className="text-right p-2 font-medium border-r min-w-[80px]">CESS %</th>
                                     <th className="text-right p-2 font-medium border-r min-w-[100px]">Tax Amount</th>
+                                    <th className="text-right p-2 font-medium border-r min-w-[120px]">Gross Amount</th>
                                     <th className="text-right p-2 font-medium min-w-[120px]">Total Amount</th>
                                   </tr>
                                 </thead>
@@ -2312,6 +2315,12 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                         )}
                                       </td>
                                       <td className="p-2 text-right border-r">
+                                        {line.gst_percent ? `${parseFloat(line.gst_percent).toFixed(2)}%` : '-'}
+                                      </td>
+                                      <td className="p-2 text-right border-r">
+                                        {line.cess_percent ? `${parseFloat(line.cess_percent).toFixed(2)}%` : '-'}
+                                      </td>
+                                      <td className="p-2 text-right border-r">
                                         {(() => {
                                           // For Blinkit data, show the exact tax_amount from tax_value column
                                           if (line.tax_amount) {
@@ -2325,6 +2334,13 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                           const taxAmount = totalAmount - taxableValue;
                                           return taxAmount.toFixed(0);
                                         })()}
+                                      </td>
+                                      <td className="p-2 text-right border-r font-medium text-green-600">
+                                        {safeDisplay(
+                                          line.gross_amount,
+                                          '₹0.00',
+                                          'currency'
+                                        )}
                                       </td>
                                       <td className="p-2 text-right font-medium text-green-600">
                                         {safeDisplay(
