@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, decimal, timestamp, boolean, serial, date, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, decimal, timestamp, boolean, serial, date, unique, char } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -91,11 +91,11 @@ export const pfItemMst = pgTable("pf_item_mst", {
   pf_itemcode: varchar("pf_itemcode", { length: 100 }).notNull(),
   pf_itemname: text("pf_itemname").notNull(),
   pf_id: integer("pf_id").notNull().references(() => pfMst.id),
-  sap_id: varchar("sap_id", { length: 50 }).notNull() // Changed to varchar to store itemcode directly
+  sap_id: varchar("sap_id", { length: 50 }).notNull() // VARCHAR(50) to match actual database structure
 }, (table) => ({
   // Unique constraint to prevent duplicate item codes within the same platform
   uniqueItemCode: unique("pf_item_mst_pf_id_itemcode_unique").on(table.pf_id, table.pf_itemcode),
-  // Unique constraint to prevent duplicate item names within the same platform  
+  // Unique constraint to prevent duplicate item names within the same platform
   uniqueItemName: unique("pf_item_mst_pf_id_itemname_unique").on(table.pf_id, table.pf_itemname)
 }));
 
@@ -789,6 +789,7 @@ export const swiggyPos = pgTable("swiggy_po_header", {
   total_taxable_value: decimal("total_taxable_value", { precision: 15, scale: 2 }),
   total_tax_amount: decimal("total_tax_amount", { precision: 15, scale: 2 }),
   grand_total: decimal("grand_total", { precision: 15, scale: 2 }),
+  unique_hsn_codes: text("unique_hsn_codes").array(),
   status: varchar("status", { length: 50 }).default("pending"),
   created_by: varchar("created_by", { length: 100 }),
   created_at: timestamp("created_at").defaultNow(),
@@ -803,6 +804,7 @@ export const swiggyPoLines = pgTable("swiggy_po_lines", {
   item_description: text("item_description"),
   category_id: varchar("category_id", { length: 255 }),
   brand_name: varchar("brand_name", { length: 255 }),
+  hsn_code: varchar("hsn_code", { length: 20 }),
   quantity: integer("quantity").notNull(),
   received_qty: integer("received_qty").default(0),
   balanced_qty: integer("balanced_qty").default(0),
@@ -1067,6 +1069,8 @@ export const dealsharePoLines = pgTable("dealshare_po_lines", {
   gst_percent: decimal("gst_percent", { precision: 5, scale: 2 }),
   cess_percent: decimal("cess_percent", { precision: 5, scale: 2 }),
   gross_amount: decimal("gross_amount", { precision: 12, scale: 2 }),
+  tax_amount: decimal("tax_amount", { precision: 12, scale: 2 }),
+  total_value: decimal("total_value", { precision: 12, scale: 2 }),
   created_at: timestamp("created_at", { mode: 'string' }).defaultNow(),
   updated_at: timestamp("updated_at", { mode: 'string' }).defaultNow()
 });
@@ -1152,7 +1156,7 @@ export const amazonPoLines = pgTable("amazon_po_lines", {
   discount_percent: decimal("discount_percent", { precision: 5, scale: 2 }),
   discount_amount: decimal("discount_amount", { precision: 10, scale: 2 }),
   net_amount: decimal("net_amount", { precision: 12, scale: 2 }),
-  supplier_reference: varchar("supplier_reference", { length: 100 }),
+  supplier_reference: text("supplier_reference"), // Changed from varchar(100) to text to store JSON
   expected_delivery_date: timestamp("expected_delivery_date"),
   created_at: timestamp("created_at").defaultNow(),
   updated_at: timestamp("updated_at").defaultNow()
@@ -2679,52 +2683,61 @@ export type InsertBigBasketInventoryDaily = z.infer<typeof insertBigBasketInvent
 export type BigBasketInventoryRange = typeof invBigBasketJmRange.$inferSelect;
 export type InsertBigBasketInventoryRange = z.infer<typeof insertBigBasketInventoryRangeSchema>;
 
+// Platforms table
+export const platforms = pgTable("platforms", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 256 }).notNull().unique()
+});
+
 // PO Master table - unified consolidated table for all platforms
+// IMPORTANT: This schema matches ACTUAL database (verified 2025-10-06)
 export const poMaster = pgTable("po_master", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  po_number: varchar("po_number", { length: 100 }).notNull().unique(),
-  company: varchar("company", { length: 100 }),
+  id: serial("id").primaryKey(),
   platform_id: integer("platform_id").notNull(),
-  serving_distributor: varchar("serving_distributor", { length: 200 }),
+  po_number: varchar("po_number", { length: 256 }).notNull(),
   po_date: timestamp("po_date").notNull(),
-  expiry_date: timestamp("expiry_date"),
+  delivery_date: timestamp("delivery_date"),
+  create_on: timestamp("create_on").defaultNow().notNull(),
+  updated_on: timestamp("updated_on").defaultNow().notNull(),
+  dispatch_date: timestamp("dispatch_date"),
+  created_by: varchar("created_by", { length: 150 }),
+  dispatch_from: varchar("dispatch_from", { length: 256 }),
+  state_id: integer("state_id"),
+  district_id: integer("district_id"),
+  region: text("region"),
+  area: text("area"),
+  ware_house: varchar("ware_house", { length: 50 }),
+  invoice_date: timestamp("invoice_date"),
   appointment_date: timestamp("appointment_date"),
-  region: varchar("region", { length: 100 }).notNull(),
-  state: varchar("state", { length: 100 }).notNull(),
-  city: varchar("city", { length: 100 }).notNull(),
-  area: varchar("area", { length: 100 }),
-  dispatch_from: varchar("dispatch_from", { length: 100 }),
-  warehouse: varchar("warehouse", { length: 100 }),
-  status: varchar("status", { length: 50 }).notNull().default('OPEN'),
-  comments: text("comments"),
-  attachment: varchar("attachment", { length: 255 }),
-  created_by: varchar("created_by", { length: 100 }),
-  created_at: timestamp("created_at").defaultNow(),
-  updated_at: timestamp("updated_at").defaultNow()
+  expiry_date: timestamp("expiry_date"),
+  platform_name: char("platform_name", { length: 255 }),
+  distributor_name: char("distributor_name", { length: 255 })
 });
 
 // PO Lines table - unified consolidated table for all platform line items
+// IMPORTANT: This schema matches migrations/schema.ts (actual database)
 export const poLines = pgTable("po_lines", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  po_master_id: integer("po_master_id").notNull(),
-  line_number: integer("line_number").notNull(),
-  item_name: text("item_name").notNull(),
-  platform_code: varchar("platform_code", { length: 50 }),
-  sap_code: varchar("sap_code", { length: 50 }),
-  uom: varchar("uom", { length: 20 }).notNull(),
-  quantity: integer("quantity").notNull(),
+  id: serial("id").primaryKey(),
+  po_id: integer("po_id").notNull(),
+  platform_product_code_id: integer("platform_product_code_id").notNull(),
+  quantity: decimal("quantity", { precision: 12, scale: 2 }).notNull(),
+  basic_amount: decimal("basic_amount", { precision: 14, scale: 2 }).notNull(),
+  tax: decimal("tax", { precision: 14, scale: 2 }),
+  landing_amount: decimal("landing_amount", { precision: 14, scale: 2 }),
+  total_amount: decimal("total_amount", { precision: 14, scale: 2 }).notNull(),
+  uom: varchar("uom", { length: 50 }),
+  total_liter: decimal("total_liter", { precision: 14, scale: 2 }),
   boxes: integer("boxes"),
-  unit_size_ltrs: decimal("unit_size_ltrs", { precision: 10, scale: 3 }),
-  loose_qty: integer("loose_qty"),
-  basic_amount: decimal("basic_amount", { precision: 10, scale: 2 }).notNull(),
-  tax_percent: decimal("tax_percent", { precision: 5, scale: 2 }).notNull(),
-  landing_amount: decimal("landing_amount", { precision: 10, scale: 2 }),
-  total_amount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
-  total_ltrs: decimal("total_ltrs", { precision: 10, scale: 3 }),
-  hsn_code: varchar("hsn_code", { length: 20 }),
-  status: varchar("status", { length: 50 }).notNull().default('Pending'),
-  created_at: timestamp("created_at").defaultNow(),
-  updated_at: timestamp("updated_at").defaultNow()
+  remark: text("remark"),
+  invoice_date: date("invoice_date"),
+  invoice_litre: decimal("invoice_litre", { precision: 14, scale: 2 }),
+  invoice_amount: decimal("invoice_amount", { precision: 14, scale: 2 }),
+  invoice_qty: decimal("invoice_qty", { precision: 14, scale: 2 }),
+  dispatch_date: date("dispatch_date"),
+  delivery_date: date("delivery_date"),
+  status: integer("status"),
+  delete: boolean("delete").default(false),
+  deleted: boolean("deleted").default(false)
 });
 
 // Relations for PO Master and Lines
@@ -2734,7 +2747,7 @@ export const poMasterRelations = relations(poMaster, ({ many }) => ({
 
 export const poLinesRelations = relations(poLines, ({ one }) => ({
   poMaster: one(poMaster, {
-    fields: [poLines.po_master_id],
+    fields: [poLines.po_id],
     references: [poMaster.id]
   })
 }));

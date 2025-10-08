@@ -611,6 +611,15 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
 
   const importMutation = useMutation({
     mutationFn: async (data: { header?: any; lines?: any[]; poList?: any[] }) => {
+      console.log('📤 Sending import request:', {
+        platform: selectedPlatform,
+        endpoint: `/api/po/import/${selectedPlatform}`,
+        hasHeader: !!data.header,
+        hasLines: !!data.lines,
+        linesCount: data.lines?.length || 0,
+        headerSample: data.header ? Object.keys(data.header).slice(0, 10) : []
+      });
+
       const response = await fetch(`/api/po/import/${selectedPlatform}`, {
         method: "POST",
         headers: {
@@ -619,15 +628,20 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
         body: JSON.stringify(data),
       });
 
+      console.log('📥 Import response status:', response.status);
+
       if (!response.ok) {
         const error = await response.json();
+        console.error('❌ Import error response:', error);
         if (response.status === 409 && error.type === 'duplicate_po') {
           throw new Error(error.error);
         }
-        throw new Error(error.error || "Failed to import PO");
+        throw new Error(error.error || error.message || "Failed to import PO");
       }
 
-      return response.json();
+      const result = await response.json();
+      console.log('✅ Import successful:', result);
+      return result;
     },
     onSuccess: async (data) => {
       console.log("🔍 Upload response data:", data);
@@ -1412,23 +1426,23 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                       <td className="p-2 text-sm">{line.product_description || ''}</td>
                                       <td className="p-2">{safeDisplay(line.basic_cost_price, '₹0.00', 'currency')}</td>
                                       <td className="p-2">{(() => {
-                                        // For Blinkit data, show the exact tax_amount from tax_value column
-                                        if (line.tax_amount) {
-                                          const taxAmount = parseFloat(line.tax_amount || '0');
-                                          return taxAmount.toFixed(0);
+                                        // For platforms with direct tax_amount or total_tax_amount field
+                                        if (line.tax_amount || line.total_tax_amount) {
+                                          const taxAmount = parseFloat(line.tax_amount || line.total_tax_amount || '0');
+                                          return taxAmount.toFixed(2);
                                         }
 
                                         // Fallback for other platforms - show calculated tax amount
                                         const taxableValue = parseFloat(line.taxable_value || line.basic_value || '0');
                                         const totalAmount = parseFloat(line.total_amount || line.line_total || '0');
                                         const taxAmount = totalAmount - taxableValue;
-                                        return taxAmount.toFixed(0);
+                                        return taxAmount.toFixed(2);
                                       })()}</td>
                                       <td className="p-2 font-medium">₹{line.landing_rate || '0'}</td>
                                       <td className="p-2 text-center font-medium">{line.quantity || 0}</td>
                                       <td className="p-2">{safeDisplay(line.mrp, '₹0.00', 'currency')}</td>
                                       <td className="p-2">{line.margin_percent || '0'}%</td>
-                                      <td className="p-2 font-bold text-green-600">{safeDisplay(line.total_amount, '₹0.00', 'currency')}</td>
+                                      <td className="p-2 font-bold text-green-600">{safeDisplay(line.line_total || line.total_amount, '₹0.00', 'currency')}</td>
                                     </tr>
                                   ))}
                                 </tbody>
@@ -1795,6 +1809,14 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                               totalAmount: parsedData.totalAmount || parsedData.header?.total_amount || "0",
                               detectedVendor: parsedData.detectedVendor || "Amazon"
                             }}
+                            showImportButton={true}
+                            onImport={() => {
+                              console.log('🟢 Amazon Import Button Clicked');
+                              console.log('📋 Parsed Data:', parsedData);
+                              console.log('🏢 Selected Platform:', selectedPlatform);
+                              handleImportData();
+                            }}
+                            isImporting={importMutation.isPending}
                           />
                         </div>
                       ) : (selectedPlatform === 'swiggy' && (parsedData.poList || (parsedData.header && parsedData.lines))) ? (
@@ -2013,17 +2035,17 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                             <td className="p-2 text-right">₹{parseFloat(line.UnitBasedCost || line.unit_base_cost || '0').toFixed(2)}</td>
                                             <td className="p-2 text-right">₹{parseFloat(line.Mrp || line.mrp || '0').toFixed(2)}</td>
                                             <td className="p-2 text-right">{(() => {
-                                              // For Blinkit data, show the exact tax_amount from tax_value column
-                                              if (line.tax_amount) {
-                                                const taxAmount = parseFloat(line.tax_amount || '0');
-                                                return taxAmount.toFixed(0);
+                                              // For platforms with direct tax_amount or total_tax_amount field
+                                              if (line.tax_amount || line.total_tax_amount) {
+                                                const taxAmount = parseFloat(line.tax_amount || line.total_tax_amount || '0');
+                                                return taxAmount.toFixed(2);
                                               }
 
                                               // Fallback for other platforms - show calculated tax amount
                                               const taxableValue = parseFloat(line.PoLineValueWithoutTax || line.taxable_value || '0');
                                               const totalAmount = parseFloat(line.PoLineValueWithTax || line.total_value || '0');
                                               const taxAmount = totalAmount - taxableValue;
-                                              return taxAmount.toFixed(0);
+                                              return taxAmount.toFixed(2);
                                             })()}</td>
                                             <td className="p-2 text-right font-medium">₹{parseFloat(line.PoLineValueWithTax || line.total_value || '0').toFixed(2)}</td>
                                           </tr>
@@ -2078,8 +2100,8 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                   {(parsedData.header.credit_term || parsedData.header.payment_terms) && (
                                     <div><span className="font-medium text-gray-600">Payment Terms:</span> <span className="ml-2">{parsedData.header.credit_term || parsedData.header.payment_terms}</span></div>
                                   )}
-                                  {(parsedData.header.reference_number || parsedData.header.ref_no || parsedData.header.order_reference) && (
-                                    <div><span className="font-medium text-gray-600">Reference No:</span> <span className="ml-2">{parsedData.header.reference_number || parsedData.header.ref_no || parsedData.header.order_reference}</span></div>
+                                  {(parsedData.header.account_number || parsedData.header.reference_number || parsedData.header.ref_no || parsedData.header.order_reference) && (
+                                    <div><span className="font-medium text-gray-600">Account/Ref No:</span> <span className="ml-2">{parsedData.header.account_number || parsedData.header.reference_number || parsedData.header.ref_no || parsedData.header.order_reference}</span></div>
                                   )}
                                   {(parsedData.header.currency || parsedData.header.currency_code) && (
                                     <div><span className="font-medium text-gray-600">Currency:</span> <span className="ml-2">{parsedData.header.currency || parsedData.header.currency_code || 'INR'}</span></div>
@@ -2104,35 +2126,45 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                   {/* Enhanced Totals Section */}
                                   <div className="border-t border-gray-200 my-4"></div>
                                   <div className="bg-gradient-to-r from-blue-50 to-green-50 p-4 rounded-lg border border-blue-200">
-                                    <h6 className="font-semibold text-gray-800 mb-3 text-center">Purchase Order Summary</h6>
-                                    <div className="grid grid-cols-4 gap-3">
-                                      <div className="text-center bg-white p-3 rounded-lg shadow-sm">
-                                        <h4 className="font-medium text-gray-600 mb-1 text-xs">Total Lines</h4>
-                                        <p className="text-xl font-bold text-blue-600">{parsedData.lines ? parsedData.lines.length : 0}</p>
+                                    <h6 className="font-semibold text-gray-800 mb-4 text-center text-base">Purchase Order Summary</h6>
+                                    <div className="bg-white p-4 rounded-lg shadow-sm space-y-3">
+                                      <div className="flex justify-between items-center border-b pb-2">
+                                        <span className="font-medium text-gray-700">Total Line Items:</span>
+                                        <span className="font-bold text-blue-600 text-lg">{parsedData.lines ? parsedData.lines.length : 0}</span>
                                       </div>
-                                      <div className="text-center bg-white p-3 rounded-lg shadow-sm">
-                                        <h4 className="font-medium text-gray-600 mb-1 text-xs">Total Quantity</h4>
-                                        <p className="text-xl font-bold text-green-600">
+                                      <div className="flex justify-between items-center border-b pb-2">
+                                        <span className="font-medium text-gray-700">Total Quantity:</span>
+                                        <span className="font-bold text-green-600 text-lg">
                                           {(() => {
                                             const headerQty = parseFloat(parsedData.header.total_quantity || '0');
-                                            const calculatedQty = parsedData.lines?.reduce((sum: number, line: any) => sum + (parseFloat(line.quantity || line.OrderedQty || '0')), 0) || 0;
+                                            const calculatedQty = parsedData.lines?.reduce((sum: number, line: any) => sum + (parseFloat(line.quantity || line.quantity_ordered || line.OrderedQty || '0')), 0) || 0;
                                             return (headerQty > 0 ? headerQty : calculatedQty).toLocaleString('en-IN');
                                           })()}
-                                        </p>
+                                        </span>
                                       </div>
-                                      <div className="text-center bg-white p-3 rounded-lg shadow-sm">
-                                        <h4 className="font-medium text-gray-600 mb-1 text-xs">Total Amount</h4>
-                                        <p className="text-lg font-bold text-green-600">
+                                      <div className="flex justify-between items-center border-b pb-2">
+                                        <span className="font-medium text-gray-700">Total Tax Amount:</span>
+                                        <span className="font-bold text-orange-600 text-lg whitespace-nowrap">
+                                          ₹{(() => {
+                                            const headerTax = parseFloat(parsedData.header.total_tax_amount || '0');
+                                            const calculatedTax = parsedData.lines?.reduce((sum: number, line: any) => sum + (parseFloat(line.total_tax_amount || line.tax_amount || '0')), 0) || 0;
+                                            return (headerTax > 0 ? headerTax : calculatedTax).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                                          })()}
+                                        </span>
+                                      </div>
+                                      <div className="flex justify-between items-center border-b pb-2">
+                                        <span className="font-medium text-gray-700">Grand Total:</span>
+                                        <span className="font-bold text-green-700 text-xl whitespace-nowrap">
                                           ₹{(() => {
                                             const headerAmount = parseFloat(parsedData.header.grand_total || parsedData.header.total_amount || parsedData.header.po_amount || '0');
                                             const calculatedAmount = parsedData.lines?.reduce((sum: number, line: any) => sum + (parseFloat(line.total_amount || line.PoLineValueWithTax || line.line_total || '0')), 0) || 0;
                                             return (headerAmount > 0 ? headerAmount : calculatedAmount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                                           })()}
-                                        </p>
+                                        </span>
                                       </div>
-                                      <div className="text-center bg-white p-3 rounded-lg shadow-sm">
-                                        <h4 className="font-medium text-gray-600 mb-1 text-xs">Status</h4>
-                                        <p className="text-sm font-bold text-orange-600">{parsedData.header.status || 'Open'}</p>
+                                      <div className="flex justify-between items-center pt-2">
+                                        <span className="font-medium text-gray-700">Status:</span>
+                                        <span className="font-bold text-orange-600 px-3 py-1 bg-orange-50 rounded-full text-sm">{parsedData.header.status || 'Open'}</span>
                                       </div>
                                     </div>
                                   </div>
@@ -2152,28 +2184,28 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                 {/* Vendor Information Section */}
                                 <div className="space-y-2">
                                   <h6 className="font-semibold text-gray-800 pb-2 border-b">Shipped By (Vendor)</h6>
-                                  {(parsedData.header.shipped_by || parsedData.header.vendor_name || parsedData.header.supplier_name) && (
-                                    <div><span className="font-medium text-gray-600">Company:</span> <span className="ml-2">{parsedData.header.shipped_by || parsedData.header.vendor_name || parsedData.header.supplier_name}</span></div>
+                                  {(parsedData.header.bill_from_name || parsedData.header.ship_from_name || parsedData.header.shipped_by || parsedData.header.vendor_name || parsedData.header.supplier_name) && (
+                                    <div><span className="font-medium text-gray-600">Company:</span> <span className="ml-2">{parsedData.header.bill_from_name || parsedData.header.ship_from_name || parsedData.header.shipped_by || parsedData.header.vendor_name || parsedData.header.supplier_name}</span></div>
                                   )}
-                                  {parsedData.header.vendor_code && (
-                                    <div><span className="font-medium text-gray-600">Vendor Code:</span> <span className="ml-2">{parsedData.header.vendor_code}</span></div>
+                                  {(parsedData.header.vendor_id || parsedData.header.vendor_code) && (
+                                    <div><span className="font-medium text-gray-600">Vendor ID:</span> <span className="ml-2">{parsedData.header.vendor_id || parsedData.header.vendor_code}</span></div>
                                   )}
-                                  {parsedData.header.shipped_by_phone && (
-                                    <div><span className="font-medium text-gray-600">Phone:</span> <span className="ml-2">{parsedData.header.shipped_by_phone}</span></div>
+                                  {(parsedData.header.bill_from_phone || parsedData.header.shipped_by_phone) && (
+                                    <div><span className="font-medium text-gray-600">Phone:</span> <span className="ml-2">{parsedData.header.bill_from_phone || parsedData.header.shipped_by_phone}</span></div>
                                   )}
-                                  {(parsedData.header.shipped_by_gstin || parsedData.header.vendor_gst_no || parsedData.header.supplier_gstin) && (
-                                    <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.shipped_by_gstin || parsedData.header.vendor_gst_no || parsedData.header.supplier_gstin}</span></div>
+                                  {(parsedData.header.bill_from_gstin || parsedData.header.ship_from_gstin || parsedData.header.shipped_by_gstin || parsedData.header.vendor_gst_no || parsedData.header.supplier_gstin) && (
+                                    <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.bill_from_gstin || parsedData.header.ship_from_gstin || parsedData.header.shipped_by_gstin || parsedData.header.vendor_gst_no || parsedData.header.supplier_gstin}</span></div>
                                   )}
-                                  {(parsedData.header.shipped_by_address || parsedData.header.vendor_registered_address || parsedData.header.supplier_address) && (
-                                    <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2 text-xs">{parsedData.header.shipped_by_address || parsedData.header.vendor_registered_address || parsedData.header.supplier_address}</span></div>
+                                  {(parsedData.header.bill_from_address || parsedData.header.ship_from_address || parsedData.header.shipped_by_address || parsedData.header.vendor_registered_address || parsedData.header.supplier_address) && (
+                                    <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2 text-xs">{parsedData.header.bill_from_address || parsedData.header.ship_from_address || parsedData.header.shipped_by_address || parsedData.header.vendor_registered_address || parsedData.header.supplier_address}</span></div>
                                   )}
                                 </div>
 
                                 {/* Buyer Information Section */}
                                 <div className="space-y-2">
                                   <h6 className="font-semibold text-gray-800 pb-2 border-b">Bill To (Buyer)</h6>
-                                  {(parsedData.header.bill_to || parsedData.header.buyer_name) && (
-                                    <div><span className="font-medium text-gray-600">Company:</span> <span className="ml-2">{parsedData.header.bill_to || parsedData.header.buyer_name}</span></div>
+                                  {(parsedData.header.bill_to_name || parsedData.header.bill_to || parsedData.header.buyer_name) && (
+                                    <div><span className="font-medium text-gray-600">Company:</span> <span className="ml-2">{parsedData.header.bill_to_name || parsedData.header.bill_to || parsedData.header.buyer_name}</span></div>
                                   )}
                                   {(parsedData.header.bill_to_gstin || parsedData.header.buyer_gst || parsedData.header.billed_to_gstin) && (
                                     <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.bill_to_gstin || parsedData.header.buyer_gst || parsedData.header.billed_to_gstin}</span></div>
@@ -2183,17 +2215,17 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                   )}
 
                                   {/* Shipped To Section - Only show if any shipped_to data exists */}
-                                  {(parsedData.header.shipped_to || parsedData.header.shipped_to_gstin || parsedData.header.shipped_to_address) && (
+                                  {(parsedData.header.ship_to_name || parsedData.header.shipped_to || parsedData.header.ship_to_gstin || parsedData.header.shipped_to_gstin || parsedData.header.ship_to_address || parsedData.header.shipped_to_address) && (
                                     <div className="mt-4 pt-2 border-t">
                                       <h6 className="font-semibold text-gray-700 text-xs">Shipped To</h6>
-                                      {parsedData.header.shipped_to && (
-                                        <div className="mt-1"><span className="font-medium text-gray-600">Location:</span> <span className="ml-2">{parsedData.header.shipped_to}</span></div>
+                                      {(parsedData.header.ship_to_name || parsedData.header.shipped_to) && (
+                                        <div className="mt-1"><span className="font-medium text-gray-600">Location:</span> <span className="ml-2">{parsedData.header.ship_to_name || parsedData.header.shipped_to}</span></div>
                                       )}
-                                      {parsedData.header.shipped_to_gstin && (
-                                        <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.shipped_to_gstin}</span></div>
+                                      {(parsedData.header.ship_to_gstin || parsedData.header.shipped_to_gstin) && (
+                                        <div><span className="font-medium text-gray-600">GST Number:</span> <span className="ml-2">{parsedData.header.ship_to_gstin || parsedData.header.shipped_to_gstin}</span></div>
                                       )}
-                                      {parsedData.header.shipped_to_address && (
-                                        <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2 text-xs">{parsedData.header.shipped_to_address}</span></div>
+                                      {(parsedData.header.ship_to_address || parsedData.header.shipped_to_address) && (
+                                        <div><span className="font-medium text-gray-600">Address:</span> <span className="ml-2 text-xs">{parsedData.header.ship_to_address || parsedData.header.shipped_to_address}</span></div>
                                       )}
                                     </div>
                                   )}
@@ -2244,14 +2276,21 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                     <th className="text-left p-2 font-medium border-r min-w-[50px]">#</th>
                                     <th className="text-left p-2 font-medium border-r min-w-[120px]">Item Code</th>
                                     <th className="text-left p-2 font-medium border-r min-w-[200px]">Description</th>
+                                    <th className="text-left p-2 font-medium border-r min-w-[100px]">HSN</th>
                                     <th className="text-center p-2 font-medium border-r min-w-[60px]">Qty</th>
                                     <th className="text-left p-2 font-medium border-r min-w-[60px]">UOM</th>
                                     <th className="text-right p-2 font-medium border-r min-w-[100px]">Buying Price</th>
-                                    <th className="text-right p-2 font-medium border-r min-w-[100px]">MRP</th>
+                                    {selectedPlatform !== 'zomato' && (
+                                      <th className="text-right p-2 font-medium border-r min-w-[100px]">MRP</th>
+                                    )}
                                     <th className="text-right p-2 font-medium border-r min-w-[80px]">GST %</th>
-                                    <th className="text-right p-2 font-medium border-r min-w-[80px]">CESS %</th>
+                                    {selectedPlatform !== 'zomato' && (
+                                      <th className="text-right p-2 font-medium border-r min-w-[80px]">CESS %</th>
+                                    )}
                                     <th className="text-right p-2 font-medium border-r min-w-[100px]">Tax Amount</th>
-                                    <th className="text-right p-2 font-medium border-r min-w-[120px]">Gross Amount</th>
+                                    {selectedPlatform !== 'zomato' && (
+                                      <th className="text-right p-2 font-medium border-r min-w-[120px]">Gross Amount</th>
+                                    )}
                                     <th className="text-right p-2 font-medium min-w-[120px]">Total Amount</th>
                                   </tr>
                                 </thead>
@@ -2292,6 +2331,9 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                           )}
                                         </div>
                                       </td>
+                                      <td className="p-2 font-mono border-r">
+                                        {line.hsn_code || line.hsn || line.hsn_sac || '-'}
+                                      </td>
                                       <td className="p-2 text-center font-medium border-r">
                                         {line.quantity || line.po_qty || line.quantity_ordered || 0}
                                       </td>
@@ -2307,44 +2349,61 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                                           'currency'
                                         )}
                                       </td>
-                                      <td className="p-2 text-right border-r">
-                                        {safeDisplay(
-                                          line.mrp || line.supplier_mrp || line.mrp_tax_inclusive,
-                                          '₹0.00',
-                                          'currency'
-                                        )}
-                                      </td>
-                                      <td className="p-2 text-right border-r">
-                                        {line.gst_percent ? `${parseFloat(line.gst_percent).toFixed(2)}%` : '-'}
-                                      </td>
-                                      <td className="p-2 text-right border-r">
-                                        {line.cess_percent ? `${parseFloat(line.cess_percent).toFixed(2)}%` : '-'}
-                                      </td>
+                                      {selectedPlatform !== 'zomato' && (
+                                        <td className="p-2 text-right border-r">
+                                          {safeDisplay(
+                                            line.mrp || line.supplier_mrp || line.mrp_tax_inclusive,
+                                            '₹0.00',
+                                            'currency'
+                                          )}
+                                        </td>
+                                      )}
                                       <td className="p-2 text-right border-r">
                                         {(() => {
-                                          // For Blinkit data, show the exact tax_amount from tax_value column
-                                          if (line.tax_amount) {
-                                            const taxAmount = parseFloat(line.tax_amount || '0');
-                                            return taxAmount.toFixed(0);
+                                          // For Zomato, use gst_rate (stored as decimal like 0.05 for 5%)
+                                          if (line.gst_rate !== undefined && line.gst_rate !== null) {
+                                            const gstRate = parseFloat(line.gst_rate) * 100;
+                                            return `${gstRate.toFixed(2)}%`;
+                                          }
+                                          // For other platforms, use gst_percent
+                                          if (line.gst_percent) {
+                                            return `${parseFloat(line.gst_percent).toFixed(2)}%`;
+                                          }
+                                          return '-';
+                                        })()}
+                                      </td>
+                                      {selectedPlatform !== 'zomato' && (
+                                        <td className="p-2 text-right border-r">
+                                          {line.cess_percent ? `${parseFloat(line.cess_percent).toFixed(2)}%` : '-'}
+                                        </td>
+                                      )}
+                                      <td className="p-2 text-right border-r">
+                                        {(() => {
+                                          // For platforms with direct tax_amount or total_tax_amount field
+                                          if (line.tax_amount || line.total_tax_amount) {
+                                            const taxAmount = parseFloat(line.tax_amount || line.total_tax_amount || '0');
+                                            return taxAmount.toFixed(2);
                                           }
 
                                           // Fallback for other platforms - show calculated tax amount
                                           const taxableValue = parseFloat(line.taxable_value || line.basic_value || line.net_amount || '0');
                                           const totalAmount = parseFloat(line.total_amount || line.line_total || line.grand_total || '0');
                                           const taxAmount = totalAmount - taxableValue;
-                                          return taxAmount.toFixed(0);
+                                          return taxAmount.toFixed(2);
                                         })()}
                                       </td>
-                                      <td className="p-2 text-right border-r font-medium text-green-600">
-                                        {safeDisplay(
-                                          line.gross_amount,
-                                          '₹0.00',
-                                          'currency'
-                                        )}
-                                      </td>
+                                      {selectedPlatform !== 'zomato' && (
+                                        <td className="p-2 text-right border-r font-medium text-green-600">
+                                          {safeDisplay(
+                                            line.gross_amount,
+                                            '₹0.00',
+                                            'currency'
+                                          )}
+                                        </td>
+                                      )}
                                       <td className="p-2 text-right font-medium text-green-600">
                                         {safeDisplay(
-                                          line.total_amount || line.total_value,
+                                          line.line_total || line.total_amount || line.total_value,
                                           '₹0.00',
                                           'currency'
                                         )}
@@ -2719,60 +2778,6 @@ export function UnifiedUploadComponent({ onComplete }: UnifiedUploadComponentPro
                   </>
                 ) : (
                   "Ready to import CityMall PO data"
-                )}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Import Data into Database Button - Bottom of page for Amazon POs */}
-      {currentStep === 'preview' && selectedPlatformData?.id === 'amazon' && parsedData && (
-        <Card className="mt-6">
-          <CardContent className="pt-6">
-            <div className="flex justify-center">
-              <Button
-                onClick={() => {
-                  console.log('🟢 Amazon Import Button Clicked');
-                  console.log('📋 Parsed Data:', parsedData);
-                  console.log('🏢 Selected Platform:', selectedPlatform);
-                  console.log('📊 Data Structure:', {
-                    hasHeader: !!parsedData?.header,
-                    hasLines: !!parsedData?.lines,
-                    linesCount: parsedData?.lines?.length || 0,
-                    headerKeys: parsedData?.header ? Object.keys(parsedData.header) : [],
-                    firstLineKeys: parsedData?.lines?.[0] ? Object.keys(parsedData.lines[0]) : []
-                  });
-                  handleImportData();
-                }}
-                disabled={importMutation.isPending}
-                size="lg"
-                className="bg-green-600 hover:bg-green-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 px-8 py-3"
-              >
-                {importMutation.isPending ? (
-                  <>
-                    <Database className="mr-2 h-5 w-5 animate-spin" />
-                    Importing Amazon Data...
-                  </>
-                ) : (
-                  <>
-                    <Database className="mr-2 h-5 w-5" />
-                    Import Data into Database
-                  </>
-                )}
-              </Button>
-            </div>
-            <div className="mt-4 text-center">
-              <p className="text-sm text-gray-600">
-                {parsedData.lines?.length ? (
-                  <>
-                    Ready to import <strong>{parsedData.lines.length}</strong> Amazon line items
-                    {parsedData.header?.total_amount && (
-                      <> | Total Amount: <strong>${Number(parsedData.header.total_amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong></>
-                    )}
-                  </>
-                ) : (
-                  "Ready to import Amazon PO data"
                 )}
               </p>
             </div>

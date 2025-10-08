@@ -344,6 +344,7 @@ export function parseSwiggyPO(fileBuffer: Buffer, uploadedBy: string): ParsedSwi
       expected_delivery_date: expectedDeliveryDate || null,
       po_expiry_date: poExpiryDate || null,
       vendor_name: vendorName && vendorName !== "N/A" && vendorName !== "Aug 4, 2025" ? vendorName : null,
+      po_amount: totalAmount > 0 ? totalAmount.toString() : null,  // Set po_amount same as grand_total for consistency
       payment_terms: paymentTerms || null,
       total_items: filteredLines.length,
       total_quantity: totalQuantity,

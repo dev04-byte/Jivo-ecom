@@ -1,0 +1,6 @@
+PO Number,PO Date,Vendor Name,Vendor GSTIN,Vendor Code,Total Quantity,Total Base Amount,Total IGST Amount,Total Amount
+TEST-CM-CSV-001,2025-01-08,Jivo Mart Private Limited,07AAFCJ4102J1ZS,VENDOR001,100,41000.00,7380.00,48380.00
+
+Line Number,Article ID,Article Name,HSN Code,MRP,Base Cost Price,Quantity,Base Amount,IGST Percent,IGST Amount,Total Amount
+1,ITEM001,Jivo Extra Virgin Olive Oil 500ml,15099090,549.00,400.00,50,20000.00,18.00,3600.00,23600.00
+2,ITEM002,Jivo Pomace Olive Oil 1L,15099090,799.00,420.00,50,21000.00,18.00,3780.00,24780.00

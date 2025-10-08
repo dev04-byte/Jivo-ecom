@@ -34,6 +34,8 @@ interface DealsharePoItem {
   gst_percent?: string;
   cess_percent?: string;
   gross_amount?: string;
+  tax_amount?: string;
+  total_value?: string;
 }
 
 export async function parseDealsharePO(buffer: Buffer, uploadedBy: string) {
@@ -252,17 +254,34 @@ export async function parseDealsharePO(buffer: Buffer, uploadedBy: string) {
           skuStr.startsWith('total sku') || skuStr === '' || 
           productStr === '' || productStr === '...') continue;
 
+      // Parse numeric values
+      const qty = parseInt(String(quantity || '0')) || 0;
+      const buyingPriceNum = parseFloat(String(buyingPrice || '0').replace(/,/g, ''));
+      const grossAmountNum = parseFloat(String(grossAmount || '0').replace(/,/g, ''));
+      const gstPercentNum = parseFloat(String(gstPercent || '0').replace(/,/g, ''));
+      const cessPercentNum = parseFloat(String(cessPercent || '0').replace(/,/g, ''));
+
+      // Calculate tax amount: (buying_price * quantity) * (gst% + cess%) / 100
+      const taxableAmount = buyingPriceNum * qty;
+      const taxRate = gstPercentNum + cessPercentNum;
+      const taxAmount = (taxableAmount * taxRate) / 100;
+
+      // Calculate total value: gross_amount + tax_amount
+      const totalValue = grossAmountNum + taxAmount;
+
       const line: DealsharePoItem = {
         line_number: i - 10, // Adjust for header rows (line items start from row 12, so subtract 10 to get line number starting from 1)
         sku: String(sku).trim(),
         product_name: String(productName || '').trim(),
         hsn_code: String(hsnCode || '').trim(),
-        quantity: parseInt(String(quantity || '0')) || 0,
+        quantity: qty,
         mrp_tax_inclusive: String(parseFloat(String(mrpTaxInclusive || '0').replace(/,/g, '')).toFixed(2)),
-        buying_price: String(parseFloat(String(buyingPrice || '0').replace(/,/g, '')).toFixed(2)),
-        gst_percent: String(parseFloat(String(gstPercent || '0').replace(/,/g, '')).toFixed(2)),
-        cess_percent: String(parseFloat(String(cessPercent || '0').replace(/,/g, '')).toFixed(2)),
-        gross_amount: String(parseFloat(String(grossAmount || '0').replace(/,/g, '')).toFixed(2))
+        buying_price: buyingPriceNum.toFixed(2),
+        gst_percent: gstPercentNum.toFixed(2),
+        cess_percent: cessPercentNum.toFixed(2),
+        gross_amount: grossAmountNum.toFixed(2),
+        tax_amount: taxAmount.toFixed(2),
+        total_value: totalValue.toFixed(2)
       };
 
       // Additional filter check after line creation

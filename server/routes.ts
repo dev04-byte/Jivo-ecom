@@ -2376,30 +2376,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Process each PO
         for (const parsedPO of poList) {
           try {
-            // Check for existing PO first
-            const existingPo = await storage.getSwiggyPoByNumber(parsedPO.header.po_number);
-            if (existingPo) {
+            console.log(`\n🔄 Processing PO: ${parsedPO.header.po_number}`);
+
+            // Use NEW insertSwiggyPoToDatabase with type safety
+            const insertResult = await insertSwiggyPoToDatabase(parsedPO);
+
+            if (insertResult.success) {
+              results.push({
+                success: true,
+                message: `Successfully imported PO ${parsedPO.header.po_number}`,
+                data: insertResult.data
+              });
+              successCount++;
+            } else {
+              console.error(`❌ Failed to insert PO ${parsedPO.header.po_number}:`, insertResult.message);
               results.push({
                 success: false,
-                message: `PO ${parsedPO.header.po_number} already exists in database. Skipping duplicate.`
+                message: `Failed to insert PO ${parsedPO.header.po_number}: ${insertResult.message}`
               });
               failureCount++;
-              continue;
             }
-
-            // Use storage method for consistency
-            const createdPo = await storage.createSwiggyPo(parsedPO.header, parsedPO.lines);
-            results.push({
-              success: true,
-              message: `Successfully imported PO ${parsedPO.header.po_number}`,
-              data: {
-                po_id: createdPo.id,
-                po_number: createdPo.po_number
-              }
-            });
-            successCount++;
           } catch (error) {
-            console.error(`Error inserting PO ${parsedPO.header.po_number}:`, error);
+            console.error(`❌ Error processing PO ${parsedPO.header.po_number}:`, error);
+            console.error(`❌ Error stack:`, error instanceof Error ? error.stack : 'No stack');
             results.push({
               success: false,
               message: `Failed to insert PO ${parsedPO.header.po_number}: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -2416,10 +2415,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
           results
         });
       } else {
-        // Handle Excel file upload (existing logic)
+        // Handle Excel file upload with NEW type-safe database operations
+        const { parseSwiggyPO } = await import('./swiggy-parser');
+        const { insertSwiggyPoToDatabase } = await import('./swiggy-db-operations');
+
         const { header, lines } = await parseSwiggyPO(req.file.buffer, uploadedBy);
-        const createdPo = await storage.createSwiggyPo(header, lines);
-        res.status(201).json(createdPo);
+
+        console.log(`\n🔄 Processing Excel PO: ${header.po_number}`);
+
+        const insertResult = await insertSwiggyPoToDatabase({ header, lines });
+
+        if (insertResult.success) {
+          res.status(201).json(insertResult.data);
+        } else {
+          console.error(`❌ Failed to insert Excel PO:`, insertResult.message);
+          return res.status(400).json({
+            error: "Failed to create PO",
+            message: insertResult.message
+          });
+        }
       }
     } catch (error) {
       console.error("Error uploading Swiggy PO:", error);
@@ -2645,9 +2659,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!insertResult.success) {
         console.error('❌ Database insertion failed:', insertResult.message);
+        console.error('❌ Full error details:', JSON.stringify(insertResult, null, 2));
         return res.status(400).json({
           error: "Failed to create PO",
-          message: insertResult.message
+          message: insertResult.message,
+          details: insertResult.message  // Include full error in response
         });
       }
 
@@ -4107,7 +4123,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         switch (vendor) {
           case "flipkart":
+            console.log('🔍 Checking for duplicate Flipkart PO:', header.po_number);
             existingPo = await storage.getFlipkartGroceryPoByNumber(header.po_number);
+            console.log('🔍 Duplicate check result:', existingPo ? 'FOUND - PO exists' : 'NOT FOUND - PO is new');
             break;
           case "zepto":
             existingPo = await storage.getZeptoPoByNumber(header.po_number);
@@ -4122,12 +4140,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             existingPo = await storage.getSwiggyPoByNumber(header.po_number);
             break;
         }
-        
+
         if (existingPo) {
+          console.log('❌ Duplicate PO detected, rejecting import');
           return res.status(400).json({ error: "PO already exists" });
         }
-      } catch (error) {
-        // If the method doesn't exist, continue - it means no duplicate check is implemented yet
+      } catch (duplicateCheckError) {
+        // If the method doesn't exist or fails, log but continue - duplicate will be caught by DB constraint
+        console.warn('⚠️ Duplicate check failed, will rely on database constraint:', duplicateCheckError instanceof Error ? duplicateCheckError.message : 'Unknown error');
       }
 
       // NO DATE CONVERSION - Schema now accepts string values directly
@@ -4290,7 +4310,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           createdPo = await storage.createZeptoPo(headerForDb, linesForDb);
         } else if (vendor === 'citymall') {
-          console.log('🏢 Creating CityMall PO:', cleanHeader.po_number);
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          console.log('🏢 CITYMALL IMPORT STARTED');
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          console.log('📋 PO Number:', cleanHeader.po_number);
+          console.log('📋 Raw Header Keys:', Object.keys(cleanHeader));
+          console.log('📋 Raw Lines Count:', cleanLines.length);
 
           // Convert Date objects from Excel parsing to ISO strings for database (schema uses mode: 'string')
           const safeHeader = { ...cleanHeader };
@@ -4312,12 +4337,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return safeLine;
           }) || [];
 
-          console.log('📊 CityMall Header Data:', JSON.stringify(safeHeader, null, 2));
-          console.log('📝 CityMall Lines Count:', safeLines.length);
-          console.log('📝 CityMall First Line:', JSON.stringify(safeLines[0], null, 2));
+          console.log('📊 CityMall Safe Header Data:', JSON.stringify(safeHeader, null, 2));
+          console.log('📝 CityMall Safe Lines Count:', safeLines.length);
+          if (safeLines.length > 0) {
+            console.log('📝 CityMall First Safe Line:', JSON.stringify(safeLines[0], null, 2));
+          }
 
           // Validate required fields for CityMall
           if (!safeHeader.po_number) {
+            console.error('❌ CityMall: PO number is missing!');
             throw new Error('PO number is required for CityMall');
           }
 
@@ -4355,8 +4383,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return lineForDb;
           });
 
+          console.log('📤 Calling storage.createCityMallPo...');
+          console.log('   Header for DB:', JSON.stringify(headerForDb, null, 2));
+          console.log('   Lines for DB count:', linesForDb.length);
+
           createdPo = await storage.createCityMallPo(headerForDb, linesForDb);
-          console.log('✅ CityMall PO Created Successfully:', createdPo.id);
+
+          console.log('✅ CityMall PO Created Successfully!');
+          console.log('   Created PO ID:', createdPo.id);
+          console.log('   Created PO Number:', createdPo.po_number);
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         } else if (vendor === 'blinkit') {
           // Filter and clean header data to match ACTUAL database schema
           const actualDbHeaderFields = [
@@ -4863,7 +4899,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       } catch (error: any) {
         if (error.code === '23505') {
-          return res.status(409).json({ 
+          return res.status(409).json({
             error: `PO ${cleanHeader.po_number} already exists`,
             type: 'duplicate_po'
           });
@@ -4884,7 +4920,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         errorDetail: (error as any)?.detail,
         errorConstraint: (error as any)?.constraint,
         errorTable: (error as any)?.table,
-        errorColumn: (error as any)?.column
+        errorColumn: (error as any)?.column,
+        errorPosition: (error as any)?.position,
+        errorFile: (error as any)?.file,
+        errorLine: (error as any)?.line,
+        errorRoutine: (error as any)?.routine
       });
 
       // Handle duplicate PO errors with user-friendly messages
@@ -4909,9 +4949,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Send general error response
+      // Send general error response with debugging info
       res.status(500).json({
         error: errorMessage,
+        errorCode: (error as any)?.code,
+        errorDetail: (error as any)?.detail,
+        errorHint: (error as any)?.hint,
+        errorPosition: (error as any)?.position,
         details: process.env.NODE_ENV === 'development' ? {
           vendor: req.params.vendor,
           poNumber: req.body.header?.po_number,
@@ -4922,6 +4966,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // BigBasket PO GET endpoint - fetch from bigbasket_po_header and bigbasket_po_lines
+  // Fetch BigBasket PO by ID
   app.get("/api/bigbasket-pos/:id", async (req, res) => {
     try {
       const { id } = req.params;
@@ -4953,6 +4998,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     } catch (error) {
       console.error("❌ Error fetching BigBasket PO:", error);
+      res.status(500).json({
+        error: "Failed to fetch BigBasket PO data",
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Fetch BigBasket PO by PO Number (for unified list view)
+  app.get("/api/bigbasket-pos/by-number/:poNumber", async (req, res) => {
+    try {
+      const { poNumber } = req.params;
+      console.log(`📥 BigBasket PO fetch request for PO Number: ${poNumber}`);
+
+      // Fetch header data by PO number
+      const [headerResult] = await db
+        .select()
+        .from(bigbasketPoHeader)
+        .where(eq(bigbasketPoHeader.po_number, poNumber));
+
+      if (!headerResult) {
+        console.log(`❌ BigBasket PO not found: ${poNumber}`);
+        return res.status(404).json({ error: "BigBasket PO not found" });
+      }
+
+      // Fetch line items
+      const lineItems = await db
+        .select()
+        .from(bigbasketPoLines)
+        .where(eq(bigbasketPoLines.po_id, headerResult.id))
+        .orderBy(bigbasketPoLines.s_no);
+
+      console.log(`✅ Found BigBasket PO ${headerResult.po_number} (ID: ${headerResult.id}) with ${lineItems.length} line items`);
+
+      res.json({
+        header: headerResult,
+        lines: lineItems
+      });
+
+    } catch (error) {
+      console.error("❌ Error fetching BigBasket PO by number:", error);
       res.status(500).json({
         error: "Failed to fetch BigBasket PO data",
         details: error instanceof Error ? error.message : 'Unknown error'

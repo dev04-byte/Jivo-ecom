@@ -34,14 +34,6 @@ interface ZomatoPoItem {
   quantity_ordered?: string;
   price_per_unit?: string;
   uom?: string;
-  mrp?: string;
-  igst_percent?: string;
-  cgst_percent?: string;
-  sgst_percent?: string;
-  cess_percent?: string;
-  tax_amount?: string;
-  total_amount?: string;
-  // Legacy fields for backward compatibility
   gst_rate?: string;
   total_tax_amount?: string;
   line_total?: string;
@@ -114,9 +106,9 @@ export async function parseZomatoPO(buffer: Buffer, uploadedBy: string) {
       }
     }
 
-    // Extract billing/shipping info from rows 1-2
-    const billFromRow = jsonData[0] as any[];
-    const billToRow = jsonData[1] as any[];
+    // Extract billing/shipping info from rows 2-3 (indices 1-2)
+    const billFromRow = jsonData[1] as any[];
+    const billToRow = jsonData[2] as any[];
 
     if (billFromRow && billFromRow[0]) {
       const billFromText = billFromRow[0];
@@ -130,8 +122,8 @@ export async function parseZomatoPO(buffer: Buffer, uploadedBy: string) {
         if (phoneMatch) header.bill_from_phone = phoneMatch[1];
       }
 
-      // Extract shipping from info from second column
-      const shipFromText = billFromRow[1];
+      // Extract shipping from info from 8th column (index 7)
+      const shipFromText = billFromRow[7];
       if (typeof shipFromText === 'string') {
         const lines = shipFromText.split('\n');
         header.ship_from_name = lines[1]?.trim() || '';
@@ -151,8 +143,8 @@ export async function parseZomatoPO(buffer: Buffer, uploadedBy: string) {
         if (gstinMatch) header.bill_to_gstin = gstinMatch[1];
       }
 
-      // Extract shipping to info from second column
-      const shipToText = billToRow[1];
+      // Extract shipping to info from 11th column (index 10)
+      const shipToText = billToRow[10];
       if (typeof shipToText === 'string') {
         const lines = shipToText.split('\n');
         header.ship_to_name = lines[1]?.trim() || '';
@@ -168,30 +160,39 @@ export async function parseZomatoPO(buffer: Buffer, uploadedBy: string) {
     let totalValue = 0;
     let totalTax = 0;
 
-    // Row 4 contains headers, data starts from row 5
+    // Row 5 (index 4) contains headers, data starts from row 6 (index 5)
     for (let i = 5; i < jsonData.length; i++) {
       const row = jsonData[i] as any[];
-      if (!row || row.length < 19) {
+      if (!row || row.length < 15) {
         continue;
       }
+
+      // Actual column mapping based on Excel structure with merged cells:
+      // 0: Product Number
+      // 1: Product Name
+      // 2-4: Empty (merged cells)
+      // 5: HSN
+      // 6-7: Empty (merged cells)
+      // 8: Qty. Ord.
+      // 9-10: Empty (merged cells)
+      // 11: Price Per Unit
+      // 12: Empty
+      // 13: UoM
+      // 14: Empty
+      // 15: GST Rate
+      // 16: Empty
+      // 17: Total Tax Amount
+      // 18: Total
 
       const productNumber = row[0];
       const productName = row[1];
       const hsnCode = row[5];
       const quantity = row[8];
-      const uom = row[9];
-      const pricePerUnit = row[10];
-      const mrp = row[11];
-      const igstPercent = row[12];
-      const cgstPercent = row[13];
-      const sgstPercent = row[14];
-      const cessPercent = row[15];
-      const taxAmount = row[16];
-      const totalAmount = row[17];
-
-      // Legacy mappings for backward compatibility
-      const gstRate = igstPercent || cgstPercent || sgstPercent || '0';
-      const lineTotal = totalAmount;
+      const pricePerUnit = row[11];
+      const uom = row[13];
+      const gstRate = row[15];
+      const taxAmount = row[17];
+      const totalAmount = row[18];
 
       if (!productNumber || !quantity) {
         continue;
@@ -211,33 +212,28 @@ export async function parseZomatoPO(buffer: Buffer, uploadedBy: string) {
         product_number: String(productNumber),
         product_name: String(productName || ''),
         hsn_code: String(hsnCode || ''),
-        quantity_ordered: parseFloat(String(quantity || '0')).toFixed(2),
-        price_per_unit: parseFloat(String(pricePerUnit || '0')).toFixed(2),
+        quantity_ordered: String(parseFloat(String(quantity || '0')).toFixed(2)),
+        price_per_unit: String(parseFloat(String(pricePerUnit || '0')).toFixed(2)),
         uom: String(uom || ''),
-        mrp: parseFloat(String(mrp || '0')).toFixed(2),
-        igst_percent: parseFloat(String(igstPercent || '0')).toFixed(2),
-        cgst_percent: parseFloat(String(cgstPercent || '0')).toFixed(2),
-        sgst_percent: parseFloat(String(sgstPercent || '0')).toFixed(2),
-        cess_percent: parseFloat(String(cessPercent || '0')).toFixed(2),
-        tax_amount: parseFloat(String(taxAmount || '0')).toFixed(2),
-        total_amount: parseLineTotal(totalAmount),
-        // Legacy fields for backward compatibility
-        gst_rate: parseFloat(String(gstRate || '0')).toFixed(4),
-        total_tax_amount: parseFloat(String(taxAmount || '0')).toFixed(2),
-        line_total: parseLineTotal(totalAmount)
+        gst_rate: String(parseFloat(String(gstRate || '0')).toFixed(4)),
+        total_tax_amount: String(parseFloat(String(taxAmount || '0')).toFixed(2)),
+        line_total: String(parseLineTotal(totalAmount))
       };
 
       lines.push(line);
 
       // Calculate totals
       totalQuantity += parseFloat(line.quantity_ordered || '0');
-      totalValue += parseFloat(line.total_amount || '0');
-      totalTax += parseFloat(line.tax_amount || '0');
+      totalValue += parseFloat(line.line_total || '0');
+      totalTax += parseFloat(line.total_tax_amount || '0');
 
       console.log(`Parsed Zomato line item ${line.line_number}:`, {
         product_number: line.product_number,
         product_name: line.product_name?.substring(0, 50) + '...',
         quantity: line.quantity_ordered,
+        price: line.price_per_unit,
+        gst_rate: line.gst_rate,
+        tax: line.total_tax_amount,
         line_total: line.line_total
       });
     }
@@ -285,8 +281,6 @@ export async function parseZomatoPO(buffer: Buffer, uploadedBy: string) {
       data: {
         po_header: header,
         po_lines: lines,
-        header: header,  // Added for legacy compatibility
-        lines: lines,    // Added for legacy compatibility
         source: 'excel_real_data_extracted'
       },
       message: `Successfully extracted Zomato PO ${header.po_number} with ${lines.length} line items`,

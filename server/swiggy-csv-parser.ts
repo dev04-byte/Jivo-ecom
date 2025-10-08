@@ -135,8 +135,20 @@ export function parseSwiggyCSV(csvContent: string, uploadedBy: string): Multiple
 
       const calculatedGrandTotal = poRows.reduce((sum: number, row: SwiggyCSVRow) => sum + parseNumberOrZero(row.PoLineValueWithTax), 0);
 
-      // Use MRP-based total if all MRPs are available, otherwise use PoAmount or calculated total
-      const grandTotal = mrpBasedTotal > 0 ? mrpBasedTotal : (poAmount > 0 ? poAmount : calculatedGrandTotal);
+      // Priority order for grand_total calculation:
+      // 1. Use PoAmount from CSV (most reliable source for total)
+      // 2. Calculate from PoLineValueWithTax sum
+      // 3. Calculate from MRP × Quantity (fallback)
+      const grandTotal = poAmount > 0 ? poAmount : (calculatedGrandTotal > 0 ? calculatedGrandTotal : mrpBasedTotal);
+
+      console.log(`💰 PO ${poNumber} totals:`, {
+        poAmount,
+        calculatedGrandTotal,
+        mrpBasedTotal,
+        selectedGrandTotal: grandTotal,
+        totalTaxableValue,
+        totalTaxAmount
+      });
 
       // Get unique categories (HSN codes not available in CSV format)
       const uniqueHsnCodes: string[] = [];
@@ -155,7 +167,7 @@ export function parseSwiggyCSV(csvContent: string, uploadedBy: string): Multiple
         po_expiry_date: parseDate(firstRow.PoExpiryDate),
         supplier_code: firstRow.SupplierCode || null,
         vendor_name: firstRow.VendorName || null,
-        po_amount: poAmount > 0 ? poAmount.toString() : null,
+        po_amount: poAmount > 0 ? poAmount.toString() : (grandTotal > 0 ? grandTotal.toString() : null),
         payment_terms: `${firstRow.InternalExternalPo || 'External'} PO`,
         otb_reference_number: firstRow.OtbReferenceNumber || null,
         internal_external_po: firstRow.InternalExternalPo || null,
@@ -164,7 +176,7 @@ export function parseSwiggyCSV(csvContent: string, uploadedBy: string): Multiple
         total_taxable_value: totalTaxableValue > 0 ? totalTaxableValue.toString() : null,
         total_tax_amount: totalTaxAmount > 0 ? totalTaxAmount.toString() : null,
         grand_total: grandTotal > 0 ? grandTotal.toString() : null,
-        unique_hsn_codes: Array.from(new Set(poRows.map((row: SwiggyCSVRow) => row.CategoryId).filter(Boolean))),
+        unique_hsn_codes: Array.from(new Set(poRows.map((row: SwiggyCSVRow) => row.CategoryId).filter(Boolean).map(String))),
         status: firstRow.Status || 'pending',
         created_by: uploadedBy
       };
@@ -247,9 +259,20 @@ export function parseSwiggyCSV(csvContent: string, uploadedBy: string): Multiple
 
     console.log(`🎉 Successfully parsed ${parsedPOs.length} Swiggy POs from CSV`);
 
+    // Calculate total amounts and items across all POs for preview display
+    const totalItems = parsedPOs.reduce((sum, po) => sum + po.lines.length, 0);
+    const totalAmount = parsedPOs.reduce((sum, po) => {
+      const poTotal = po.header.grand_total || po.header.po_amount;
+      return sum + (poTotal ? parseFloat(poTotal) : 0);
+    }, 0);
+
+    console.log(`📊 Summary: ${parsedPOs.length} POs, ${totalItems} items, ₹${totalAmount.toFixed(2)} total`);
+
     return {
       poList: parsedPOs,
-      totalPOs: parsedPOs.length
+      totalPOs: parsedPOs.length,
+      totalItems: totalItems,
+      totalAmount: totalAmount.toString()
     };
 
   } catch (error) {

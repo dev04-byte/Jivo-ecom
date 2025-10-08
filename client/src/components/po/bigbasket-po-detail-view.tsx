@@ -265,12 +265,13 @@ export function BigBasketPODetailView({ po, orderItems, onImportData, showImport
     let grandTotal = 0;
 
     orderItems.forEach(item => {
-      const quantity = parseInt(String(item.quantity || 0));
-      const basicCost = parseFloat(String(item.basic_cost || '0'));
-      const gstAmount = parseFloat(String(item.gst_amount || '0'));
-      const cessValue = parseFloat(String(item.cess_value || '0'));
-      const stateCess = parseFloat(String(item.state_cess || '0'));
-      const totalValue = parseFloat(String(item.total_value || '0'));
+      // Safely parse numeric values, handling both string and number types
+      const quantity = Number(item.quantity) || 0;
+      const basicCost = Number(item.basic_cost) || 0;
+      const gstAmount = Number(item.gst_amount) || 0;
+      const cessValue = Number(item.cess_value) || 0;
+      const stateCess = Number(item.state_cess) || 0;
+      const totalValue = Number(item.total_value) || 0;
 
       totalQuantity += quantity;
       totalBasicCost += basicCost * quantity;
@@ -281,10 +282,10 @@ export function BigBasketPODetailView({ po, orderItems, onImportData, showImport
 
     return {
       totalQuantity,
-      totalBasicCost: totalBasicCost.toFixed(2),
-      totalGST: totalGST.toFixed(2),
-      totalCess: totalCess.toFixed(2),
-      grandTotal: grandTotal.toFixed(2)
+      totalBasicCost: Number(totalBasicCost.toFixed(2)),
+      totalGST: Number(totalGST.toFixed(2)),
+      totalCess: Number(totalCess.toFixed(2)),
+      grandTotal: Number(grandTotal.toFixed(2))
     };
   };
 
@@ -297,12 +298,13 @@ export function BigBasketPODetailView({ po, orderItems, onImportData, showImport
     let grandTotal = 0;
 
     filteredItems.forEach(item => {
-      const quantity = parseInt(String(item.quantity || 0));
-      const basicCost = parseFloat(String(item.basic_cost || '0'));
-      const gstAmount = parseFloat(String(item.gst_amount || '0'));
-      const cessValue = parseFloat(String(item.cess_value || '0'));
-      const stateCess = parseFloat(String(item.state_cess || '0'));
-      const totalValue = parseFloat(String(item.total_value || '0'));
+      // Safely parse numeric values, handling both string and number types
+      const quantity = Number(item.quantity) || 0;
+      const basicCost = Number(item.basic_cost) || 0;
+      const gstAmount = Number(item.gst_amount) || 0;
+      const cessValue = Number(item.cess_value) || 0;
+      const stateCess = Number(item.state_cess) || 0;
+      const totalValue = Number(item.total_value) || 0;
 
       totalQuantity += quantity;
       totalBasicCost += basicCost * quantity;
@@ -313,10 +315,10 @@ export function BigBasketPODetailView({ po, orderItems, onImportData, showImport
 
     return {
       totalQuantity,
-      totalBasicCost: totalBasicCost.toFixed(2),
-      totalGST: totalGST.toFixed(2),
-      totalCess: totalCess.toFixed(2),
-      grandTotal: grandTotal.toFixed(2)
+      totalBasicCost: Number(totalBasicCost.toFixed(2)),
+      totalGST: Number(totalGST.toFixed(2)),
+      totalCess: Number(totalCess.toFixed(2)),
+      grandTotal: Number(grandTotal.toFixed(2))
     };
   }, [filteredItems]);
 
@@ -421,23 +423,23 @@ export function BigBasketPODetailView({ po, orderItems, onImportData, showImport
             </div>
             <div className="text-center p-3 bg-purple-50 rounded-lg border border-purple-200">
               <p className="text-sm text-gray-600">Basic Cost</p>
-              <p className="text-xl font-bold text-purple-600">₹{totals.totalBasicCost}</p>
+              <p className="text-xl font-bold text-purple-600">₹{totals.totalBasicCost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               {searchTerm && (
-                <p className="text-xs text-purple-500">₹{filteredTotals.totalBasicCost}</p>
+                <p className="text-xs text-purple-500">₹{filteredTotals.totalBasicCost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               )}
             </div>
             <div className="text-center p-3 bg-orange-50 rounded-lg border border-orange-200">
               <p className="text-sm text-gray-600">Total GST</p>
-              <p className="text-xl font-bold text-orange-600">₹{totals.totalGST}</p>
+              <p className="text-xl font-bold text-orange-600">₹{totals.totalGST.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               {searchTerm && (
-                <p className="text-xs text-orange-500">₹{filteredTotals.totalGST}</p>
+                <p className="text-xs text-orange-500">₹{filteredTotals.totalGST.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               )}
             </div>
             <div className="text-center p-3 bg-indigo-50 rounded-lg border border-indigo-200">
               <p className="text-sm text-gray-600">Grand Total</p>
-              <p className="text-xl font-bold text-indigo-600">₹{totals.grandTotal}</p>
+              <p className="text-xl font-bold text-indigo-600">₹{totals.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               {searchTerm && (
-                <p className="text-xs text-indigo-500">₹{filteredTotals.grandTotal}</p>
+                <p className="text-xs text-indigo-500">₹{filteredTotals.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               )}
             </div>
           </div>

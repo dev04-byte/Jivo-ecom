@@ -82,6 +82,12 @@ export default function FlipkartGroceryPOUpload() {
 
   const importMutation = useMutation({
     mutationFn: async (data: { header: any; lines: any[] }) => {
+      console.log("🚀 Sending import request:", {
+        po_number: data.header.po_number,
+        supplier_name: data.header.supplier_name,
+        lines_count: data.lines.length
+      });
+
       const response = await fetch("/api/po/import/flipkart", {
         method: "POST",
         headers: {
@@ -92,12 +98,15 @@ export default function FlipkartGroceryPOUpload() {
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || "Failed to import PO");
+        console.error("❌ Import failed:", error);
+        // Show detailed error message
+        throw new Error(error.error || error.message || `Failed to import PO (Status: ${response.status})`);
       }
 
       return response.json();
     },
     onSuccess: (data) => {
+      console.log("✅ Import successful:", data);
       toast({
         title: "PO imported successfully",
         description: `PO ${data.po_number} has been created`,
@@ -110,6 +119,7 @@ export default function FlipkartGroceryPOUpload() {
       });
     },
     onError: (error: Error) => {
+      console.error("❌ Import error:", error);
       toast({
         title: "Import failed",
         description: error.message,

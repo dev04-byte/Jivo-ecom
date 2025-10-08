@@ -476,111 +476,154 @@ function parseAmazonData(jsonData: any[][], uploadedBy: string): AmazonParsedDat
   console.log('📋 Analyzing header row for column mapping:');
   console.log('Header row:', headerRow);
 
-  // Amazon-specific column mapping - detect format first
-  // Format 1: Item Code, HSN, UPC, Basic Cost, IGST, etc. (Indian format)
-  // Format 2: ASIN, External Id, Model Number, HSN, Title (Standard Amazon format)
-
-  // Detect which format we have by checking first few headers
-  const firstHeader = headerRow[0] ? headerRow[0].toString().toLowerCase().trim() : '';
-  const secondHeader = headerRow[1] ? headerRow[1].toString().toLowerCase().trim() : '';
-
-  const isFormat1 = (firstHeader === '#' || firstHeader === 'item number') &&
-                    (secondHeader.includes('item code') || secondHeader.includes('sku'));
-  const isFormat2 = firstHeader === 'asin' ||
-                    (secondHeader.includes('external') && secondHeader.includes('id'));
-
-  console.log(`🔍 Detected Amazon format: ${isFormat1 ? 'Format 1 (Indian)' : isFormat2 ? 'Format 2 (Standard)' : 'Unknown, defaulting to Format 2'}`);
-
-  if (isFormat1) {
-    // Format 1: Indian Amazon PO format (5401210015065.xlsx)
-    console.log('📋 Applying Format 1 (Indian) column mapping...');
-    columnMapping['item_number'] = 0;  // Column A - #
-    columnMapping['sku'] = 1;   // Column B - Item Code
-    columnMapping['category'] = 2;   // Column C - HSN Code
-    columnMapping['upc'] = 3;  // Column D - Product UPC
-    columnMapping['product_name'] = 4;  // Column E - Product Description
-    // Column 5 is empty
-    columnMapping['unit_cost'] = 6;  // Column G - Basic Cost Price
-    columnMapping['igst_percent'] = 7;  // Column H - IGST %
-    columnMapping['cess_percent'] = 8;  // Column I - CESS %
-    columnMapping['addt_cess'] = 9;  // Column J - ADDT.CESS
-    columnMapping['tax_amount'] = 10;  // Column K - Tax Amt
-    columnMapping['landing_rate'] = 11; // Column L - Landing Rate
-    // Column 12 is empty
-    columnMapping['quantity_ordered'] = 13;  // Column N - Qty
-    columnMapping['mrp'] = 14;  // Column O - MRP
-    columnMapping['margin_percent'] = 15;  // Column P - Margin %
-    columnMapping['total_cost'] = 16; // Column Q - Total Amt
-
-    console.log('✅ Format 1 mapping applied:');
-    console.log('- #: Column 0, Item Code: Column 1, HSN: Column 2, UPC: Column 3');
-    console.log('- Description: Column 4, Basic Cost: Column 6');
-    console.log('- IGST%: Column 7, CESS%: Column 8, ADDT.CESS: Column 9');
-    console.log('- Tax Amt: Column 10, Landing Rate: Column 11');
-    console.log('- Qty: Column 13, MRP: Column 14, Margin%: Column 15, Total: Column 16');
-  } else {
-    // Format 2: Standard Amazon PO format (664155NW.xlsx)
-    console.log('📋 Applying Format 2 (Standard) column mapping...');
-    columnMapping['asin'] = 0;  // Column A - ASIN
-    columnMapping['external_id'] = 1;   // Column B - External Id (EAN/ISBN/SKU)
-    columnMapping['model_number'] = 2;   // Column C - Model Number
-    columnMapping['category'] = 4;   // Column E - HSN
-    columnMapping['product_name'] = 5;  // Column F - Title
-    columnMapping['window_type'] = 7;  // Column H - Window Type
-    columnMapping['expected_date'] = 8;  // Column I - Expected date
-    columnMapping['quantity_ordered'] = 9;  // Column J - Quantity Requested
-    columnMapping['quantity_accepted'] = 11;  // Column L - Accepted quantity
-    columnMapping['quantity_received'] = 13;  // Column N - Quantity received
-    columnMapping['quantity_outstanding'] = 14;  // Column O - Quantity Outstanding
-    columnMapping['unit_cost'] = 16;  // Column Q - Unit Cost
-    columnMapping['total_cost'] = 18; // Column S - Total cost
-
-    console.log('✅ Format 2 mapping applied:');
-    console.log('- ASIN: Column 0, External ID: Column 1, Model: Column 2');
-    console.log('- HSN: Column 4, Title: Column 5, Window Type: Column 7');
-    console.log('- Expected Date: Column 8, Qty Requested: Column 9');
-    console.log('- Qty Accepted: Column 11, Qty Received: Column 13, Qty Outstanding: Column 14');
-    console.log('- Unit Cost: Column 16, Total Cost: Column 18');
-  }
-
-  // Optional: Validate/refine mapping by checking actual headers (but don't override format-specific mappings)
-  console.log('🔍 Validating column headers match expected positions...');
-  let validationWarnings = 0;
+  // Dynamic column detection - scan header row for matching column names
+  console.log('🔍 Starting dynamic column detection...');
 
   headerRow.forEach((header: any, index: number) => {
     if (!header) return;
     const headerStr = header.toString().toLowerCase().trim().replace(/\s+/g, ' ');
 
-    // For Format 1, validate key columns
-    if (isFormat1) {
-      if (index === 0 && headerStr !== '#' && !headerStr.includes('item')) {
-        console.warn(`⚠️ Warning: Column 0 header is "${header}", expected "#" or "item number"`);
-        validationWarnings++;
-      }
-      if (index === 1 && !headerStr.includes('item') && !headerStr.includes('code')) {
-        console.warn(`⚠️ Warning: Column 1 header is "${header}", expected "Item Code"`);
-        validationWarnings++;
+    // Item number / Line number
+    if (headerStr === '#' || headerStr === 'item number' || headerStr === 'line number') {
+      columnMapping['item_number'] = index;
+      console.log(`✅ Found Item Number at column ${index}: "${header}"`);
+    }
+
+    // ASIN
+    if (headerStr === 'asin') {
+      columnMapping['asin'] = index;
+      console.log(`✅ Found ASIN at column ${index}: "${header}"`);
+    }
+
+    // SKU / Item Code
+    if ((headerStr.includes('item') && headerStr.includes('code')) ||
+        (headerStr === 'sku' || headerStr === 'item code')) {
+      columnMapping['sku'] = index;
+      console.log(`✅ Found SKU/Item Code at column ${index}: "${header}"`);
+    }
+
+    // External ID
+    if (headerStr.includes('external') && headerStr.includes('id')) {
+      columnMapping['external_id'] = index;
+      console.log(`✅ Found External ID at column ${index}: "${header}"`);
+    }
+
+    // Model Number
+    if (headerStr.includes('model') && headerStr.includes('number')) {
+      columnMapping['model_number'] = index;
+      console.log(`✅ Found Model Number at column ${index}: "${header}"`);
+    }
+
+    // HSN Code (PRIORITY: exact match)
+    if (headerStr === 'hsn' || headerStr === 'hsn code' || headerStr === 'hsn_code') {
+      columnMapping['category'] = index;
+      console.log(`✅ Found HSN Code at column ${index}: "${header}"`);
+    }
+
+    // Product Name / Title / Description
+    if ((headerStr === 'title') ||
+        (headerStr === 'product description') ||
+        (headerStr.includes('product') && headerStr.includes('description'))) {
+      columnMapping['product_name'] = index;
+      console.log(`✅ Found Product Name/Title at column ${index}: "${header}"`);
+    }
+
+    // UPC
+    if (headerStr === 'upc' || headerStr.includes('product upc')) {
+      columnMapping['upc'] = index;
+      console.log(`✅ Found UPC at column ${index}: "${header}"`);
+    }
+
+    // Window Type
+    if (headerStr.includes('window') && headerStr.includes('type')) {
+      columnMapping['window_type'] = index;
+      console.log(`✅ Found Window Type at column ${index}: "${header}"`);
+    }
+
+    // Expected Date
+    if (headerStr.includes('expected') && headerStr.includes('date')) {
+      columnMapping['expected_date'] = index;
+      console.log(`✅ Found Expected Date at column ${index}: "${header}"`);
+    }
+
+    // Quantity variations
+    if (headerStr.includes('quantity') && headerStr.includes('requested')) {
+      columnMapping['quantity_ordered'] = index;
+      console.log(`✅ Found Quantity Requested at column ${index}: "${header}"`);
+    } else if (headerStr === 'qty' || headerStr === 'quantity') {
+      if (!columnMapping['quantity_ordered']) {
+        columnMapping['quantity_ordered'] = index;
+        console.log(`✅ Found Quantity at column ${index}: "${header}"`);
       }
     }
 
-    // For Format 2, validate key columns
-    if (isFormat2) {
-      if (index === 0 && headerStr !== 'asin') {
-        console.warn(`⚠️ Warning: Column 0 header is "${header}", expected "ASIN"`);
-        validationWarnings++;
-      }
-      if (index === 1 && !headerStr.includes('external') && !headerStr.includes('id')) {
-        console.warn(`⚠️ Warning: Column 1 header is "${header}", expected "External Id"`);
-        validationWarnings++;
-      }
+    if (headerStr.includes('accepted') && headerStr.includes('quantity')) {
+      columnMapping['quantity_accepted'] = index;
+      console.log(`✅ Found Quantity Accepted at column ${index}: "${header}"`);
+    }
+
+    if (headerStr.includes('received') && headerStr.includes('quantity')) {
+      columnMapping['quantity_received'] = index;
+      console.log(`✅ Found Quantity Received at column ${index}: "${header}"`);
+    }
+
+    if (headerStr.includes('outstanding') && headerStr.includes('quantity')) {
+      columnMapping['quantity_outstanding'] = index;
+      console.log(`✅ Found Quantity Outstanding at column ${index}: "${header}"`);
+    }
+
+    // Unit Cost / Basic Cost
+    if ((headerStr.includes('unit') && headerStr.includes('cost')) ||
+        (headerStr.includes('basic') && headerStr.includes('cost'))) {
+      columnMapping['unit_cost'] = index;
+      console.log(`✅ Found Unit Cost at column ${index}: "${header}"`);
+    }
+
+    // Total Cost / Amount
+    if ((headerStr.includes('total') && (headerStr.includes('cost') || headerStr.includes('amt') || headerStr.includes('amount')))) {
+      columnMapping['total_cost'] = index;
+      console.log(`✅ Found Total Cost at column ${index}: "${header}"`);
+    }
+
+    // Tax fields
+    if (headerStr.includes('igst') && headerStr.includes('%')) {
+      columnMapping['igst_percent'] = index;
+      console.log(`✅ Found IGST% at column ${index}: "${header}"`);
+    }
+
+    if (headerStr.includes('cess') && headerStr.includes('%')) {
+      columnMapping['cess_percent'] = index;
+      console.log(`✅ Found CESS% at column ${index}: "${header}"`);
+    }
+
+    if (headerStr.includes('addt') && headerStr.includes('cess')) {
+      columnMapping['addt_cess'] = index;
+      console.log(`✅ Found ADDT.CESS at column ${index}: "${header}"`);
+    }
+
+    if (headerStr.includes('tax') && (headerStr.includes('amt') || headerStr.includes('amount'))) {
+      columnMapping['tax_amount'] = index;
+      console.log(`✅ Found Tax Amount at column ${index}: "${header}"`);
+    }
+
+    // Landing Rate
+    if (headerStr.includes('landing') && headerStr.includes('rate')) {
+      columnMapping['landing_rate'] = index;
+      console.log(`✅ Found Landing Rate at column ${index}: "${header}"`);
+    }
+
+    // MRP
+    if (headerStr === 'mrp') {
+      columnMapping['mrp'] = index;
+      console.log(`✅ Found MRP at column ${index}: "${header}"`);
+    }
+
+    // Margin
+    if (headerStr.includes('margin') && headerStr.includes('%')) {
+      columnMapping['margin_percent'] = index;
+      console.log(`✅ Found Margin% at column ${index}: "${header}"`);
     }
   });
-
-  if (validationWarnings === 0) {
-    console.log('✅ All column headers validated successfully');
-  } else {
-    console.warn(`⚠️ Found ${validationWarnings} validation warnings - mapping may be incorrect`);
-  }
 
   console.log('📊 Final column mapping:', columnMapping);
 

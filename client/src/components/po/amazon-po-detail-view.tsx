@@ -1,7 +1,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CalendarDays, Package, DollarSign, Building, Truck, User, Hash } from "lucide-react";
+import { CalendarDays, Package, IndianRupee, Building, Truck, User, Hash, Database } from "lucide-react";
 
 interface AmazonPoHeaderData {
   po_number?: string;
@@ -54,9 +55,12 @@ interface AmazonPoDetailViewProps {
     totalAmount: string;
     detectedVendor?: string;
   };
+  onImport?: () => void;
+  isImporting?: boolean;
+  showImportButton?: boolean;
 }
 
-export function AmazonPoDetailView({ header, lines, summary }: AmazonPoDetailViewProps) {
+export function AmazonPoDetailView({ header, lines, summary, onImport, isImporting = false, showImportButton = false }: AmazonPoDetailViewProps) {
   // Debug logging
   console.log('🔍 AmazonPoDetailView - Header:', header);
   console.log('🔍 AmazonPoDetailView - Lines:', lines);
@@ -124,6 +128,23 @@ export function AmazonPoDetailView({ header, lines, summary }: AmazonPoDetailVie
     }
   };
 
+  // Calculate accurate totals from line items
+  const calculatedTotals = {
+    totalItems: lines.length,
+    totalQuantityRequested: lines.reduce((sum, line) => {
+      const additionalData = line.supplier_reference ? parseAdditionalData(line.supplier_reference) : null;
+      return sum + (additionalData?.quantity_requested || line.quantity_ordered || 0);
+    }, 0),
+    totalQuantityAccepted: lines.reduce((sum, line) => {
+      const additionalData = line.supplier_reference ? parseAdditionalData(line.supplier_reference) : null;
+      return sum + (additionalData?.quantity_accepted || 0);
+    }, 0),
+    totalOrderValue: lines.reduce((sum, line) => {
+      const cost = typeof line.total_cost === 'string' ? parseFloat(line.total_cost) : (line.total_cost || 0);
+      return sum + cost;
+    }, 0)
+  };
+
   try {
     return (
       <div className="space-y-6">
@@ -188,7 +209,7 @@ export function AmazonPoDetailView({ header, lines, summary }: AmazonPoDetailVie
             {/* Payment & Financial */}
             <div className="space-y-3">
               <h4 className="font-semibold flex items-center gap-2 text-purple-700">
-                <DollarSign className="h-4 w-4" />
+                <IndianRupee className="h-4 w-4" />
                 Payment & Financial
               </h4>
               <div className="space-y-2 text-sm">
@@ -206,37 +227,30 @@ export function AmazonPoDetailView({ header, lines, summary }: AmazonPoDetailVie
           </div>
 
           {/* Order Summary Stats */}
-          {summary && (
-            <div className="mt-4 bg-gradient-to-r from-blue-50 to-green-50 p-4 rounded-lg border border-blue-200">
-              <h4 className="font-semibold text-gray-800 mb-3 text-center">Order Summary Statistics</h4>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="text-center bg-white p-3 rounded-lg shadow-sm">
-                  <p className="text-xs text-gray-600 mb-1">Submitted</p>
-                  <p className="text-xl font-bold text-blue-600">{summary.totalItems}</p>
-                  <p className="text-xs text-gray-500">items</p>
-                </div>
-                <div className="text-center bg-white p-3 rounded-lg shadow-sm">
-                  <p className="text-xs text-gray-600 mb-1">Total Quantity</p>
-                  <p className="text-xl font-bold text-green-600">{summary.totalQuantity.toLocaleString()}</p>
-                  <p className="text-xs text-gray-500">units</p>
-                </div>
-                <div className="text-center bg-white p-3 rounded-lg shadow-sm">
-                  <p className="text-xs text-gray-600 mb-1">Accepted</p>
-                  <p className="text-xl font-bold text-green-600">
-                    {lines.reduce((sum, line) => {
-                      const additionalData = line.supplier_reference ? parseAdditionalData(line.supplier_reference) : null;
-                      return sum + (additionalData?.quantity_accepted || 0);
-                    }, 0).toLocaleString()}
-                  </p>
-                  <p className="text-xs text-gray-500">units</p>
-                </div>
-                <div className="text-center bg-white p-3 rounded-lg shadow-sm">
-                  <p className="text-xs text-gray-600 mb-1">Order Value</p>
-                  <p className="text-lg font-bold text-green-600">{formatCurrency(summary.totalAmount, header.currency)}</p>
-                </div>
+          <div className="mt-4 bg-gradient-to-r from-blue-50 to-green-50 p-4 rounded-lg border border-blue-200">
+            <h4 className="font-semibold text-gray-800 mb-3 text-center">Order Summary Statistics</h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center bg-white p-3 rounded-lg shadow-sm">
+                <p className="text-xs text-gray-600 mb-1">Total Items</p>
+                <p className="text-xl font-bold text-blue-600">{calculatedTotals.totalItems}</p>
+                <p className="text-xs text-gray-500">line items</p>
+              </div>
+              <div className="text-center bg-white p-3 rounded-lg shadow-sm">
+                <p className="text-xs text-gray-600 mb-1">Qty Requested</p>
+                <p className="text-xl font-bold text-orange-600">{calculatedTotals.totalQuantityRequested.toLocaleString()}</p>
+                <p className="text-xs text-gray-500">units</p>
+              </div>
+              <div className="text-center bg-white p-3 rounded-lg shadow-sm">
+                <p className="text-xs text-gray-600 mb-1">Qty Accepted</p>
+                <p className="text-xl font-bold text-green-600">{calculatedTotals.totalQuantityAccepted.toLocaleString()}</p>
+                <p className="text-xs text-gray-500">units</p>
+              </div>
+              <div className="text-center bg-white p-3 rounded-lg shadow-sm">
+                <p className="text-xs text-gray-600 mb-1">Total Cost</p>
+                <p className="text-lg font-bold text-green-600">{formatCurrency(calculatedTotals.totalOrderValue, header.currency)}</p>
               </div>
             </div>
-          )}
+          </div>
 
           {header.notes && (
             <div className="mt-4 p-3 bg-gray-50 rounded-lg">
@@ -299,14 +313,14 @@ export function AmazonPoDetailView({ header, lines, summary }: AmazonPoDetailVie
                       </TableCell>
                       <TableCell className="font-mono text-xs">
                         <div className="max-w-[150px] break-words text-xs">
-                          {additionalData?.model_number || line.product_description || '-'}
+                          {line.product_description || additionalData?.model_number || '-'}
                         </div>
                       </TableCell>
                       <TableCell className="font-mono text-xs">
-                        {additionalData?.hsn_code || line.category || '-'}
+                        {line.category || additionalData?.hsn_code || '-'}
                       </TableCell>
                       <TableCell className="max-w-[350px]">
-                        <div className="break-words text-xs" title={line.product_name}>
+                        <div className="break-words text-xs" title={line.product_name || ''}>
                           {line.product_name || '-'}
                         </div>
                       </TableCell>
@@ -366,6 +380,48 @@ export function AmazonPoDetailView({ header, lines, summary }: AmazonPoDetailVie
           )}
         </CardContent>
       </Card>
+
+      {/* Import Data into Database Button */}
+      {showImportButton && onImport && (
+        <Card className="mt-6">
+          <CardContent className="pt-6">
+            <div className="flex justify-center">
+              <Button
+                onClick={onImport}
+                disabled={isImporting}
+                size="lg"
+                className="bg-green-600 hover:bg-green-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 px-8 py-3"
+              >
+                {isImporting ? (
+                  <>
+                    <Database className="mr-2 h-5 w-5 animate-spin" />
+                    Importing Amazon Data...
+                  </>
+                ) : (
+                  <>
+                    <Database className="mr-2 h-5 w-5" />
+                    Import Data into Database
+                  </>
+                )}
+              </Button>
+            </div>
+            <div className="mt-4 text-center">
+              <p className="text-sm text-gray-600">
+                {lines.length ? (
+                  <>
+                    Ready to import <strong>{lines.length}</strong> Amazon line items
+                    {header?.total_amount && (
+                      <> | Total Amount: <strong>{formatCurrency(header.total_amount, header.currency)}</strong></>
+                    )}
+                  </>
+                ) : (
+                  "Ready to import Amazon PO data"
+                )}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
   } catch (error) {

@@ -11,6 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { BigBasketPODetailView } from "@/components/po/bigbasket-po-detail-view";
 import { DealsharePODetailView } from "@/components/po/dealshare-po-detail-view";
 import { AmazonPoDetailView } from "@/components/po/amazon-po-detail-view";
+import { ZomatoPODetailView } from "@/components/po/zomato-po-detail-view";
 import type { PfPo, PfMst, PfOrderItems } from "@shared/schema";
 
 interface POWithDetails extends Omit<PfPo, 'platform'> {
@@ -25,14 +26,39 @@ export default function PODetails() {
   const queryClient = useQueryClient();
   const poId = params.id;
 
-  // Determine if this is an Amazon PO (IDs >= 10000000 and < 11000000)
+  // Determine PO type by ID range
+  // Amazon: IDs >= 10000000 and < 11000000
+  // BigBasket: IDs >= 12000000 and < 13000000
   const isAmazonPo = poId && parseInt(poId) >= 10000000 && parseInt(poId) < 11000000;
+  const isBigBasketPo = poId && parseInt(poId) >= 12000000 && parseInt(poId) < 13000000;
   const amazonId = isAmazonPo ? parseInt(poId) - 10000000 : null;
+  const bigbasketId = isBigBasketPo ? parseInt(poId) - 12000000 : null;
 
-  const { data: po, isLoading, error } = useQuery<POWithDetails>({
-    queryKey: isAmazonPo ? [`/api/amazon-pos/${amazonId}`] : [`/api/pos/${poId}`],
+  // First fetch to get basic PO info
+  const { data: initialPo, isLoading: initialLoading, error: initialError } = useQuery<any>({
+    queryKey: isAmazonPo ? [`/api/amazon-pos/${amazonId}`] :
+              isBigBasketPo ? [`/api/bigbasket-pos/${bigbasketId}`] :
+              [`/api/pos/${poId}`],
     enabled: !!poId
   });
+
+  // Check if it's a BigBasket PO by platform name and fetch detailed data
+  const isBigBasketByPlatform = !isAmazonPo && !isBigBasketPo &&
+    initialPo?.platform?.pf_name?.toLowerCase().includes('bigbasket');
+
+  const { data: bigbasketDetailedPo, isLoading: bigbasketLoading } = useQuery<any>({
+    queryKey: [`/api/bigbasket-pos/by-number/${initialPo?.po_number}`],
+    enabled: !!initialPo?.po_number && isBigBasketByPlatform,
+  });
+
+  // Use detailed BigBasket data if available, otherwise use initial data
+  const po = isBigBasketByPlatform && bigbasketDetailedPo ? bigbasketDetailedPo : initialPo;
+  const isLoading = initialLoading || (isBigBasketByPlatform && bigbasketLoading);
+  const error = initialError;
+
+  // Check if we have the complete BigBasket data structure
+  const hasBigBasketDetailedData = (isBigBasketPo || isBigBasketByPlatform) &&
+    ((po?.header && po?.lines) || (isBigBasketPo && po));
 
   const handleEdit = () => {
     setLocation(`/po-edit/${poId}`);
@@ -145,7 +171,17 @@ export default function PODetails() {
     );
   }
 
-  const { totalQuantity, totalValue } = calculatePOTotals(isAmazonPo ? (po as any).poLines || [] : po.orderItems);
+  const { totalQuantity, totalValue } = calculatePOTotals(
+    isAmazonPo ? (po as any).poLines || [] :
+    hasBigBasketDetailedData ? po.lines || [] :
+    po.orderItems || []
+  );
+
+  // Get display data based on PO type
+  const displayPoNumber = hasBigBasketDetailedData ? po.header?.po_number : po.po_number;
+  const displayPlatform = hasBigBasketDetailedData ? 'BigBasket' : isAmazonPo ? 'Amazon' : po.platform?.pf_name;
+  const displayDate = hasBigBasketDetailedData ? po.header?.po_date : (po.order_date || po.created_at);
+  const displayStatus = hasBigBasketDetailedData ? po.header?.status : po.status;
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -153,8 +189,8 @@ export default function PODetails() {
       <header className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-900 dark:to-gray-800 shadow-lg border-b border-blue-100 dark:border-gray-700 px-6 py-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => setLocation("/platform-po")}
               className="hover:bg-blue-50"
             >
@@ -163,17 +199,17 @@ export default function PODetails() {
             </Button>
             <div>
               <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                {po.po_number}
+                {displayPoNumber}
               </h1>
               <p className="text-gray-600 dark:text-gray-300 mt-1">
-                {isAmazonPo ? 'Amazon' : po.platform?.pf_name} • Created {po.order_date ? format(new Date(po.order_date), 'MMM dd, yyyy') : po.created_at ? format(new Date(po.created_at), 'MMM dd, yyyy') : 'Date not available'}
+                {displayPlatform} • Created {displayDate ? format(new Date(displayDate), 'MMM dd, yyyy') : 'Date not available'}
               </p>
             </div>
-            <Badge 
-              variant={getStatusBadgeVariant(po.status)}
+            <Badge
+              variant={getStatusBadgeVariant(displayStatus)}
               className="px-3 py-1 text-sm font-semibold"
             >
-              {po.status}
+              {displayStatus}
             </Badge>
           </div>
           <div className="flex items-center space-x-3">
@@ -196,72 +232,76 @@ export default function PODetails() {
       {/* Content */}
       <main className="flex-1 overflow-y-auto p-6 bg-gray-50 dark:bg-gray-900">
         <div className="max-w-7xl mx-auto space-y-6">
-          {/* PO Overview */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Package className="mr-2 h-5 w-5" />
-                  Purchase Order Details
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Show all actual Blinkit table columns */}
-                  {Object.entries(po).filter(([key, value]) =>
-                    key !== 'platform' &&
-                    key !== 'orderItems' &&
-                    key !== 'poLines' &&
-                    value !== null &&
-                    value !== undefined &&
-                    value !== ''
-                  ).map(([key, value]) => (
-                    <div key={key} className="space-y-1">
-                      <p className="text-sm font-medium text-gray-500 capitalize">{key.replace(/_/g, ' ')}</p>
-                      <div className="flex items-center">
-                        <span className="font-semibold text-sm break-words">{String(value)}</span>
+          {/* PO Overview - Skip for BigBasket as it has its own detail view */}
+          {!hasBigBasketDetailedData && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <Card className="lg:col-span-2">
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Package className="mr-2 h-5 w-5" />
+                    Purchase Order Details
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Show all actual table columns */}
+                    {Object.entries(po).filter(([key, value]) =>
+                      key !== 'platform' &&
+                      key !== 'orderItems' &&
+                      key !== 'poLines' &&
+                      value !== null &&
+                      value !== undefined &&
+                      value !== ''
+                    ).map(([key, value]) => (
+                      <div key={key} className="space-y-1">
+                        <p className="text-sm font-medium text-gray-500 capitalize">{key.replace(/_/g, ' ')}</p>
+                        <div className="flex items-center">
+                          <span className="font-semibold text-sm break-words">{String(value)}</span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
 
-            {/* Summary Card */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Package className="mr-2 h-5 w-5" />
-                  Order Summary
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Total Items</span>
-                    <span className="font-semibold">{isAmazonPo ? (po as any).poLines?.length || 0 : po.orderItems.length}</span>
+              {/* Summary Card */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Package className="mr-2 h-5 w-5" />
+                    Order Summary
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-3">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Total Items</span>
+                      <span className="font-semibold">{isAmazonPo ? (po as any).poLines?.length || 0 : po.orderItems.length}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Total Quantity</span>
+                      <span className="font-semibold">{totalQuantity}</span>
+                    </div>
+                    <Separator />
+                    <div className="flex justify-between">
+                      <span className="text-lg font-medium">Total Value</span>
+                      <span className="text-lg font-bold text-primary">₹{totalValue.toFixed(2)}</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Total Quantity</span>
-                    <span className="font-semibold">{totalQuantity}</span>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between">
-                    <span className="text-lg font-medium">Total Value</span>
-                    <span className="text-lg font-bold text-primary">₹{totalValue.toFixed(2)}</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
           {/* Order Items - Use platform-specific views */}
-          {!isAmazonPo && po.platform?.pf_name?.toLowerCase().includes('bigbasket') ||
-           !isAmazonPo && po.platform?.pf_name?.toLowerCase() === 'bigbasket' ? (
-            <BigBasketPODetailView po={po as any} orderItems={po.orderItems as any} />
-          ) : !isAmazonPo && po.platform?.pf_name?.toLowerCase().includes('dealshare') ||
+          {hasBigBasketDetailedData ? (
+            <BigBasketPODetailView po={po.header} orderItems={po.lines} />
+          ) : !isAmazonPo && !isBigBasketPo && po.platform?.pf_name?.toLowerCase().includes('dealshare') ||
                !isAmazonPo && po.platform?.pf_name?.toLowerCase() === 'dealshare' ? (
             <DealsharePODetailView po={po as any} orderItems={po.orderItems as any} />
+          ) : !isAmazonPo && po.platform?.pf_name?.toLowerCase().includes('zomato') ||
+               !isAmazonPo && po.platform?.pf_name?.toLowerCase() === 'zomato' ? (
+            <ZomatoPODetailView po={po as any} orderItems={po.orderItems as any} />
           ) : isAmazonPo ||
                (!isAmazonPo && po.platform?.pf_name?.toLowerCase().includes('amazon')) ||
                (!isAmazonPo && po.platform?.pf_name?.toLowerCase() === 'amazon') ? (

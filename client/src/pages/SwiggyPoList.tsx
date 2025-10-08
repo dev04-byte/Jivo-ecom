@@ -215,12 +215,29 @@ export default function SwiggyPoList() {
                       </TableCell>
                       <TableCell>
                         <div className="font-medium">
-                          ₹{po.po_amount || po.grand_total ?
-                            (typeof (po.po_amount || po.grand_total) === 'string' ?
-                              parseFloat((po.po_amount || po.grand_total) as string) :
-                              (po.po_amount || po.grand_total)
-                            ).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) :
-                            '0'}
+                          ₹{(() => {
+                            // Try po_amount first
+                            if (po.po_amount) {
+                              const amount = typeof po.po_amount === 'string' ? parseFloat(po.po_amount) : po.po_amount;
+                              if (amount > 0) return amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                            }
+
+                            // Try grand_total second
+                            if (po.grand_total) {
+                              const amount = typeof po.grand_total === 'string' ? parseFloat(po.grand_total) : po.grand_total;
+                              if (amount > 0) return amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                            }
+
+                            // Calculate from line items as fallback
+                            const calculatedTotal = po.poLines?.reduce((sum, line) => {
+                              if (line.line_total) {
+                                return sum + (typeof line.line_total === 'string' ? parseFloat(line.line_total) : line.line_total);
+                              }
+                              return sum;
+                            }, 0) || 0;
+
+                            return calculatedTotal > 0 ? calculatedTotal.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : '0.00';
+                          })()}
                         </div>
                         {po.total_quantity && (
                           <div className="text-xs text-gray-500">Qty: {po.total_quantity}</div>

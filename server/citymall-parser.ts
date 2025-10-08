@@ -94,42 +94,44 @@ function extractPOInfo(workbook: XLSX.WorkBook): {
         }
       }
 
-      // Extract vendor info - vendor data is in column 4 (index 4)
-      if (String(row[0]).toLowerCase().includes('issued to')) {
-        vendorName = String(row[4] || '').trim();
+      // Extract vendor info - correct column indices based on actual Excel structure
+      // Vendor data is in column 19 (index 18) for "Issued To" and related fields
+      if (String(row[15] || '').toLowerCase().includes('issued to')) {
+        vendorName = String(row[18] || '').trim();
       }
-      if (String(row[0]).toLowerCase().includes('vendor code')) {
-        vendorCode = String(row[4] || '').trim();
+      if (String(row[15] || '').toLowerCase().includes('vendor code')) {
+        vendorCode = String(row[18] || '').trim();
       }
-      // GST for vendor is after "Vendor Code" row
-      if (String(row[0]).toLowerCase() === 'gst' && i > 6 && !vendorGST) {
-        const gstValue = String(row[4] || '').trim();
+      // GST for vendor
+      if (String(row[15] || '').toLowerCase() === 'gst' && i > 1 && !vendorGST) {
+        const gstValue = String(row[18] || '').trim();
         if (gstValue.includes('-')) {
           vendorGST = gstValue;
         }
       }
       // Extract contact person name
-      if (String(row[0]).toLowerCase().includes('contact person')) {
-        vendorContactName = String(row[4] || '').trim();
+      if (String(row[15] || '').toLowerCase().includes('contact person')) {
+        vendorContactName = String(row[18] || '').trim();
       }
       // Extract vendor address
-      if (String(row[0]).toLowerCase() === 'address' && i > 6) {
-        vendorAddress = String(row[4] || '').trim();
+      if (String(row[15] || '').toLowerCase() === 'address' && i > 6) {
+        vendorAddress = String(row[18] || '').trim();
       }
       // Extract vendor contact number
-      if (String(row[0]).toLowerCase().includes('vendor contact')) {
-        vendorPhone = String(row[4] || '').trim();
+      if (String(row[15] || '').toLowerCase().includes('vendor contact')) {
+        vendorPhone = String(row[18] || '').trim();
       }
 
       // Extract buyer company information (from "Company Details" section)
-      if (String(row[0]).toLowerCase() === 'name' && i < 5) {
-        buyerName = String(row[2] || '').trim();
+      // Company info is in columns 2-4 (indices 1-3)
+      if (String(row[1] || '').toLowerCase() === 'name' && i < 5) {
+        buyerName = String(row[3] || '').trim();
       }
-      if (String(row[0]).toLowerCase() === 'gst' && i < 5) {
-        buyerGST = String(row[2] || '').trim();
+      if (String(row[1] || '').toLowerCase() === 'gst' && i < 5) {
+        buyerGST = String(row[3] || '').trim();
       }
-      if (String(row[0]).toLowerCase().includes('billing address') && i < 5) {
-        buyerAddress = String(row[2] || '').trim();
+      if (String(row[1] || '').toLowerCase().includes('billing address') && i < 5) {
+        buyerAddress = String(row[3] || '').trim();
       }
     }
   }
@@ -246,7 +248,7 @@ export function parseCityMallPO(fileContent: Buffer, uploadedBy: string): Parsed
     }
 
     // Validate that we have basic required data
-    const tempArticleId = String(row[1] || '').trim();
+    const tempArticleId = String(row[2] || '').trim();
     const tempArticleName = String(row[5] || '').trim();
     const tempSNo = row[0];
 
@@ -254,18 +256,18 @@ export function parseCityMallPO(fileContent: Buffer, uploadedBy: string): Parsed
       continue; // Skip if we don't have essential data
     }
 
-    // Map row data based on XLSX.js output structure
-    const sNo = row[0];
-    const articleId = row[1] || '';
-    const articleName = row[5] || ''; // Article name at index 5
-    const hsnCode = row[8] || ''; // HSN code at index 8
-    const mrp = row[11] || 0; // MRP at index 11
-    const baseCostPrice = row[13] || 0; // Base cost price at index 13
-    const quantity = row[15] || 0; // Quantity at index 15
-    const baseAmount = row[16] || 0; // Base amount at index 16
-    const igstCess = String(row[18] || ''); // IGST/CESS percentage at index 18
-    const igstCessAmount = String(row[19] || ''); // IGST/CESS amount at index 19
-    const total = row[21] || 0; // Total at index 21
+    // Map row data based on ACTUAL Excel column positions
+    const sNo = row[0];              // Column 1 (index 0): S.No
+    const articleId = row[2] || '';  // Column 3 (index 2): Article Id
+    const articleName = row[5] || ''; // Column 6 (index 5): Article Name
+    const hsnCode = row[9] || '';    // Column 10 (index 9): HSN Code
+    const mrp = row[11] || 0;        // Column 12 (index 11): MRP
+    const baseCostPrice = row[12] || 0; // Column 13 (index 12): Base Cost Price
+    const quantity = row[16] || 0;   // Column 17 (index 16): Quantity
+    const baseAmount = row[17] || 0; // Column 18 (index 17): Base Amount
+    const igstCess = String(row[19] || ''); // Column 20 (index 19): IGST/CESS %
+    const igstCessAmount = String(row[21] || ''); // Column 22 (index 21): IGST/CESS amount
+    const total = row[23] || 0;      // Column 24 (index 23): Total Amount
 
     // Parse IGST and CESS percentages
     const igstCessLines = igstCess.split('\n');
@@ -294,6 +296,17 @@ export function parseCityMallPO(fileContent: Buffer, uploadedBy: string): Parsed
       status: 'Pending',
       created_by: uploadedBy
     };
+
+    // DEBUG: Log first item to verify extraction
+    if (lines.length === 0) {
+      console.log('🔍 CityMall Parser - First Line Item:');
+      console.log(`  article_id: "${line.article_id}" (from row[2]="${articleId}")`);
+      console.log(`  article_name: "${line.article_name}"`);
+      console.log(`  hsn_code: "${line.hsn_code}"`);
+      console.log(`  quantity: ${line.quantity}`);
+      console.log(`  base_cost_price: "${line.base_cost_price}"`);
+      console.log(`  mrp: "${line.mrp}"`);
+    }
 
     lines.push(line);
 
@@ -334,7 +347,7 @@ export function parseCityMallPO(fileContent: Buffer, uploadedBy: string): Parsed
       uploaded_by: uploadedBy
     };
 
-    return {
+    const result = {
       header: {
         ...header,
         buyer_name: poInfo.buyerName,
@@ -347,6 +360,16 @@ export function parseCityMallPO(fileContent: Buffer, uploadedBy: string): Parsed
       },
       lines
     };
+
+    console.log('🎯 CityMall Parser - Final Output Summary:');
+    console.log(`  Total lines: ${result.lines.length}`);
+    console.log(`  Header vendor_name: "${result.header.vendor_name}"`);
+    console.log(`  Header buyer_name: "${result.header.buyer_name}"`);
+    console.log(`  Header total_quantity: ${result.header.total_quantity}`);
+    console.log(`  First line article_id: "${result.lines[0]?.article_id}"`);
+    console.log(`  First line quantity: ${result.lines[0]?.quantity}`);
+
+    return result;
 
   } catch (error) {
     console.error('Error parsing CityMall PO:', error);

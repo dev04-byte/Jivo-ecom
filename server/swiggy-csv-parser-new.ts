@@ -272,6 +272,16 @@ function parseSingleSwiggyPO(records: any[], uploadedBy: string): ParsedSwiggyPO
     po_expiry_date: poExpiryDate,
     supplier_code: supplierCode,
     vendor_name: vendorName,
+    po_amount: (() => {
+      // Use poAmount from CSV, or calculated total from lines
+      if (poAmount > 0) {
+        return poAmount.toString();
+      }
+      if (calculatedTotalAmount > 0) {
+        return calculatedTotalAmount.toString();
+      }
+      return null;
+    })(),
     payment_terms: null,
     otb_reference_number: firstRow.OtbReferenceNumber || '',
     internal_external_po: firstRow.InternalExternalPo || '',
@@ -280,16 +290,16 @@ function parseSingleSwiggyPO(records: any[], uploadedBy: string): ParsedSwiggyPO
     total_taxable_value: totalTaxableValue,
     total_tax_amount: totalTaxAmount,
     grand_total: (() => {
-      // Prioritize calculated total from line items
+      // Priority: 1. poAmount from CSV, 2. Calculated from lines
       let finalTotal = 0;
-      if (calculatedTotalAmount > 0) {
-        finalTotal = calculatedTotalAmount;
-      } else if (poAmount > 0) {
+      if (poAmount > 0) {
         finalTotal = poAmount;
+      } else if (calculatedTotalAmount > 0) {
+        finalTotal = calculatedTotalAmount;
       }
       const safeFinalTotal = isNaN(finalTotal) ? 0 : finalTotal;
       console.log(`💰 Final Grand Total: ${safeFinalTotal}`);
-      return safeFinalTotal;
+      return safeFinalTotal > 0 ? safeFinalTotal.toString() : null;
     })(),
     status: status || 'pending',
     created_by: uploadedBy,

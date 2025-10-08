@@ -1,114 +1,71 @@
-// Test CityMall import API
-const fetch = require('node-fetch').default || require('node-fetch');
+const fs = require('fs');
+const FormData = require('form-data');
+const fetch = require('node-fetch');
 
-async function testCityMallImport() {
+async function testCityMallAPI() {
+  console.log('🧪 Testing CityMall API Preview Response\n');
+  console.log('='.repeat(80));
+
   try {
-    console.log('🧪 Testing CityMall import API...');
+    const fileBuffer = fs.readFileSync('c:\Users\singh\Downloads\PO-1359161.xlsx');
 
-    // Create test data that matches the parser output
-    const testData = {
-      header: {
-        po_number: 'TEST-CM-' + Date.now(),
-        po_date: new Date().toISOString(),
-        vendor_name: 'Test Vendor',
-        vendor_gstin: 'TEST123456789',
-        status: 'Open',
-        total_quantity: 2,
-        total_amount: 500.00,
-        created_by: 'test-user'
-      },
-      lines: [
-        {
-          line_number: 1,
-          article_id: 'ART001',
-          article_name: 'Test Article 1',
-          hsn_code: '12345678',
-          quantity: 1,
-          mrp: 100.00,
-          base_cost_price: 80.00,
-          base_amount: 80.00,
-          igst_percent: 18.00,
-          igst_amount: 14.40,
-          total_amount: 94.40
-        },
-        {
-          line_number: 2,
-          article_id: 'ART002',
-          article_name: 'Test Article 2',
-          hsn_code: '87654321',
-          quantity: 3,
-          mrp: 150.00,
-          base_cost_price: 120.00,
-          base_amount: 360.00,
-          igst_percent: 18.00,
-          igst_amount: 64.80,
-          cess_percent: 5.00,
-          cess_amount: 18.00,
-          total_amount: 442.80
-        }
-      ]
-    };
+    const form = new FormData();
+    form.append('file', fileBuffer, {
+      filename: 'PO-1359161.xlsx',
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    form.append('platform', 'citymall');
 
-    console.log('📤 Sending import request to CityMall API...');
-
-    const response = await fetch('http://127.0.0.1:5001/api/po/import/citymall', {
+    console.log('📤 Sending request to http://localhost:5001/api/po/preview');
+    const response = await fetch('http://localhost:5001/api/po/preview', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(testData)
+      body: form,
+      headers: form.getHeaders()
     });
 
-    console.log(`📊 Response status: ${response.status} ${response.statusText}`);
-
-    const result = await response.json();
-    console.log('📋 Response data:', JSON.stringify(result, null, 2));
-
-    if (response.ok) {
-      console.log('✅ Import successful!');
-
-      // Verify by fetching all CityMall POs
-      console.log('🔍 Fetching all CityMall POs...');
-      const posResponse = await fetch('http://127.0.0.1:5001/api/city-mall-pos');
-      const pos = await posResponse.json();
-
-      console.log(`📊 Found ${pos.length} CityMall POs in database`);
-
-      if (pos.length > 0) {
-        const latestPo = pos[0];
-        console.log('📋 Latest PO:', {
-          id: latestPo.id,
-          po_number: latestPo.po_number,
-          vendor_name: latestPo.vendor_name,
-          total_amount: latestPo.total_amount,
-          lines_count: latestPo.poLines?.length || 0
-        });
-      }
-
-      // Also check unified POs list
-      console.log('🔍 Checking unified POs list...');
-      const unifiedResponse = await fetch('http://127.0.0.1:5001/api/pos');
-      const unifiedPos = await unifiedResponse.json();
-
-      const cityMallPos = unifiedPos.filter(po => po.platform?.pf_name === 'CityMall');
-      console.log(`📊 Found ${cityMallPos.length} CityMall POs in unified list`);
-
-      if (cityMallPos.length > 0) {
-        console.log('📋 CityMall PO in unified list:', {
-          id: cityMallPos[0].id,
-          po_number: cityMallPos[0].po_number,
-          platform: cityMallPos[0].platform?.pf_name,
-          total_amount: cityMallPos[0].total_amount
-        });
-      }
-
-    } else {
-      console.log('❌ Import failed:', result);
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('❌ API Error:', error);
+      return;
     }
 
+    const data = await response.json();
+
+    console.log('\n📊 API RESPONSE:\n');
+    console.log('='.repeat(80));
+    console.log('\n📋 HEADER:');
+    console.log(JSON.stringify(data.header, null, 2));
+
+    console.log('\n📦 FIRST 2 LINE ITEMS:');
+    if (data.lines && data.lines.length > 0) {
+      console.log('Item 1:', JSON.stringify(data.lines[0], null, 2));
+      if (data.lines.length > 1) {
+        console.log('\nItem 2:', JSON.stringify(data.lines[1], null, 2));
+      }
+    }
+
+    console.log('\n📈 SUMMARY:');
+    console.log(`Total Lines: ${data.lines?.length || 0}`);
+    console.log(`Total Quantity: ${data.totalQuantity || 0}`);
+    console.log(`Total Amount: ${data.totalAmount || 0}`);
+
+    console.log('\n🔍 FIELD CHECK (First item):');
+    if (data.lines && data.lines.length > 0) {
+      const firstLine = data.lines[0];
+      console.log(`  article_id: ${firstLine.article_id || 'MISSING'}`);
+      console.log(`  article_name: ${firstLine.article_name || 'MISSING'}`);
+      console.log(`  hsn_code: ${firstLine.hsn_code || 'MISSING'}`);
+      console.log(`  quantity: ${firstLine.quantity || 'MISSING'}`);
+      console.log(`  base_cost_price: ${firstLine.base_cost_price || 'MISSING'}`);
+      console.log(`  mrp: ${firstLine.mrp || 'MISSING'}`);
+      console.log(`  total_amount: ${firstLine.total_amount || 'MISSING'}`);
+    }
+
+    console.log('\n' + '='.repeat(80));
+
   } catch (error) {
-    console.error('❌ Test failed:', error);
+    console.error('❌ Error:', error.message);
   }
 }
 
-testCityMallImport();
+testCityMallAPI();

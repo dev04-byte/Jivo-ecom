@@ -1,0 +1,5 @@
+BigBasket:1595
+CityMall:1650
+Dealshare:1706
+Zomato:1764
+Amazon:1857
